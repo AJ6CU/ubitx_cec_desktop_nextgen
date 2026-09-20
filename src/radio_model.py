@@ -1,0 +1,487 @@
+#!/usr/bin/python3
+"""
+RadioState -- what the rig last told us, and nothing else.
+
+WHY THIS EXISTS
+
+The frequency is currently held in a widget (theVFO), read back in at least
+three forms, and quantised on the way in by a setting that belongs to the
+tuning dial. Consumers ask for whatever shape they need:
+
+    getIntPrimaryVFO()          integer Hz
+    getFormattedPrimaryVFO()    a display string, with the user's delimiter
+    ...plus the transmit frequency, which is sometimes offset by the CW
+       sidetone and sometimes not, depending on who is asking
+
+and channels.py opens by saving the tuning preset, forcing it to its finest
+value, and restoring it on close -- because otherwise a channel recalled at
+7.032.100 comes back as 7.032.000. That workaround is load-bearing in a file
+about memories, and it is invisible to anyone reading either one.
+
+THE RULE HERE
+
+    Stored once, as an integer number of Hz. Everything else is derived.
+
+No formatting in the model. No sidetone in the stored value. No rounding,
+ever -- if the firmware quantises on write, the radio layer sets the finest
+preset before writing and puts it back afterwards, always, so no caller has
+to know.
+
+WHAT THE ROLE MODEL REMOVES
+
+theVFO spends about 228 lines on _CW, _RIT, _SPLIT and three ManageLabels
+companions, deciding which frequency is displayed where and what the labels
+say this time. That machinery exists because the display changes meaning
+with state.
+
+Asking instead which VFO is RECEIVING and which is TRANSMITTING makes the
+question disappear: receive is always on the left, transmit always on the
+right, and the only thing that changes is a small label saying which VFO is
+currently filling each role.
+
+POPULATED BY THE RIG, NOT THE INTERFACE
+
+The protocol is request-then-confirm: the interface sends a command and waits
+to be told what happened. So nothing in the interface writes to this object.
+The xx_UX_ handlers in mainScreen write to it when the rig reports, and the
+view redraws from it. A control that changed state locally would be guessing.
+
+Machine firmware encodes  DFT(default) = 0, LSB=2, USB=3, CWL=4,CWU=5
+DFT only used for EEPROM channels, 1 reserved for other
+"""
+
+MODES = ("DFT", "ERR", "LSB", "USB", "CWL", "CWU")
+
+
+class RadioModel:
+    """
+    Everything the interface displays, in one place and one form.
+
+    Every frequency is an integer number of Hz. Every derived form -- the
+    display string, the transmit frequency with its sidetone offset, the
+    receive frequency with its RIT offset -- is a method, computed when asked.
+    """
+
+    def __init__(self, on_change=None, schedule=None):
+        """
+        Args:
+            on_change: Called when something has changed and the view should
+                redraw. One callback, not one per field -- see changed().
+            schedule: A function taking (milliseconds, callable), normally a
+                widget's `after`. Used to coalesce a burst of reports into a
+                single redraw. Without it, every report redraws immediately.
+        """
+        self._on_change = on_change
+        self._schedule = schedule
+        self._pending = False
+
+        # Held while a transport is mid-sequence. See suspend_notifications.
+        self._suspended = 0
+
+        # --- what the rig has told us ------------------------------------
+        self.vfo_a = 14_000_000
+        self.vfo_b = 14_000_000
+        self.active = "a"              # which VFO the rig calls primary
+        self.mode_a = "USB"
+        self.mode_b = "USB"
+
+        self.split = False
+        self.rit = False
+        self.rit_offset = 0            # Hz, signed, applied to RECEIVE
+
+        self.locked = False
+        self.muted = False
+        self.tx_inhibit = False
+        self.transmitting = False
+
+        self.cw_tone = 600             # Hz. The TX offset in a CW mode.
+        self.filter_hz = 2600
+
+        # --- telemetry, as reported -------------------------------------
+        # Held raw. The meters decide how to show them; nothing here knows
+        # about S units or bar segments.
+        self.s_value = 0.0             # S units, 0-9 then dB over
+        self.pwr = 0.0                 # watts
+        self.swr = 1.0
+
+        self._callsign = "AJ6CU/9"
+        self._firmware = "CEC 2.0"
+
+        # --- how the user wants it shown ---------------------------------
+        # A display preference the formatter needs, NOT a property of the
+        # frequency. It is REGISTERED for rather than read on demand: the
+        # configuration manager already notifies observers when a value
+        # changes, and theVFO, channels and piRadio all use it. That is the
+        # right channel -- a consumer that polls, or reaches into the main
+        # screen for a label, gets a stale answer the moment the setting
+        # changes while its window is open.
+        self.delimiter = "."
+
+    # ------------------------------------------------------------------
+    # Telling the view
+    # ------------------------------------------------------------------
+    def changed(self):
+        """
+        Says that something has changed, without saying what.
+
+        ONE NOTIFICATION, NOT ONE PER FIELD, because almost everything the
+        view shows is derived. role_frequency("tx") depends on vfo_a, vfo_b,
+        active, split, rit, rit_offset, mode and cw_tone -- so a view
+        registered for "mode" would not know to redraw when split changed.
+        Per-field observers would need either a dependency graph or every
+        consumer registering for eight things, and the first person to add a
+        derived value would forget one.
+
+        Recomputing everything cannot be out of step. That is worth more than
+        the redraws it costs, and the cost is handled below rather than by
+        making the notification cleverer.
+
+        Note this is deliberately unlike ConfigurationManager's per-key
+        observers. Preferences are independent of each other, change rarely,
+        and have distant consumers -- exactly the case where per-key is right.
+        """
+        if self._on_change is None:
+            return
+
+        if self._schedule is None:
+            self._on_change()
+            return
+
+        # COALESCED. A burst of reports -- the startup dump, or an S-meter
+        # arriving ten times a second -- becomes one redraw on the next idle
+        # pass instead of ten. The view stays simple and the rate stops
+        # being its problem.
+        if not self._pending:
+            self._pending = True
+            self._schedule(0, self._flush)
+
+    def _flush(self):
+        self._pending = False
+        if self._suspended:
+            # Still mid-sequence. The change is not lost -- resuming asks
+            # for a redraw, which will show wherever things ended up.
+            return
+        if self._on_change is not None:
+            self._on_change()
+
+    def suspend_notifications(self):
+        """
+        Stops the view redrawing until the matching resume.
+
+        FOR TRANSIENT STATES THE OPERATOR SHOULD NOT SEE. Writing a transmit
+        frequency in split means borrowing the primary slot: the rig really
+        does make the other VFO primary for a moment and really does report
+        it, and a view that redraws faithfully shows the transmit frequency
+        appearing in the receive panel and then vanishing. Accurate, and
+        confusing.
+
+        The borrow is a detail of how the transport reaches a VFO the rig
+        will not address directly. Holding the redraw until the slot has been
+        handed back shows the operator the result rather than the mechanism.
+
+        Counted rather than a flag, so nested or overlapping sequences cannot
+        resume each other early.
+        """
+        self._suspended += 1
+
+    def resume_notifications(self):
+        """Releases a suspend, and redraws if that was the last one."""
+        if self._suspended:
+            self._suspended -= 1
+        if not self._suspended:
+            self.changed()
+
+    def follow_configuration(self, config):
+        """
+        Takes the display preferences from configuration, and keeps them.
+
+        Called once at startup. Anything registered here updates itself
+        afterwards, so no consumer has to ask twice or know where the value
+        came from.
+        """
+        self.delimiter = config.get_NUMBER_DELIMITER()
+        config.register_observer("NUMBER DELIMITER", self._set_delimiter)
+
+    def _set_delimiter(self, value):
+        self.delimiter = value
+
+    # ------------------------------------------------------------------
+    # Roles. Ask which VFO is doing what, never which VFO is "primary".
+    # ------------------------------------------------------------------
+    @property
+    def tx_vfo(self):
+        """
+        The VFO that transmits: the one NOT displayed when split, otherwise
+        the active one.
+
+        NOT hardcoded to "b". The rig transmits on whichever VFO is not
+        currently primary, and primary can be either -- so with B active and
+        split on, the transmit VFO is A. Assuming B is right half the time,
+        which is the worst kind of wrong.
+        """
+        if not self.split:
+            return self.active
+        return "b" if self.active == "a" else "a"
+
+    @property
+    def rx_vfo(self):
+        """The VFO that receives. Always the active one."""
+        return self.active
+
+    def role_vfo(self, role):
+        return self.tx_vfo if role == "tx" else self.rx_vfo
+
+    # ------------------------------------------------------------------
+    # Frequencies. Integer Hz throughout.
+    # ------------------------------------------------------------------
+    def frequency(self, which):
+        """
+        The stored frequency of a VFO. No offsets, no formatting.
+
+        Args:
+            which: "a", "b", or "p" for whichever is primary.
+
+        RAISES ON ANYTHING ELSE, deliberately. This used to return vfo_b for
+        any argument that was not "a", so passing a ROLE -- "rx" or "tx" --
+        silently handed back VFO B's frequency. The caller got a plausible
+        number, the rig was told to tune to it, and the only symptom was a
+        dial that appeared to jump somewhere unrelated.
+
+        A method that cannot fail is a method that hides its misuse. Use
+        role_frequency() for a role; this one takes a VFO.
+        """
+        if which == "a" or (which == "p" and self.active == "a"):
+            return self.vfo_a
+        if which == "b" or (which == "p" and self.active == "b"):
+            return self.vfo_b
+        raise ValueError(
+            f'frequency() takes a VFO name -- "a", "b" or "p" -- not {which!r}. '
+            f'For a role, use role_frequency().')
+
+    def set_frequency(self, which, hz):
+        """
+        Stores a frequency exactly as given.
+
+        NOT ROUNDED. The tuning preset decides how far the DIAL moves per
+        click; it has nothing to do with what a frequency may be. If the
+        firmware quantises on write, that belongs in the radio layer, which
+        can set the finest preset around the write and restore it -- once,
+        for every caller, instead of channels.py doing it by hand.
+
+        which is vfo ("a" or "b").  If which is "p", then the active vfo is updated
+        """
+        hz = int(hz)
+        if which == "a" or (which == "p" and self.active =="a"):
+            self.vfo_a = hz
+        else:
+            self.vfo_b = hz
+
+    def role_frequency(self, role):
+        """
+        What a role is actually on, offsets included.
+
+        This is the number to DISPLAY. Receive carries the RIT offset when
+        RIT is on; transmit carries the CW sidetone offset in a CW mode.
+        Neither is stored, because neither is a property of the VFO -- they
+        are consequences of the current state, and storing a consequence is
+        how the two get out of step.
+        """
+        which = self.role_vfo(role)
+        hz = self.frequency(which)
+
+        if role == "rx" and self.rit:
+            return hz + self.rit_offset
+        if role == "tx" and self.mode_of(which).startswith("CW"):
+            return hz - self.cw_tone
+        return hz
+
+    def role_to_vfo_hz(self, role, displayed_hz):
+        """
+        The value to WRITE to a VFO, given what the operator sees.
+
+        THE INVERSE OF role_frequency, and it has to exist. That method
+        subtracts the CW sidetone from the transmit frequency for display, so
+        a caller that takes the displayed number, adds a step, and writes the
+        result straight to the VFO loses the offset:
+
+            displayed = vfo - 600
+            asked for = displayed + 1000  =  vfo + 400
+            written   = vfo + 400
+            displayed = vfo + 400 - 600   -- moved 400, not 1000
+
+        Which is exactly what a 1 kHz step did while the tone was 600 Hz.
+
+        Receive under RIT returns the VFO unchanged: tuning there moves the
+        offset, not the frequency, so there is nothing to write.
+        """
+        which = self.role_vfo(role)
+        print("role_to_vfo_hz", which, role)
+        if role == "rx" and self.rit:
+            return self.frequency(which)
+        if role == "tx" and self.mode_of(which).startswith("CW"):
+            return int(displayed_hz) + self.cw_tone
+        return int(displayed_hz)
+
+    def set_role_frequency(self, role, hz):
+        """
+        Moves what a role is on.
+
+        Tuning the receive side while RIT is on moves the OFFSET, not the
+        VFO -- that is what RIT is, a temporary nudge you can undo. The base
+        stays put so turning RIT off returns you to it.
+        """
+        which = self.role_vfo(role)
+        if role == "rx" and self.rit:
+            self.rit_offset = int(hz) - self.frequency(which)
+            return
+        self.set_frequency(which, hz)
+
+    def set_active(self, which):
+        """
+        Records which VFO the rig is displaying.
+
+        THIS IS WHAT `cv` MEANS. The rig reports 0 for A and 1 for B, and it
+        is telling you which one is primary -- not asking you to exchange the
+        two frequencies.
+
+        Swapping contents here instead was the source of the confusion about
+        where the transmit VFO lives: exchange them on every toggle and the
+        active one is always in vfo_a, so the model can no longer say which
+        VFO is which. It also fights the va/vb handlers, which write to a
+        named VFO.
+        """
+        self.active = "a" if which in ("a", 0, "0") else "b"
+
+    def swap_vfos(self):
+        """
+        Exchanges the two VFOs' contents.
+
+        A DIFFERENT THING from set_active, and a different rig command. This
+        is the A<>B swap an operator asks for deliberately; toggling which
+        VFO is displayed leaves both frequencies where they were.
+        """
+        self.vfo_a, self.vfo_b = (self.vfo_b, self.vfo_a)
+        self.mode_a, self.mode_b = (self.mode_b, self.mode_a)
+
+    # ------------------------------------------------------------------
+    # Band. DERIVED, not stored.
+    #
+    # The band is a fact about the frequency, so storing it separately gives
+    # two things that can disagree -- and they will, because the rig reports
+    # frequency changes and says nothing about bands.
+    # ------------------------------------------------------------------
+    BANDS = (
+        ("160 m", 1_800_000, 2_000_000), ("80 m", 3_500_000, 4_000_000),
+        ("60 m", 5_330_000, 5_410_000), ("40 m", 7_000_000, 7_300_000),
+        ("30 m", 10_100_000, 10_150_000), ("20 m", 14_000_000, 14_350_000),
+        ("17 m", 18_068_000, 18_168_000), ("15 m", 21_000_000, 21_450_000),
+        ("12 m", 24_890_000, 24_990_000), ("10 m", 28_000_000, 29_700_000),
+    )
+
+    def band_name(self, which=None):
+        """
+        The amateur band a VFO is in, or None outside one.
+
+        None is a real answer -- the uBITX tunes continuously and general
+        coverage receive is a normal thing to do. A caller wanting a label
+        can say "out of band" rather than being handed a nearest guess.
+        """
+        hz = self.frequency(which or self.rx_vfo)
+        for name, low, high in self.BANDS:
+            if low <= hz <= high:
+                return name
+        return None
+
+    # ------------------------------------------------------------------
+    # Modes
+    # ------------------------------------------------------------------
+    def mode_of(self, which):
+        """The mode of a VFO. Same argument rules as frequency()."""
+        if which == "a" or (which == "p" and self.active == "a"):
+            return self.mode_a
+        if which == "b" or (which == "p" and self.active == "b"):
+            return self.mode_b
+        raise ValueError(
+            f'mode_of() takes a VFO name -- "a", "b" or "p" -- not {which!r}.')
+
+    def set_mode(self, which, mode):
+        if (which == "a") or (which == "p" and self.active == "a"):
+            print("setting a", mode)
+            self.mode_a = mode
+        else:
+            self.mode_b = mode
+            print("setting b", mode)
+
+    @property
+    def mode(self):
+        """The active VFO's mode, which is what the interface shows."""
+        return self.mode_of(self.active)
+
+    # ------------------------------------------------------------------
+    # Display. A function of a number, not a method on a widget.
+    # ------------------------------------------------------------------
+    def formatted(self, hz, places=3):
+        """
+        A frequency as a string, grouped with the user's delimiter.
+
+        Here rather than in the view because the delimiter is a preference
+        several windows share, and passing a formatter around is less
+        trouble than each one reaching into the main screen for a label.
+
+        It takes a NUMBER, not a role or a VFO name -- so the caller has
+        already decided what it wants to show, and this only decides how.
+        """
+        hz = int(hz)
+        mhz, rest = divmod(hz, 1_000_000)
+        khz, units = divmod(rest, 1000)
+        return f"{mhz}{self.delimiter}{khz:03d}{self.delimiter}{units:03d}"
+
+    def role_text(self, role):
+        """The string for a role's readout. What the view actually wants."""
+        return self.formatted(self.role_frequency(role))
+
+    # ------------------------------------------------------------------
+    # Annotations -- the small print under each readout
+    # ------------------------------------------------------------------
+    def role_note(self, role):
+        """
+        One line explaining anything unusual about a role's frequency.
+
+        Everything here is DERIVED. Nothing sets a note; it is worked out
+        from the state, so it cannot disagree with the number above it.
+        """
+        if self.locked:
+            return "locked"
+        if role == "tx":
+            if not self.split:
+                return "follows rx"
+            if self.mode_of(self.tx_vfo).startswith("CW"):
+                return f"−{self.cw_tone} Hz cw tone"
+            return ""
+        if self.rit:
+            base = self.formatted(self.frequency(self.rx_vfo))
+            return f"rit {self.rit_offset:+d} Hz · base {base}"
+        return ""
+
+    def split_delta_hz(self):
+        """How far transmit sits from receive. Zero when simplex."""
+        return self.frequency(self.tx_vfo) - self.frequency(self.rx_vfo)
+
+    # ------------------------------------------------------------------
+    # About. Manges information provided in the About page
+    # ------------------------------------------------------------------
+
+    def set_callsign(self, callsign):
+        self._callsign = callsign
+
+    @property
+    def callsign(self):
+        return self._callsign
+
+    def set_firmware(self, firmware):
+        self._firmware = firmware
+
+    @property
+    def firmware(self):
+        return self._firmware
+
