@@ -9,7 +9,7 @@ transport can be swapped in without rewiring the interface.
 ### Running it
 
 ```bash
-python3 ubitx_mockup.py
+python3 ubitx_cec_desktop.py
 ```
 
 Needs `scustomtkinter` installed, with a theme block for every widget it

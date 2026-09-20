@@ -25,7 +25,7 @@ WHAT IT DEMONSTRATES
 
 RUN IT
 
-    python3 ubitx_mockup.py
+    python3 ubitx_cec_desktop.py
 
 Then: click frequency digits, turn the dials, toggle Split and RIT, press
 Transmit to watch the meters swap roles, and move between the tabs.
