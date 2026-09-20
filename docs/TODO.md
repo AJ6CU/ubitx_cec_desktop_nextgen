@@ -25,6 +25,16 @@ straightforward until you meet the thing that stopped them last time.
 <a name="library-code"></a>
 ### Library code
 
+**The canvas widgets do not scale their fonts.** `sCTkSMeter`,
+`sCTkSMeterBar` and `sCTkSelector` draw text on canvases and never call
+`_apply_font_scaling`, so their labels stay the same size while everything
+around them grows on a scaled display. `sCTkNotebook` and
+`sCTkFrequencyDisplay` do it correctly and are worth copying.
+
+A canvas text item takes a plain font tuple, which CustomTkinter's own font
+scaling never sees -- so a widget that draws rather than packing labels has
+to scale the font itself or it silently opts out.
+
 **`_raw_theme_block()` on `ThemeableWidget`.** The dials, the S-meters and
 sCTkNotebook all read `_tw.GLOBAL_THEME_REGISTRY` directly, because
 `final_kw` has had the vector keys stripped out of it by the time they want
@@ -301,6 +311,24 @@ The library's own convention avoids the first: the dials and S-meters use
 `self.canvas` and `_draw_dial_base` / `_draw_meter` precisely because
 `self._canvas` and `_draw` belong to `CTkFrame`.
 
+**`_apply_font_scaling` takes a FONT, not a size.** It returns the whole
+tuple with the size scaled; handed a bare integer it raises
+
+```
+ValueError: Can not scale font '38' of type <class 'int'>
+```
+
+**And a `try/except` around a call you got wrong turns a loud failure into a
+feature that quietly does not work.** `sCTkNotebook` made exactly this
+mistake inside a guard that swallowed it and returned the unscaled font, so
+its tab labels never scaled on any display and nothing ever said so. It was
+found only because the same line was written again in a widget whose guard
+happened not to cover it.
+
+Worth the general rule: a fallback should be a fallback from something that
+works, not the path taken every time. If an `except` is always running, the
+`try` is wrong.
+
 **A guard must name an exception it can see.** `sctk_dial.py` does not import
 `tkinter`, so `except tk.TclError` raised `NameError` from inside the
 handler -- which aborted the binding pass and took the wheel handling with
@@ -321,6 +349,24 @@ producing it.
 
 The trackpad handler had returned `"break"` all along, and applied a
 cooldown, which is why one input device behaved and the other did not.
+
+**`_apply_font_scaling` takes a FONT, not a size.** It returns the whole
+tuple with the size scaled; handed a bare integer it raises
+
+```
+ValueError: Can not scale font '38' of type <class 'int'>
+```
+
+**And a `try/except` around a call you got wrong turns a loud failure into a
+feature that quietly does not work.** `sCTkNotebook` made exactly this
+mistake inside a guard that swallowed it and returned the unscaled font, so
+its tab labels never scaled on any display and nothing ever said so. It was
+found only because the same line was written again in a widget whose guard
+happened not to cover it.
+
+Worth the general rule: a fallback should be a fallback from something that
+works, not the path taken every time. If an `except` is always running, the
+`try` is wrong.
 
 **A guard must name an exception it can see.** `sctk_dial.py` does not import
 `tkinter`, so `except tk.TclError` raised `NameError` from inside the handler

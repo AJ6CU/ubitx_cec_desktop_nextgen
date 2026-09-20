@@ -77,6 +77,8 @@ class RadioModel:
 
         # Held while a transport is mid-sequence. See suspend_notifications.
         self._suspended = 0
+        # The active VFO as it was before a borrow began. See role_vfo.
+        self._frozen_active = None
 
         # --- what the rig has told us ------------------------------------
         self.vfo_a = 14_000_000
@@ -95,6 +97,17 @@ class RadioModel:
         self.transmitting = False
 
         self.cw_tone = 600             # Hz. The TX offset in a CW mode.
+
+        # THE RIG ROUNDS EVERY FREQUENCY IT IS GIVEN to the active tuning
+        # preset. Ask for 14.024.510 with the preset at 100 Hz and it stores
+        # 14.024.500 and reports that back.
+        #
+        # It is a dial-step setting with a side effect on frequency entry,
+        # which is why channels.py forced the preset to its finest value and
+        # put it back afterwards. Anything comparing what it asked for
+        # against what the rig confirmed has to know about it.
+        self.tuning_presets = [10, 20, 50, 100, 1000]
+        self.active_tuning_preset = 4          # 1-based, as the rig counts
         self.filter_hz = 2600
 
         # --- telemetry, as reported -------------------------------------
@@ -183,12 +196,15 @@ class RadioModel:
         resume each other early.
         """
         self._suspended += 1
+        if self._frozen_active is None:
+            self._frozen_active = self.active
 
     def resume_notifications(self):
         """Releases a suspend, and redraws if that was the last one."""
         if self._suspended:
             self._suspended -= 1
         if not self._suspended:
+            self._frozen_active = None
             self.changed()
 
     def follow_configuration(self, config):
@@ -220,13 +236,30 @@ class RadioModel:
         which is the worst kind of wrong.
         """
         if not self.split:
-            return self.active
-        return "b" if self.active == "a" else "a"
+            return self._role_active
+        return "b" if self._role_active == "a" else "a"
+
+    @property
+    def _role_active(self):
+        """
+        The active VFO for the purpose of working out roles.
+
+        FROZEN DURING A BORROW. Writing a transmit frequency in split makes
+        the rig switch primary for a moment, and `active` follows it --
+        which inverts tx_vfo, because transmit is defined as the VFO that is
+        not active. A dial turned in that window computed against the
+        receive VFO and wrote to it, so adjusting transmit moved receive.
+
+        Suspending notifications hid the borrow from the DISPLAY but not
+        from this. Freezing the value hides it from both, which is what
+        "the borrow is a mechanism, not a state" has to mean.
+        """
+        return self._frozen_active or self.active
 
     @property
     def rx_vfo(self):
         """The VFO that receives. Always the active one."""
-        return self.active
+        return self._role_active
 
     def role_vfo(self, role):
         return self.tx_vfo if role == "tx" else self.rx_vfo
@@ -295,6 +328,25 @@ class RadioModel:
             return hz - self.cw_tone
         return hz
 
+    def tuning_step_hz(self):
+        """The active preset's size, which is also the rounding granularity."""
+        index = max(1, min(len(self.tuning_presets),
+                           int(self.active_tuning_preset)))
+        return int(self.tuning_presets[index - 1])
+
+    def as_the_rig_would_store(self, hz):
+        """
+        What the rig will actually hold if asked for this frequency.
+
+        Used to decide whether a confirmation matches: comparing the exact
+        value fails whenever the preset is coarser than the step, and the
+        sequence then waits for a report that can never arrive.
+        """
+        step = self.tuning_step_hz()
+        if step <= 1:
+            return int(hz)
+        return int(round(int(hz) / step) * step)
+
     def role_to_vfo_hz(self, role, displayed_hz):
         """
         The value to WRITE to a VFO, given what the operator sees.
@@ -315,7 +367,6 @@ class RadioModel:
         offset, not the frequency, so there is nothing to write.
         """
         which = self.role_vfo(role)
-        print("role_to_vfo_hz", which, role)
         if role == "rx" and self.rit:
             return self.frequency(which)
         if role == "tx" and self.mode_of(which).startswith("CW"):
@@ -405,12 +456,11 @@ class RadioModel:
             f'mode_of() takes a VFO name -- "a", "b" or "p" -- not {which!r}.')
 
     def set_mode(self, which, mode):
+        # newmode = MODES[mode]
         if (which == "a") or (which == "p" and self.active == "a"):
-            print("setting a", mode)
             self.mode_a = mode
         else:
             self.mode_b = mode
-            print("setting b", mode)
 
     @property
     def mode(self):

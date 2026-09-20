@@ -1,34 +1,50 @@
 #!/usr/bin/python3
 """
-uBITX CEC Desktop -- proposed interface, as a working mockup.
+uBITX CEC Desktop -- a desktop interface for KD8CEC-powered uBITX radios.
 
-Nothing here talks to a radio. Every value is simulated so the LAYOUT and the
-INTERACTIONS can be judged: what is where, what happens when you click it, how
-it behaves when the state changes.
+Talks to the rig over serial or network through uBITX_Link, which speaks the
+protocol the Nextion display used. The SDR side is not wired yet.
 
-WHAT IT DEMONSTRATES
+HOW IT IS PUT TOGETHER
 
-  * Two VFO panels of equal weight, the transmitting one tinted and marked.
-    Nothing moves or changes size when split, RIT or transmit turn on or off.
+    view (this file)  reads RadioModel, sends commands
+          |                                    ^
+          v reads only                         | commands only
+    RadioModel        what the rig last reported
+          ^ writes
+    uBITX_Link        the protocol, and nothing else
 
-  * Digit-select tuning. Click any digit in a frequency and the dial steps by
-    that digit's value -- selecting a digit IS selecting the step, so there is
-    no separate step control to keep in sync.
+THE ONE RULE: no view code writes to the model. A control sends a command and
+changes nothing; the rig confirms; the confirmation updates the model; the
+model asks for one redraw. Grep for `self.model.<something> =` outside the
+transport and the only hits should be seeding values at startup.
+
+That discipline is what makes the display trustworthy. A control that changed
+the state locally would show what it asked for rather than what happened, and
+the two diverge the first time the rig refuses.
+
+WHAT IS WORTH KNOWING WHILE READING IT
+
+  * Two frequency panels, laid out by ROLE rather than by VFO. Receive is
+    always on the left and transmit always on the right, so nothing swaps
+    sides when split turns on -- only the small `vfo a` / `vfo b` label under
+    each heading changes.
+
+  * Digit-select tuning, via sCTkFrequencyDisplay. Clicking a digit selects
+    it and the selection IS the step, so there is no separate tuning-preset
+    control to keep in sync.
 
   * One meter split in two: signal under the receiving frequency, power and
     SWR under the transmitting one. Neither half is ever dead.
 
-  * Controls that do not exist yet shown DISABLED rather than absent, so the
-    layout does not shift when a backend gains the capability.
+  * Controls a backend cannot serve yet are DISABLED rather than absent, so
+    the layout does not shift when a capability arrives.
 
-  * A wide, short window, sized to sit above SDR++ on a laptop.
+  * The rig can only write to the primary VFO, so setting a transmit
+    frequency in split borrows the primary slot, writes, and hands it back --
+    a sequence that waits for each confirmation. See uBITX_Link.
 
-RUN IT
-
-    python3 ubitx_cec_desktop.py
-
-Then: click frequency digits, turn the dials, toggle Split and RIT, press
-Transmit to watch the meters swap roles, and move between the tabs.
+See ARCHITECTURE.md for the reasoning, and TODO.md for what is not done.
 """
 import json
 import os
@@ -49,7 +65,7 @@ from scustomtkinter import (
     sCTkButtonPrimary, sCTkButtonSecondary, sCTkButtonTertiary,
     sCTkSMeterBar, sCTkDialContinuous, sCTkSpinbox,
     sCTkSegmentedButton, sCTkSwitch, sCTkComboBox, sCTkEntryPrimary,
-    sCTkCheckBox,
+    sCTkCheckBox, sCTkFrequencyDisplay,
 )
 
 # ---------------------------------------------------------------------------
@@ -117,94 +133,11 @@ LATCHING_DIALS = False
 # geometry would be the obvious alternative, but Tk cannot see another
 # application's windows -- and the answer would be stale the moment either
 # one moved.
-GEOMETRY_FILE = os.path.expanduser("~/.ubitx_mockup_geometry.json")
+GEOMETRY_FILE = os.path.expanduser("~/.ubitx_cec_desktop_geometry.json")
 
 
 # ---------------------------------------------------------------------------
 # A frequency readout whose digits can be clicked
-# ---------------------------------------------------------------------------
-class FrequencyDisplay(sCTkFrame):
-    """
-    A frequency in the form 14.029.400, with every digit individually
-    clickable.
-
-    Clicking a digit selects it, and the selection IS the tuning step -- the
-    hundreds digit means 100 Hz per dial click. That replaces a separate step
-    control, and a step control that can disagree with the digit being tuned.
-    """
-
-    def __init__(self, master, on_digit=None, font_size=FREQ_FONT_SIZE, **kw):
-        super().__init__(master, fg_color="transparent", border_width=0, **kw)
-        self._on_digit = on_digit
-        self._font = ("Arial", font_size)
-        self._dim = ("Arial", font_size)
-        self._digits = []          # label widgets, most significant first
-        self._selected = 3         # index into the 8 digits; 1 kHz to start
-        self._enabled = True
-        # The rig tunes in whole 10 Hz steps, so the units digit can never be
-        # the thing you are moving. It is shown, because the frequency has
-        # eight digits, but it is not selectable.
-        self._min_index = 6
-        self._build()
-
-    def _build(self):
-        """Eight digit labels and two separators, packed left to right."""
-        position = 0
-        for group, trailing_dot in ((2, True), (3, True), (3, False)):
-            for _ in range(group):
-                lbl = sCTkLabelPrimary(self, text="0", font=self._font,
-                                       fg_color="transparent")
-                lbl.pack(side="left")
-                # Each label carries its own index, so the handler knows which
-                # digit was hit without searching the list.
-                if position <= self._min_index:
-                    lbl.bind("<Button-1>",
-                             lambda e, i=position: self._select(i))
-                self._digits.append(lbl)
-                position += 1
-            if trailing_dot:
-                sCTkLabelTertiary(self, text=".", font=self._font,
-                                  fg_color="transparent").pack(side="left")
-
-    def set_enabled(self, value):
-        """Greys the digits when the panel is not tunable."""
-        self._enabled = bool(value)
-        self._paint_selection()
-
-    def _select(self, index):
-        if index > self._min_index or not self._enabled:
-            return
-        self._selected = index
-        self._paint_selection()
-        if callable(self._on_digit):
-            self._on_digit(self.step_hz())
-
-    def step_hz(self):
-        """The value of the selected digit, in Hz."""
-        return 10 ** (7 - self._selected)
-
-    def set_frequency(self, hz):
-        text = f"{int(hz):08d}"[-8:]
-        for lbl, ch in zip(self._digits, text):
-            lbl.configure(text=ch)
-        self._paint_selection()
-
-    def _paint_selection(self):
-        for i, lbl in enumerate(self._digits):
-            if not self._enabled:
-                lbl.configure(fg_color="transparent",
-                              text_color=("#94A3B8", "#64748B"))
-                continue
-            lbl.configure(text_color=("#111827", "#F9FAFB"))
-            if i == self._selected:
-                lbl.configure(fg_color=("#1A4375", "#2471A3"),
-                              text_color=("#FFFFFF", "#FFFFFF"))
-            else:
-                lbl.configure(fg_color="transparent")
-
-
-# ---------------------------------------------------------------------------
-# One VFO panel: label, frequency, annotation, dial
 # ---------------------------------------------------------------------------
 class RolePanel(sCTkFrame):
     """
@@ -272,14 +205,14 @@ class RolePanel(sCTkFrame):
         body = sCTkFrame(self, fg_color="transparent", border_width=0)
         body.pack(fill="x", padx=8, pady=(0, 5))
 
+        # PACKED BEFORE the readout, which expands.
+        #
+        # Tk gives space to packed children in order, and `left` has
+        # expand=True -- so a wide readout took what it wanted and the dial
+        # got whatever was left, which at a large font size was not much. The
+        # dial has a fixed size it should always get; the readout is the one
+        # that should give way.
         left = sCTkFrame(body, fg_color="transparent", border_width=0)
-        left.pack(side="left", fill="x", expand=True)
-
-        self.display = FrequencyDisplay(left, on_digit=self._on_digit)
-        self.display.pack(anchor="w")
-
-        self.note = sCTkLabelTertiary(left, text="", font=("Arial", 10))
-        self.note.pack(anchor="w")
 
         # fg_color transparent so the knob sits on the panel's own colour.
         # The dial's theme block carries its own background, which reads as a
@@ -298,9 +231,27 @@ class RolePanel(sCTkFrame):
             right_click_callback=lambda: self._click_step(+1),
             double_click_command=lambda d: d.set_pressed(True),
             shift_double_click_command=lambda d: d.set_pressed(False))
+
+        # The LIBRARY widget now, not a local class.
+        #
+        # This started as ten sCTkLabelPrimary widgets with the selected
+        # one's background coloured, which jittered as the digits changed and
+        # had resorted to hardcoded hex for its highlight. It is a real
+        # widget -- themed, documented, and in the Designer palette.
+        self.display = sCTkFrequencyDisplay(
+            left, digits=10, value=0, font_size=FREQ_FONT_SIZE,
+            min_digit=1, command=self._on_digit)
+        self.display.pack(anchor="w")
+
+        self.note = sCTkLabelTertiary(left, text="", font=("Arial", 10))
+        self.note.pack(anchor="w")
+
         self.dial.pack(side="right", padx=(4, 0), pady=0)
 
-    def _on_digit(self, step_hz):
+        # Now the readout, with whatever room the dial did not take.
+        left.pack(side="left", fill="x", expand=True)
+
+    def _on_digit(self, step):
         self._app.refresh()
 
     def _click_step(self, direction):
@@ -324,7 +275,7 @@ class RolePanel(sCTkFrame):
         if radio.model.locked:
             return
 
-        step = self.display.step_hz()
+        step = self.display.step()
         now = time.monotonic()
 
         confirmed = radio.model.role_frequency(self._role)
@@ -348,7 +299,7 @@ class RolePanel(sCTkFrame):
         #
         # One widget, not a redraw: everything else on screen is still
         # whatever the rig last confirmed.
-        self.display.set_frequency(self._target)
+        self.display.set(self._target)
 
         # role_frequency, NOT frequency: frequency() takes a VFO NAME, and a
         # role passed to it returns VFO B whatever the dial computed.
@@ -382,7 +333,10 @@ class RolePanel(sCTkFrame):
         if wanted != self._dial_state:
             self._dial_state = wanted
             self.dial.state(wanted)
-        self.display.set_enabled(live)
+        # The widget disables as a whole rather than exposing an enabled
+        # flag: greying the digits and refusing selection is what "disabled"
+        # means for it.
+        self.display.configure(state="normal" if live else "disabled")
         # SHOWS THE TARGET WHILE A COMMAND IS IN FLIGHT.
         #
         # A bounded exception to "the view never assumes". Receive is one
@@ -406,7 +360,7 @@ class RolePanel(sCTkFrame):
                     > TURN_ACCUMULATE_SECONDS):
                 self._target = None
 
-        self.display.set_frequency(
+        self.display.set(
             confirmed if self._target is None else self._target)
         self.vfo_label.configure(text=f"vfo {radio.role_vfo(self._role)}")
 
@@ -442,20 +396,25 @@ class RolePanel(sCTkFrame):
             self.note.configure(text=f"step {self._readable_step()}")
 
     def _readable_step(self):
-        hz = self.display.step_hz()
+        hz = self.display.step()
         return f"{hz // 1000} kHz" if hz >= 1000 else f"{hz} Hz"
 
 
 # ---------------------------------------------------------------------------
 # The application
 # ---------------------------------------------------------------------------
-class UbitxMockup(sCTk):
+class UbitxCecDesktop(sCTk):
 
     def __init__(self):
         super().__init__()
-        self.title("uBITX CEC Desktop — proposed layout")
+        self.title("uBITX CEC Desktop")
         self.geometry(self._remembered_geometry())
         self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+        # Also saved as it changes -- see _on_configure. Closing cleanly is
+        # not something an IDE's stop button does.
+        self._geometry_timer = None
+        self.bind("<Configure>", self._on_configure)
 
         # on_change is refresh, schedule is `after` -- so a burst of reports
         # becomes one redraw. See RadioModel.changed().
@@ -471,7 +430,18 @@ class UbitxMockup(sCTk):
 
         #   initialize radio connection
         #
-        self.model.vfo_a, self.model.vfo_b = 14_029_400, 14_024_500
+        # NOTHING IS SEEDED. The model starts at zero and the rig's own
+        # report fills it in a moment later.
+        #
+        # Seeding plausible frequencies here was worse than showing nothing:
+        # the readout came up with a number that looked real, and then
+        # visibly jumped when read_all_values said the rig was somewhere
+        # else entirely. Which reads as the frequency moving on its own --
+        # indistinguishable, to anyone watching, from the transmit write
+        # bug it took a while to find.
+        #
+        # Zero reads as 0.000, which is obviously not a frequency and
+        # therefore obviously "not yet known".
 
         # Every control goes through here. Nothing in the view writes state:
         # a command is sent, and the confirmation updates the display -- the
@@ -516,17 +486,49 @@ class UbitxMockup(sCTk):
             with open(GEOMETRY_FILE) as handle:
                 return json.load(handle)["geometry"]
         except Exception:
-            return "1140x500"
+            # Sized for a 13" MacBook Air, which is 1470 points wide.
+            #
+            # Two ten-digit readouts at 56pt plus their dials do not fit in
+            # much less, and the first symptom of trying is a dial squeezed
+            # to nothing rather than anything that says "too narrow". Wider
+            # than the screen would be worse, so this is the screen.
+            return "1440x520"
 
     def _on_close(self):
+        self._save_geometry()
+        self.after_cancel(self.connection.reader_process_id)
+        self.destroy()
+
+    def _on_configure(self, event):
+        """
+        Remembers the size and position as they change.
+
+        SAVED ON RESIZE, NOT ONLY ON EXIT. Saving in _on_close alone depends
+        on the window being closed properly -- and stopping the process from
+        an IDE kills it outright, so WM_DELETE_WINDOW never fires and nothing
+        is ever written. The geometry silently never persisted at all.
+
+        Debounced, because <Configure> fires for every pixel of a drag and
+        writing a file that often would be absurd. Half a second after the
+        window stops moving, one write.
+        """
+        if event.widget is not self:
+            return          # a child resizing, not the window
+        if self._geometry_timer is not None:
+            try:
+                self.after_cancel(self._geometry_timer)
+            except Exception:
+                pass
+        self._geometry_timer = self.after(500, self._save_geometry)
+
+    def _save_geometry(self):
+        self._geometry_timer = None
         try:
             with open(GEOMETRY_FILE, "w") as handle:
                 json.dump({"geometry": self.winfo_geometry()}, handle)
         except Exception:
             # Losing the position is a small cost; refusing to close is not.
             pass
-        self.after_cancel(self.connection.reader_process_id)
-        self.destroy()
 
     def _toggle_on_top(self):
         """
@@ -766,7 +768,7 @@ class UbitxMockup(sCTk):
 
         # NOT part of the design. The real radio transmits from the key or the
         # PTT, so there is no transmit button to place -- this is here only so
-        # the mockup can show what the panel looks like on air, and it sits
+        # this can show what the panel looks like on air, and it sits
         # apart from the controls that are real.
         sCTkButtonTertiary(strip, text="simulate transmit", width=130,
                            height=22, command=self._toggle_tx
@@ -1467,5 +1469,5 @@ class UbitxMockup(sCTk):
 
 
 if __name__ == "__main__":
-    ctk.set_appearance_mode("dark")
-    UbitxMockup().mainloop()
+    # ctk.set_appearance_mode("dark")
+    UbitxCecDesktop().mainloop()

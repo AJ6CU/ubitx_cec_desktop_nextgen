@@ -14,6 +14,23 @@ MODES = ("DFT", "ERR", "LSB", "USB", "CWL", "CWU")
 # too long only delays clearing a failed sequence; waiting too little
 # abandons one that was about to succeed.
 TX_WRITE_TIMEOUT_MS = 2000
+
+# How long to wait before starting a queued transmit write after the last one
+# finished. Long enough for the rig's trailing reports -- the frequency and
+# mode of the VFO it just switched back to -- to arrive and be attributed to
+# the sequence they belong to.
+FOLLOW_UP_DELAY_MS = 250
+
+# How long to wait after a confirmation before sending the next command of a
+# sequence.
+#
+# MCU_COMMAND_HEADROOM paces commands generally, but a VFO toggle is not a
+# general command: the rig does real work and emits several reports, and a
+# frequency write arriving in the middle of that is sometimes simply lost --
+# no acknowledgement, no error, the sequence waits for a confirmation that
+# never comes. Intermittently, which is what made it look like something
+# other than timing.
+STEP_SETTLE_MS = 150
 # Seconds between commands sent to the rig. The laptop can outrun a Nano
 # easily, and this is what stops it. 0.04 means a transmit write in split --
 # toggle, frequency, toggle -- spends 120 ms behind the throttle, which is
@@ -28,22 +45,9 @@ class uBITX_Link:
         self._model = model
         self.schedule = schedule
 
-        # The borrow-write-return sequence for a transmit frequency in split.
-        # See set_role_frequency: the rig can only write to the primary VFO,
-        # so transmit has to borrow that slot and hand it back.
-        #
-        # SET BEFORE THE READER EXISTS. Constructing _input reads the rig's
-        # startup dump and dispatches it immediately, so a handler runs
-        # during this constructor -- before any line that follows the
-        # assignment. Anything a handler touches has to be in place first.
-        self._tx_write_state = None
-        self._tx_write_hz = None
-        self._tx_write_timer = None
-        # The most recent thing the dial asked for while a write was running.
-        self._tx_write_next = None
-
-        self._ubitx_reader = self._input(self)
-
+        # THE COMMAND TABLE FIRST. It is static data, and everything that
+        # sends anything needs it -- including a handler that fires while
+        # the reader is still being constructed.
         self.toRadioCommandDict = {
             "TS_CMD_MODE": 1,
             "TS_CMD_FREQ": 2,
@@ -77,6 +81,27 @@ class uBITX_Link:
             "TS_CMD_UBITX_REBOOT": 95  # Reboot
         }
 
+        # The borrow-write-return sequence for a transmit frequency in split.
+        # See set_role_frequency: the rig can only write to the primary VFO,
+        # so transmit has to borrow that slot and hand it back.
+        #
+        # SET BEFORE THE READER EXISTS. Constructing _input reads the rig's
+        # startup dump and dispatches it immediately, so a handler runs
+        # during this constructor -- before any line that follows the
+        # assignment. Anything a handler touches has to be in place first.
+        self._tx_write_state = None
+        self._tx_write_hz = None
+        self._tx_write_timer = None
+        # The most recent thing the dial asked for while a write was running.
+        self._tx_write_next = None
+
+        # ALL OF THIS BEFORE THE READER.
+        #
+        # Constructing _input reads the rig's startup dump and dispatches it
+        # immediately, so handlers run DURING this constructor -- before any
+        # line that follows. Anything they touch, or that anything they
+        # trigger touches, has to exist first: the memory queue a handler
+        # appends to, and the framing and timing sendCommandToMCU needs.
         self.memoryQueue = []  # when a memory slot is requested, it later comes in without any indication of which
         # memory slot it belong to. Fortunately, all in order. So everytime a memory slot is
         # requested, the type of memory requested is added to the queue so when we take it
@@ -87,6 +112,35 @@ class uBITX_Link:
 
         self.mcu_command_buffer = []  # buffer used to send bytes to MCU
         self.time_of_last_sent = timer()  # used to avoid overloading MCU
+
+        self._ubitx_reader = self._input(self)
+
+        # THE FINEST PRESET, ONCE, AND LEFT THERE.
+        #
+        # AFTER the reader, not inside it. _read_all_values runs from
+        # _input's constructor, which is called before toRadioCommandDict
+        # exists -- so sending a command from there fails on an attribute
+        # that has not been assigned yet. Commands belong out here anyway;
+        # the reader reads.
+        #
+        # The rig rounds every frequency it is given to the active tuning
+        # preset -- a dial-step setting with a side effect on frequency
+        # entry. At 100 Hz a 10 Hz tuning step simply vanishes: the digit
+        # turns, the rig rounds it away, and nothing moves.
+        #
+        # channels.py worked around this per operation, forcing the preset
+        # to its finest value and restoring it afterwards, with a comment
+        # explaining that a channel recalled at 7.032.100 came back as
+        # 7.032.000 otherwise. Doing it once at connect costs two fewer
+        # commands on every write and removes the workaround from everywhere
+        # that would otherwise need it.
+        #
+        # What it changes: the rig's OWN knob now steps at the finest rate
+        # too. For a desktop controller that is the right trade -- and the
+        # operator can still change it on the rig, which reports it and this
+        # model follows, so the rounding tolerance stays correct either way.
+        self.Set_Tuning_Preset(1)
+
 
     @property
     def reader_process_id(self):
@@ -218,7 +272,6 @@ class uBITX_Link:
                                 MCU_Read_Wait_Period = .04
                                 sleep(float(MCU_Read_Wait_Period))
             print("read all values done")
-
         def _reader(self):
             # print ("read")
             ffCount = 0
@@ -469,6 +522,7 @@ class uBITX_Link:
         def v1_UX_Set_Tuning_Preset_1(self, buffer):
             value = self._extract_value(buffer, 10, len(buffer) - 3)
             print("Tuning Preset 1: ", value)
+            self._model.tuning_presets[0] = int(value)
             # self.theVFO_Object.setTuningPreset(1, value)
 
         #
@@ -477,6 +531,7 @@ class uBITX_Link:
         def v2_UX_Set_Tuning_Preset_2(self, buffer):
             value = self._extract_value(buffer, 10, len(buffer) - 3)
             print("Tuning Preset 2: ", value)
+            self._model.tuning_presets[1] = int(value)
             # self.theVFO_Object.setTuningPreset(2, value)
 
         #
@@ -485,6 +540,7 @@ class uBITX_Link:
         def v3_UX_Set_Tuning_Preset_3(self, buffer):
             value = self._extract_value(buffer, 10, len(buffer) - 3)
             print("Tuning Preset 3: ", value)
+            self._model.tuning_presets[2] = int(value)
             # self.theVFO_Object.setTuningPreset(3, value)
 
         #
@@ -493,6 +549,7 @@ class uBITX_Link:
         def v4_UX_Set_Tuning_Preset_4(self, buffer):
             value = self._extract_value(buffer, 10, len(buffer) - 3)
             print("Tuning Preset 4: ", value)
+            self._model.tuning_presets[3] = int(value)
             # self.theVFO_Object.setTuningPreset(4, value)
 
         #
@@ -501,6 +558,7 @@ class uBITX_Link:
         def v5_UX_Set_Tuning_Preset_5(self, buffer):
             value = self._extract_value(buffer, 10, len(buffer) - 3)
             print("Tuning Preset 5: ", value)
+            self._model.tuning_presets[4] = int(value)
             # self.theVFO_Object.setTuningPreset(5, value)
 
         #
@@ -510,6 +568,9 @@ class uBITX_Link:
 
             value = self._extract_value(buffer, 10, len(buffer) - 3)
             print("Active Tuning Preset: ", value)
+            # Decides the rounding granularity, so anything comparing a
+            # confirmation against a request needs it.
+            self._model.active_tuning_preset = int(value)
             # self.theVFO_Object.set_Active_Tuning_Preset(value)
 
         #
@@ -1407,7 +1468,6 @@ class uBITX_Link:
         ########################################################################################
 
 
-
     #   Radio Commands
     ########################################################################################
     #   These routines are called to tell the MCU that an action has happened in the UX.
@@ -1742,7 +1802,6 @@ class uBITX_Link:
             self._tx_write_next = int(hz)
             return
 
-        print("borrowing the primary slot to write tx")
         self._tx_write_hz = int(hz)
         self._tx_write_state = "awaiting-borrow"
 
@@ -1780,17 +1839,28 @@ class uBITX_Link:
         if state == "awaiting-borrow" and confirmation == "cv":
             # The other VFO is primary now; write to it.
             self._tx_write_state = "awaiting-write"
-            self.set_frequency(self._tx_write_hz)
+            # Deferred: the rig is still reporting the VFO change.
+            self.root.after(
+                STEP_SETTLE_MS,
+                lambda hz=self._tx_write_hz: self.set_frequency(hz))
 
         elif state == "awaiting-write" and confirmation == "vc":
-            if value is not None and int(value) != int(self._tx_write_hz):
+            # COMPARED AGAINST WHAT THE RIG WILL STORE, not what we asked
+            # for. It rounds every frequency to the active tuning preset, so
+            # asking for 14.024.510 with the preset at 100 Hz gets
+            # 14.024.500 back -- and an exact comparison waits for a report
+            # that can never arrive, then abandons the sequence with the
+            # borrow still in place.
+            expected = self._model.as_the_rig_would_store(self._tx_write_hz)
+            if value is not None and int(value) != expected:
                 # The borrowed VFO reporting itself, not our write landing.
-                print("   ignoring vc", value, "-- waiting for",
-                      self._tx_write_hz)
+                print(f"   ignoring vc {value} -- waiting for {expected}"
+                      f" (asked {self._tx_write_hz}, preset"
+                      f" {self._model.tuning_step_hz()} Hz)")
                 return
             # Written. Hand the primary slot back.
             self._tx_write_state = "awaiting-return"
-            self.toggle_vfo()
+            self.root.after(STEP_SETTLE_MS, self.toggle_vfo)
 
         elif state == "awaiting-return" and confirmation == "cv":
             self._tx_write_state = None
@@ -1798,19 +1868,30 @@ class uBITX_Link:
             # The slot is back. One redraw now, showing the result.
             self._model.resume_notifications()
 
-            # Anything the dial asked for while that was running goes now.
+            # Anything the dial asked for while that was running goes next
+            # -- but NOT IMMEDIATELY.
+            #
+            # The rig is still emitting the trailing reports of the sequence
+            # that just ended: the frequency and mode of the VFO it switched
+            # back to. Starting the next borrow inline means it consumes one
+            # of those as its own confirmation, never sees the cv it is
+            # actually waiting for, and times out with the primary slot left
+            # on the wrong VFO. Which is how adjusting transmit ends up
+            # moving receive.
+            #
+            # A short wait lets the tail settle before anything new is sent.
             if self._tx_write_next is not None:
                 pending, self._tx_write_next = self._tx_write_next, None
                 if pending != self._model.frequency(self._model.tx_vfo):
-                    print("   following up with", pending)
-                    self._begin_tx_write(pending)
+                    print("   following up with", pending, "shortly")
+                    self.root.after(FOLLOW_UP_DELAY_MS,
+                                    lambda hz=pending: self._begin_tx_write(hz))
             if self._tx_write_timer is not None:
                 try:
                     self.root.after_cancel(self._tx_write_timer)
                 except Exception:
                     pass
                 self._tx_write_timer = None
-            print("tx write complete")
 
     def _arm_tx_write_timeout(self):
         """
@@ -1839,14 +1920,31 @@ class uBITX_Link:
         """
         Gives up on a sequence that never finished.
 
-        Leaves the model alone: the rig is the authority on which VFO is
-        primary, and it has been reporting that all along. If the borrow was
-        left in place, the next cv tells us.
+        HANDS THE PRIMARY SLOT BACK if the borrow got that far.
+
+        Leaving it was the earlier behaviour and it is wrong: after the first
+        toggle the rig really is on the other VFO, so rx_vfo becomes that one
+        and the RECEIVE panel starts showing the transmit frequency. It looks
+        like the two VFOs are bleeding into each other, and it persists until
+        something else toggles -- which is why the receive readout settles on
+        one or two values rather than wandering.
+
+        The model is left alone -- the rig is the authority on which VFO is
+        primary and reports it -- but the borrow itself has to be undone,
+        because nothing else will.
         """
         self._tx_write_timer = None
         if self._tx_write_state:
             print("tx write abandoned in state", self._tx_write_state,
                   "-- no confirmation within", TX_WRITE_TIMEOUT_MS, "ms")
+            # Undo the borrow if it happened. awaiting-borrow means the
+            # first toggle was sent but never confirmed, so the rig may or
+            # may not have moved -- its own cv will tell us either way, and
+            # toggling on a guess would be worse than leaving it.
+            if self._tx_write_state in ("awaiting-write", "awaiting-return"):
+                print("   handing the primary slot back")
+                self.toggle_vfo()
+
             # Whatever went wrong, the view must not stay frozen: release the
             # suspend so the operator sees where the radio actually is, even
             # if that is mid-borrow.
@@ -2262,6 +2360,5 @@ class uBITX_Link:
 
     def lenMemoryQueue(self):
         return len(self.memoryQueue)
-
 
 
