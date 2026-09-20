@@ -1278,10 +1278,9 @@ class uBITX_Link:
             self._model.set_frequency("p", int(value))
             print("vc_UX_Set_Primary_VFO_Frequency: ", value)
 
-            # The confirmation that a borrowed transmit write landed.
-            if self._radio_link._tx_write_state:
-                self._radio_link._advance_tx_write("vc", value)
-                return
+            # NOT fed to the transmit sequence any more. Nothing waits for
+            # a write to be acknowledged -- see _advance_tx_write -- so this
+            # is just another report, and the model has already taken it.
             # self.theVFO_Object.setPrimaryVFO(value)
             #
             # if self.theSDR != None:
@@ -1818,80 +1817,68 @@ class uBITX_Link:
         """
         Drives the borrow-write-return sequence, one confirmation at a time.
 
-        Called from the cv and vc handlers. Each step fires the next command
-        and records what it is now waiting for.
+        CONFIRMS THE TOGGLES, FIRES THE WRITE AND MOVES ON.
 
-        THE WRITE STEP CHECKS THE VALUE, and has to. Toggling the VFO makes
-        the rig report the newly-primary VFO's existing frequency -- a `vc`
-        arrives that has nothing to do with our write:
+        The two are not alike. A lost TOGGLE leaves the rig on the wrong VFO
+        with the roles inverted -- receive showing transmit -- and it does
+        not heal, because the next write goes to the wrong VFO as well. That
+        has to be confirmed.
 
-            Set_New_Frequency 14033900              what we sent
-            vc_...Primary_VFO_Frequency 14043300    the borrowed VFO's own
+        A lost WRITE costs nothing. The rig reports the VFO's frequency
+        afterwards whatever happened, so the model learns the truth either
+        way; the worst case is a dial that did not move, which the operator
+        sees and repeats.
 
-        Taking the first `vc` as confirmation sent the toggle-back before the
-        write had landed, and the real confirmation arrived with nothing
-        waiting for it. Matching the value ignores the echo and waits for the
-        one that means what we think it means.
+        Waiting for the write's confirmation as well was where most of the
+        difficulty came from -- a toggle makes the rig report the borrowed
+        VFO's own frequency first, which looks exactly like an answer to the
+        write, and the rig rounds what it stores to the tuning preset, so
+        the value it reports need not be the value that was sent. Neither
+        problem exists once nothing is waiting for it.
         """
         state = self._tx_write_state
         self._arm_tx_write_timeout()
 
         if state == "awaiting-borrow" and confirmation == "cv":
-            # The other VFO is primary now; write to it.
-            self._tx_write_state = "awaiting-write"
-            # Deferred: the rig is still reporting the VFO change.
+            # The other VFO is primary now. Write to it, then hand the slot
+            # back -- both deferred, because a command arriving while the rig
+            # is still reporting a VFO change is sometimes simply dropped.
+            self._tx_write_state = "awaiting-return"
             self.root.after(
                 STEP_SETTLE_MS,
-                lambda hz=self._tx_write_hz: self.set_frequency(hz))
-
-        elif state == "awaiting-write" and confirmation == "vc":
-            # COMPARED AGAINST WHAT THE RIG WILL STORE, not what we asked
-            # for. It rounds every frequency to the active tuning preset, so
-            # asking for 14.024.510 with the preset at 100 Hz gets
-            # 14.024.500 back -- and an exact comparison waits for a report
-            # that can never arrive, then abandons the sequence with the
-            # borrow still in place.
-            expected = self._model.as_the_rig_would_store(self._tx_write_hz)
-            if value is not None and int(value) != expected:
-                # The borrowed VFO reporting itself, not our write landing.
-                print(f"   ignoring vc {value} -- waiting for {expected}"
-                      f" (asked {self._tx_write_hz}, preset"
-                      f" {self._model.tuning_step_hz()} Hz)")
-                return
-            # Written. Hand the primary slot back.
-            self._tx_write_state = "awaiting-return"
-            self.root.after(STEP_SETTLE_MS, self.toggle_vfo)
+                lambda hz=self._tx_write_hz: self._write_then_return(hz))
 
         elif state == "awaiting-return" and confirmation == "cv":
             self._tx_write_state = None
             self._tx_write_hz = None
-            # The slot is back. One redraw now, showing the result.
-            self._model.resume_notifications()
-
-            # Anything the dial asked for while that was running goes next
-            # -- but NOT IMMEDIATELY.
-            #
-            # The rig is still emitting the trailing reports of the sequence
-            # that just ended: the frequency and mode of the VFO it switched
-            # back to. Starting the next borrow inline means it consumes one
-            # of those as its own confirmation, never sees the cv it is
-            # actually waiting for, and times out with the primary slot left
-            # on the wrong VFO. Which is how adjusting transmit ends up
-            # moving receive.
-            #
-            # A short wait lets the tail settle before anything new is sent.
-            if self._tx_write_next is not None:
-                pending, self._tx_write_next = self._tx_write_next, None
-                if pending != self._model.frequency(self._model.tx_vfo):
-                    print("   following up with", pending, "shortly")
-                    self.root.after(FOLLOW_UP_DELAY_MS,
-                                    lambda hz=pending: self._begin_tx_write(hz))
             if self._tx_write_timer is not None:
                 try:
                     self.root.after_cancel(self._tx_write_timer)
                 except Exception:
                     pass
                 self._tx_write_timer = None
+            # The slot is back. One redraw now, showing the result.
+            self._model.resume_notifications()
+
+            # Anything the dial asked for while that was running goes next,
+            # after the rig's trailing reports have settled -- starting it
+            # inline means the new sequence consumes one of them as its own
+            # confirmation and never sees the cv it is waiting for.
+            if self._tx_write_next is not None:
+                pending, self._tx_write_next = self._tx_write_next, None
+                if pending != self._model.frequency(self._model.tx_vfo):
+                    self.root.after(FOLLOW_UP_DELAY_MS,
+                                    lambda hz=pending: self._begin_tx_write(hz))
+
+    def _write_then_return(self, hz):
+        """
+        Sends the frequency, then hands the primary slot back.
+
+        The write is not acknowledged and nothing waits for it. The toggle
+        that follows is, which is what the sequence is really protecting.
+        """
+        self.set_frequency(hz)
+        self.root.after(STEP_SETTLE_MS, self.toggle_vfo)
 
     def _arm_tx_write_timeout(self):
         """
@@ -1941,7 +1928,7 @@ class uBITX_Link:
             # first toggle was sent but never confirmed, so the rig may or
             # may not have moved -- its own cv will tell us either way, and
             # toggling on a guess would be worse than leaving it.
-            if self._tx_write_state in ("awaiting-write", "awaiting-return"):
+            if self._tx_write_state == "awaiting-return":
                 print("   handing the primary slot back")
                 self.toggle_vfo()
 
@@ -2360,5 +2347,3 @@ class uBITX_Link:
 
     def lenMemoryQueue(self):
         return len(self.memoryQueue)
-
-
