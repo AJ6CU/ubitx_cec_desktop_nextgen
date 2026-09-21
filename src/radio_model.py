@@ -207,6 +207,7 @@ class RadioModel:
         resume each other early.
         """
         self._suspended += 1
+        print(f"[susp] suspend -> {self._suspended}")
         if self._frozen_active is None:
             self._frozen_active = self.active
 
@@ -214,6 +215,7 @@ class RadioModel:
         """Releases a suspend, and redraws if that was the last one."""
         if self._suspended:
             self._suspended -= 1
+        print(f"[susp] resume  -> {self._suspended}")
         if not self._suspended:
             self._frozen_active = None
             self.changed()
@@ -419,7 +421,20 @@ class RadioModel:
         # receive writes the VFO like any other time -- which is exactly
         # what the rig expects. The earlier version returned the unchanged
         # VFO here, so the write was a no-op and RIT tuning did nothing.
-        if role == "tx" and self.mode_of(which).startswith("CW"):
+        if role == "tx":
+            return self.transmit_vfo_hz(which, displayed_hz)
+        return int(displayed_hz)
+
+    def transmit_vfo_hz(self, which, displayed_hz):
+        """
+        What to write to VFO `which` for it to TRANSMIT at displayed_hz.
+
+        The CW rule in ONE place. role_to_vfo_hz uses it for a role; the
+        split offsets use it for a VFO NAME, because they have to address
+        the VFO that is not primary before split has been confirmed -- when
+        the "tx" role would still resolve to the active VFO.
+        """
+        if self.mode_of(which).startswith("CW"):
             return int(displayed_hz) + self.cw_tone
         return int(displayed_hz)
 

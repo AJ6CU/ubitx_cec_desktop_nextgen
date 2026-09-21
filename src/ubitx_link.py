@@ -1865,6 +1865,35 @@ class uBITX_Link:
                 lambda: self._begin_borrowed_write(
                     self._model.frequency(other), mode=mode))
 
+    def set_split_offset(self, offset_hz):
+        """
+        Puts transmit a given distance from receive, turning split on.
+
+        WRITES TO THE VFO THAT IS NOT PRIMARY, named explicitly, not to the
+        "tx" role. Split may not be confirmed yet -- Toggle_Split only sends a
+        command -- and until it is, the tx role still resolves to the active
+        VFO, which is receive. Addressing the other VFO by name is right
+        whether or not split has landed, and the borrow already knows how to
+        reach it.
+
+        Measured from the receive frequency AS DISPLAYED, and converted for
+        the other VFO's mode, so the gap between the two panels is exactly
+        what the button says. Adding the offset to the raw VFO came out 500
+        Hz short in CW.
+        """
+        m = self._model
+        other = "b" if m.active == "a" else "a"
+        vfo_hz = m.transmit_vfo_hz(other,
+                                   m.role_frequency("rx") + int(offset_hz))
+        if m.split:
+            self._begin_borrowed_write(vfo_hz)
+        else:
+            # Split first, then the write once the rig has settled -- the
+            # same pacing as any command sent straight after another.
+            self.Toggle_Split()
+            self.root.after(STEP_SETTLE_MS,
+                            lambda: self._begin_borrowed_write(vfo_hz))
+
     def copy_active_to_other(self):
         """
         Copies the active VFO's frequency and mode to the other one.
@@ -1948,6 +1977,7 @@ class uBITX_Link:
         problem exists once nothing is waiting for it.
         """
         state = self._tx_write_state
+        print(f"[seq] {state} + {confirmation}")
         self._arm_tx_write_timeout()
 
         if state == "awaiting-borrow" and confirmation == "cv":

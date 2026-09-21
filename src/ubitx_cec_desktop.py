@@ -201,6 +201,7 @@ class RolePanel(sCTkFrame):
             self.standby = sCTkLabelSecondary(header, text="",
                                               font=("Arial", 14))
             self.standby.pack(side="right")
+            self._standby_shown = True
 
         body = sCTkFrame(self, fg_color="transparent", border_width=0)
         body.pack(fill="x", padx=8, pady=(0, 5))
@@ -257,6 +258,29 @@ class RolePanel(sCTkFrame):
     def _click_step(self, direction):
         self._on_turn(direction)
 
+    def show_pending(self, displayed_hz):
+        """
+        Draws a frequency that has been asked for but not yet confirmed.
+
+        THE BOUNDED EXCEPTION to "the view never assumes", and the one place
+        it lives. A write to the transmit VFO in split is a borrow -- toggle,
+        write, toggle, each paced and the toggles confirmed -- with
+        notifications held throughout. Waiting for it meant the readout sat
+        still for several hundred milliseconds after the dial or button had
+        been used.
+
+        Safe because it self-corrects: update_view replaces the pending value
+        with the confirmed one as soon as it arrives, and drops it after
+        TURN_ACCUMULATE_SECONDS regardless, so a write the rig refused or
+        clamped shows reality again rather than a number nobody agreed to.
+
+        Drawn DIRECTLY rather than by asking for a redraw: during a borrow
+        the notifications are suspended, so a redraw would not happen.
+        """
+        self._target = int(displayed_hz)
+        self._target_at = time.monotonic()
+        self.display.set(self._target)
+
     def _on_turn(self, clicks):
         """
         One detent of the dial.
@@ -285,21 +309,8 @@ class RolePanel(sCTkFrame):
         else:
             base = self._target
 
-        self._target = base + clicks * step
-        self._target_at = now
-
-        # DRAWN HERE, not left to the next refresh.
-        #
-        # A transmit write in split suspends notifications for the whole
-        # borrow, so refresh() does not run and update_view never gets the
-        # chance to show this. Setting the one label directly sidesteps that
-        # without lifting the suspension -- which exists to stop the RECEIVE
-        # panel flickering through the borrowed VFO, and is still doing its
-        # job.
-        #
-        # One widget, not a redraw: everything else on screen is still
-        # whatever the rig last confirmed.
-        self.display.set(self._target)
+        # Drawn now, not at the next refresh -- see show_pending.
+        self.show_pending(base + clicks * step)
 
         # role_frequency, NOT frequency: frequency() takes a VFO NAME, and a
         # role passed to it returns VFO B whatever the dial computed.
@@ -317,13 +328,29 @@ class RolePanel(sCTkFrame):
                 else ("#94A3B8", "#64748B"))
         else:
             other = "b" if radio.rx_vfo == "a" else "a"
+            # HIDDEN IN SPLIT, not blanked.
+            #
+            # configure(text="") does nothing on an sCTk label: the library
+            # drops empty strings, because that is what the Designer sends to
+            # mean "fall back to the theme". So the label was never cleared --
+            # it kept whatever it last showed before split went on, and read
+            # like a VFO B that had stopped updating while the transmit panel
+            # showed the real one.
+            #
+            # Hiding the widget is also simply what is meant: in split, VFO B
+            # is on the transmit panel and has no business here.
             if radio.split:
-                self.standby.configure(text="")
+                if self._standby_shown:
+                    self.standby.pack_forget()
+                    self._standby_shown = False
             else:
                 hz = radio.frequency(other)
                 self.standby.configure(
                     text=f"vfo {other}   {hz // 1_000_000}."
                          f"{(hz // 1000) % 1000:03d}.{hz % 1000:03d}")
+                if not self._standby_shown:
+                    self.standby.pack(side="right")
+                    self._standby_shown = True
 
         # Lock freezes both. Otherwise TX is tunable only in split -- out of
         # split it is showing the same frequency as RX, and moving it here
@@ -1122,8 +1149,15 @@ class UbitxCecDesktop(sCTk):
                     sCTkButtonSecondary(line, text=value, width=200,
                                         anchor="w").pack(side="left")
 
-            sCTkFrame(box, fg_color="transparent", border_width=0,
-                      height=6).pack()
+            # Bottom padding comes from the LAST ROW'S pady, not a spacer.
+            #
+            # There used to be a spacer here -- an sCTkFrame with a height
+            # and no width. It took CustomTkinter's default width of 200,
+            # sat centred against the bottom edge, and "transparent" means
+            # "paint in the parent's colour" -- so it painted a 200-pixel
+            # strip of background straight across the group's border. Every
+            # group had a gap in its bottom edge, the same span each time.
+            line.pack_configure(pady=(2, 10))
 
         danger = sCTkFrame(wrap, fg_color="transparent", border_width=0)
         danger.pack(anchor="w", pady=(10, 0))
@@ -1162,15 +1196,23 @@ class UbitxCecDesktop(sCTk):
         currently sits -- see SPLIT_OFFSETS. Zero is simplex: TX back onto
         the frequency you are listening to.
         """
-        radio = self.model
-        if radio.locked:
+        if self.model.locked:
             return
-        if not radio.split:
-            self.connection.Toggle_Split()
-        print("self.connection.set_frequency", radio.split, radio.tx_vfo, radio.rx_vfo)
-        self.connection.set_frequency(
-            "b" if not radio.split else radio.tx_vfo,
-            radio.frequency(radio.rx_vfo) + (khz * 1000))
+        # A COMMAND to the link, which works out which VFO to reach.
+        #
+        # Both earlier versions were wrong. connection.set_frequency takes
+        # one argument, so calling it with a VFO name raised; and
+        # model.set_frequency changed the readout without telling the rig,
+        # so the offset appeared and the rig's next report took it away
+        # again. Both also picked the transmit VFO before split had been
+        # confirmed, when "b" is only right if A happens to be active.
+        self.connection.set_split_offset(khz * 1000)
+
+        # Show it now. The offset lands through a borrow, which holds the
+        # display for several hundred milliseconds -- the same lag the dial
+        # had until it began drawing its own target, and fixed the same way.
+        self.panel_tx.show_pending(
+            self.model.role_frequency("rx") + khz * 1000)
 
     def _toggle_tx(self):
         """Simulation only -- the rig reports transmit, it is not commanded."""
@@ -1479,7 +1521,12 @@ class UbitxCecDesktop(sCTk):
                     text=f"transmitting {abs(delta) / 1000:g} kHz "
                          f"{'above' if delta > 0 else 'below'} rx")
         else:
-            self.offset_note.configure(text="")
+            # A SPACE, not an empty string: sCTk labels ignore text="" (see
+            # the standby label), so this note would have gone on saying
+            # "transmitting 2 kHz above rx" after split was switched off.
+            # Not hidden either -- it sits under the offset buttons, and
+            # removing it would move them.
+            self.offset_note.configure(text=" ")
 
         # The rest of the readouts.
         # The band picker follows the receive frequency, like every other
