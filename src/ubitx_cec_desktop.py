@@ -367,7 +367,20 @@ class RolePanel(sCTkFrame):
         self.configure(border_color=("#993C1D", "#993C1D") if is_tx
                        else ("#CBD5E1", "#374151"))
 
-        if is_tx and not radio.split:
+        if is_tx and not radio.split and radio.rit and radio.rit_base_hz:
+            # RIT HOLDS TRANSMIT. This branch has to come first: the
+            # "follows rx" note below is exactly wrong under RIT, where
+            # transmit is precisely the thing that does NOT follow receive.
+            # Receiver Incremental Tuning moves only the receiver -- the ARRL
+            # definition -- so saying otherwise on screen describes the
+            # opposite of what the radio is doing.
+            held = radio.formatted(radio.rit_base_hz)
+            if radio.mode_of(radio.tx_vfo).startswith("CW"):
+                self.note.configure(
+                    text=f"held by rit at {held}  ·  −{radio.cw_tone} Hz cw tone")
+            else:
+                self.note.configure(text=f"held by rit at {held}")
+        elif is_tx and not radio.split:
             if radio.mode_of(radio.tx_vfo).startswith("CW"):
                 # Says BOTH things. This branch used to win outright, so out
                 # of split a CW transmit frequency was quietly offset with
@@ -384,14 +397,12 @@ class RolePanel(sCTkFrame):
             # the default happened to be rather than what is applied.
             self.note.configure(text=f"−{radio.cw_tone} Hz cw tone")
         elif not is_tx and radio.rit:
-            # The base is what you return to when RIT goes off, so it has to
-            # be visible while RIT is on -- otherwise the only frequency on
-            # screen is one you cannot get back to except by zeroing.
-            base = radio.frequency(radio.rx_vfo)
-            self.note.configure(
-                text=f"rit {radio.rit_offset:+d} Hz   ·   base "
-                     f"{base // 1_000_000}.{(base // 1000) % 1000:03d}."
-                     f"{base % 1000:03d}")
+            # From the MODEL, not composed here. This used to take the VFO as
+            # the "base" -- which under the rig's RIT is the frequency being
+            # tuned, not the one being kept. The model knows which is which,
+            # and one place deciding the wording means the two panels and any
+            # other window cannot disagree about it.
+            self.note.configure(text=radio.role_note("rx"))
         else:
             self.note.configure(text=f"step {self._readable_step()}")
 
@@ -1156,6 +1167,7 @@ class UbitxCecDesktop(sCTk):
             return
         if not radio.split:
             self.connection.Toggle_Split()
+        print("self.connection.set_frequency", radio.split, radio.tx_vfo, radio.rx_vfo)
         self.connection.set_frequency(
             "b" if not radio.split else radio.tx_vfo,
             radio.frequency(radio.rx_vfo) + (khz * 1000))
@@ -1201,7 +1213,10 @@ class UbitxCecDesktop(sCTk):
         # ERR, so "USB" is 3 there and 1 here. Two lists of the same name with
         # different contents is a trap worth not walking into twice -- the
         # view names modes, the link encodes them.
-        self.connection.set_mode(value)
+        #
+        # set_mode_everywhere, not set_mode: in split the transmit VFO needs
+        # the new mode as well, or it goes on transmitting in the old one.
+        self.connection.set_mode_everywhere(value)
 
     def _on_band(self, *_):
         label = self.band_picker.get()

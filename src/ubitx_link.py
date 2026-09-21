@@ -1153,7 +1153,11 @@ class uBITX_Link:
             # A TOGGLE, not a state. The code this replaced flipped its own
             # flag and never read `value`, which is the behaviour that worked
             # against the real firmware.
-            self._model.split = not self._model.split
+            # Read, not toggled, for the same reason as cr_: the rig reports
+            # 1 when split goes on, which is a state rather than a
+            # notification. The code this replaced flipped its own flag, and
+            # would have inverted permanently after a single missed report.
+            self._model.split = str(value).strip() == "1"
             # if (self.split_Button_On):
             #     self.split_Button_On = False
             #     self.split_Button.configure(style='Button1bRaised.TButton')
@@ -1171,19 +1175,48 @@ class uBITX_Link:
         def vr_UX_Update_RIT_Freq(self, buffer):
             value = self._extract_value(buffer, 10, len(buffer) - 3)
             print("vr_UX_Update_RIT_Freq: ", value)
-            # if self.CurrentDebug:
-            # print("vr called")  # command is rit related
-            # print(buffer)
-            pass
+            # IGNORED, deliberately.
+            #
+            # It looks like the rig's record of the RIT base, and for a while
+            # it was stored as one. It is not: it arrives immediately after
+            # cr_ and reports a round 14.000.000 wherever the radio actually
+            # is -- the same figure the original display showed as "RIT Base
+            # RX Freq", so it is the firmware's value, not ours.
+            #
+            # Storing it overwrote the correct base, captured a moment
+            # earlier in cr_ from the real receive frequency, and left the
+            # transmit readout stuck on a number nobody had tuned to.
+            #
+            # The capture in cr_ is the reliable source. If this report ever
+            # turns out to mean something useful, the place to find out is
+            # the firmware source rather than here.
 
         def cr_UX_RIT_Toggle(self, buffer):
             value = self._extract_value(buffer, 10, len(buffer) - 3)
             print("cr_UX_RIT_Toggle: ", value)
-            self._model.rit = not self._model.rit
-            if not self._model.rit:
-                # Leaving RIT returns to the base, which is what makes the
-                # base worth showing while it is on.
-                self._model.rit_offset = 0
+            # THE VALUE IS THE STATE -- 1 on, 0 off -- so it is read, not
+            # toggled. Confirmed on the rig: turning split on while RIT is
+            # on produces
+            #
+            #     cr_UX_RIT_Toggle:  0
+            #     cs_UX_SPLIT_Toggle:  1
+            #
+            # Toggling gave the right answer while every report arrived; one
+            # missed report would have left RIT inverted for good. Reading
+            # the value cannot drift, and only a genuine CHANGE acts -- so a
+            # repeated report does not capture a new base or send receive
+            # anywhere.
+            was_on = self._model.rit
+            now_on = str(value).strip() == "1"
+            self._model.rit = now_on
+            if now_on and not was_on:
+                # Captured AT SWITCH-ON from the real receive frequency: this
+                # is where transmit stays while receive is tuned away from
+                # it. The rig's vr_ report is NOT used for this -- see there.
+                self._model.rit_base_hz = self._model.frequency(
+                    self._model.rx_vfo)
+            elif was_on and not now_on:
+                self._radio_link._leave_rit()
             # if (self.rit_Button_On):
             #     self.rit_Button_On = False
             #     self.rit_Button.configure(style='Button1bRaised.TButton')
@@ -1773,13 +1806,64 @@ class uBITX_Link:
         # goes in the VFO, and the two differ by the CW sidetone on transmit.
         # role_to_vfo_hz is the inverse of role_frequency -- without it a
         # 1 kHz step moved 400 Hz while the tone was 600.
+        print("set_role_frequency", role, hz)
         hz = self._model.role_to_vfo_hz(role, hz)
+        print("new hz =", hz, "rit offset", self._model.rit_offset)
 
         if role == "rx" or not self._model.split:
+            print("link 1780", role, self._model.split)
             self.set_frequency(hz)
             return
 
         self._begin_tx_write(hz)
+
+    def _leave_rit(self):
+        """
+        Puts receive back where RIT started, then forgets the base.
+
+        TURNING RIT OFF MEANS ZERO OFFSET: receive and transmit on the same
+        frequency again. Under the rig's model the VFO was what moved, so it
+        has to be sent back to the base -- and the firmware does not do that
+        by itself, which left receive stranded wherever it had been tuned.
+
+        Called however RIT ends: from the RIT button, or as a side effect of
+        turning split on, which the firmware reports as cr_ 0 just before
+        cs_ 1.
+        """
+        base = self._model.rit_base_hz
+        self._model.rit_base_hz = 0
+        if base and base != self._model.frequency(self._model.rx_vfo):
+            # Receive is the primary VFO, so an ordinary write lands on it.
+            self.set_frequency(base)
+
+    def set_mode_everywhere(self, mode):
+        """
+        Sets the mode on the active VFO, and in split on the other one too.
+
+        THE RIG KEEPS A MODE PER VFO, and set_mode only reaches the primary.
+        So in split, choosing USB changed receive and left transmit in CW --
+        the transmit readout kept its sidetone offset because, as far as the
+        rig was concerned, the transmit VFO really was still in CW.
+
+        The mode picker sits between the two frequency panels because it
+        acts on both, and that is what an operator means by it: split is a
+        different FREQUENCY for transmit, not a different mode. Cross-mode
+        split exists, but it is rare enough to be done deliberately from the
+        rig rather than be what the everyday control does.
+
+        Out of split the two VFOs are not in use together, so only the
+        active one changes -- the standby VFO keeps whatever it had.
+        """
+        self.set_mode(mode)
+        if self._model.split:
+            # The non-primary VFO, written by borrowing the slot. Its
+            # frequency is sent back unchanged: the borrow is there for the
+            # mode, and re-sending the frequency it already has is harmless.
+            other = self._model.tx_vfo
+            self.root.after(
+                STEP_SETTLE_MS,
+                lambda: self._begin_borrowed_write(
+                    self._model.frequency(other), mode=mode))
 
     def copy_active_to_other(self):
         """
@@ -1909,6 +1993,7 @@ class uBITX_Link:
         Neither write is acknowledged and nothing waits for them. The toggle
         that follows is, which is what the sequence is really protecting.
         """
+        print("link 1913", hz)
         self.set_frequency(hz)
 
         if self._tx_write_mode is not None:

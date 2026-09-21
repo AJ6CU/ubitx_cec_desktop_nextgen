@@ -89,7 +89,18 @@ class RadioModel:
 
         self.split = False
         self.rit = False
-        self.rit_offset = 0            # Hz, signed, applied to RECEIVE
+        # RIT AS THE RIG DOES IT, which is the opposite of the obvious model.
+        #
+        # With RIT on, the VFO keeps moving as you tune -- it IS the receive
+        # frequency. What stays put is the frequency captured at the moment
+        # RIT was switched on, which becomes where you TRANSMIT. The old
+        # display called them "RIT RX Freq" and "RIT TX Freq".
+        #
+        # The first version here had it backwards -- VFO fixed, offset added
+        # on top -- so tuning receive with RIT on wrote the unchanged VFO
+        # back to the rig and nothing moved. Storing the base and DERIVING
+        # the offset matches what the hardware is actually doing.
+        self.rit_base_hz = 0
 
         self.locked = False
         self.muted = False
@@ -261,6 +272,18 @@ class RadioModel:
         """The VFO that receives. Always the active one."""
         return self._role_active
 
+    @property
+    def rit_offset(self):
+        """
+        How far receive has been tuned from where RIT was switched on.
+
+        DERIVED, never stored: it is a consequence of the VFO and the base,
+        and storing a consequence is how two values get out of step.
+        """
+        if not self.rit or not self.rit_base_hz:
+            return 0
+        return self.frequency(self.rx_vfo) - self.rit_base_hz
+
     def role_vfo(self, role):
         """
         Which VFO currently fills a role.
@@ -323,6 +346,7 @@ class RadioModel:
 
         which is vfo ("a" or "b").  If which is "p", then the active vfo is updated
         """
+        print("model set_frequency", which, hz)
         hz = int(hz)
         if which == "a" or (which == "p" and self.active =="a"):
             self.vfo_a = hz
@@ -342,8 +366,12 @@ class RadioModel:
         which = self.role_vfo(role)
         hz = self.frequency(which)
 
-        if role == "rx" and self.rit:
-            return hz + self.rit_offset
+        # Receive is simply the VFO, RIT or not: under RIT the VFO is what
+        # moves. Transmit, out of split, stays where RIT was switched on.
+        # In split, transmit is the other VFO as usual and RIT only
+        # concerns receive.
+        if role == "tx" and self.rit and not self.split and self.rit_base_hz:
+            hz = self.rit_base_hz
         if role == "tx" and self.mode_of(which).startswith("CW"):
             return hz - self.cw_tone
         return hz
@@ -387,8 +415,10 @@ class RadioModel:
         offset, not the frequency, so there is nothing to write.
         """
         which = self.role_vfo(role)
-        if role == "rx" and self.rit:
-            return self.frequency(which)
+        # No RIT case. Under RIT the VFO IS the receive frequency, so tuning
+        # receive writes the VFO like any other time -- which is exactly
+        # what the rig expects. The earlier version returned the unchanged
+        # VFO here, so the write was a no-op and RIT tuning did nothing.
         if role == "tx" and self.mode_of(which).startswith("CW"):
             return int(displayed_hz) + self.cw_tone
         return int(displayed_hz)
@@ -397,14 +427,10 @@ class RadioModel:
         """
         Moves what a role is on.
 
-        Tuning the receive side while RIT is on moves the OFFSET, not the
-        VFO -- that is what RIT is, a temporary nudge you can undo. The base
-        stays put so turning RIT off returns you to it.
+        Under RIT this moves the VFO, which is the receive frequency; the
+        offset follows from it. See rit_base_hz.
         """
         which = self.role_vfo(role)
-        if role == "rx" and self.rit:
-            self.rit_offset = int(hz) - self.frequency(which)
-            return
         self.set_frequency(which, hz)
 
     def set_active(self, which):
@@ -528,9 +554,23 @@ class RadioModel:
             if self.mode_of(self.tx_vfo).startswith("CW"):
                 return f"−{self.cw_tone} Hz cw tone"
             return ""
-        if self.rit:
-            base = self.formatted(self.frequency(self.rx_vfo))
-            return f"rit {self.rit_offset:+d} Hz · base {base}"
+        if self.rit and self.rit_base_hz:
+            base = self.formatted(self.rit_base_hz)
+            # The snapshot MEANS different things. Out of split it is where
+            # you will transmit; in split transmit is the other VFO, and the
+            # snapshot is only where receive started. The original display
+            # drew the same distinction, labelling it "RIT TX Freq" in one
+            # case and "RIT Base RX Freq" in the other.
+            if self.split:
+                # Where receive STARTED, which is a raw VFO value -- receive
+                # never carries the CW offset.
+                return f"rit {self.rit_offset:+d} Hz · from {base}"
+            # Where you will TRANSMIT, so it goes through role_frequency and
+            # carries the CW sidetone offset like every other transmit
+            # figure on screen. Formatting the base directly showed a number
+            # 500 Hz away from what the transmit panel said in CW.
+            tx = self.formatted(self.role_frequency("tx"))
+            return f"rit {self.rit_offset:+d} Hz · tx stays at {tx}"
         return ""
 
     def split_delta_hz(self):
@@ -554,4 +594,3 @@ class RadioModel:
     @property
     def firmware(self):
         return self._firmware
-
