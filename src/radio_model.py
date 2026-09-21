@@ -262,7 +262,27 @@ class RadioModel:
         return self._role_active
 
     def role_vfo(self, role):
-        return self.tx_vfo if role == "tx" else self.rx_vfo
+        """
+        Which VFO currently fills a role.
+
+        RAISES ON ANYTHING BUT "rx" OR "tx", deliberately. This used to
+        treat every argument that was not "tx" as receive, which meant a VFO
+        NAME passed by mistake -- "a" or "b" -- silently became a role and
+        did something plausible. It happened twice: once sending VFO B's
+        frequency to the rig, and once retuning the transmit VFO when the
+        band picker meant receive.
+
+        The same reasoning as frequency(): a method that cannot fail hides
+        its misuse, and both mistakes cost far more to find than a traceback
+        would have.
+        """
+        if role == "tx":
+            return self.tx_vfo
+        if role == "rx":
+            return self.rx_vfo
+        raise ValueError(
+            f'role_vfo() takes a role -- "rx" or "tx" -- not {role!r}. '
+            f'For a VFO, use frequency() or mode_of().')
 
     # ------------------------------------------------------------------
     # Frequencies. Integer Hz throughout.

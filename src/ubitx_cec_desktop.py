@@ -1167,12 +1167,33 @@ class UbitxCecDesktop(sCTk):
         self.rig.report_transmitting(not self.model.transmitting)
 
     def _swap(self):
-        # No rig command for this yet -- the model changes locally, which is
-        # a lie the moment the rig disagrees.
-        self.rig.swap_vfos()
+        """
+        Swaps which VFO receives and which transmits.
+
+        A TOGGLE, not an exchange of contents. The rig has no command to
+        swap two VFOs' frequencies -- and it does not need one, because
+        roles follow the active VFO: make the other one primary and receive
+        and transmit trade places, which is the operational effect wanted.
+
+        Doing it in the model instead was a lie the rig never heard. It
+        looked right for a moment and then reverted, because the rig's own
+        reports say where the frequencies actually are.
+        """
+        self.connection.toggle_vfo()
 
     def _copy_AtoB(self):
-        self.rig.copy_AtoB()
+        """
+        Copies the active VFO onto the other one, frequency and mode.
+
+        Through the CONNECTION now. It was on the stub, which changed the
+        model and told the rig nothing -- so it looked right until the rig's
+        next report put the old value back.
+
+        The firmware has no copy command, so the link does it with the same
+        borrow the transmit write uses: the rig only writes to whichever VFO
+        is primary, so the other one is made primary for a moment.
+        """
+        self.connection.copy_active_to_other()
 
     def _on_mode(self, value):
         # The STRING, not an index. The link converts using its own MODES,
@@ -1187,7 +1208,15 @@ class UbitxCecDesktop(sCTk):
         for i, (name, freq, endfreq) in enumerate(self.model.BANDS):
             if name == label:
                 print("band change", self.model.active, freq)
-                self.connection.set_role_frequency(self.model.active, freq)
+                # "rx", NOT model.active.
+                #
+                # set_role_frequency takes a ROLE. Handing it a VFO name --
+                # "a" or "b" -- misses the receive branch and falls through
+                # to transmit, so in split a band change borrowed the
+                # primary slot and retuned the TRANSMIT vfo while receive
+                # stayed put. Changing band is a receive action: it is where
+                # you want to listen.
+                self.connection.set_role_frequency("rx", freq)
                 # Bands imply modes -- below 10 MHz is LSB by convention.
                 # If in CW mode, maintain CW mode
                 if self.model.mode[0:2] == "CW":
@@ -1438,6 +1467,17 @@ class UbitxCecDesktop(sCTk):
             self.offset_note.configure(text="")
 
         # The rest of the readouts.
+        # The band picker follows the receive frequency, like every other
+        # readout here. It used to keep whatever was last chosen from it,
+        # so after a swap it named the band the radio had left.
+        #
+        # Safe because sCTkSpinbox.set() does not fire its command -- a
+        # programmatic set is the application saying what the value is, and
+        # firing would turn this into a loop.
+        band_now = s.band_name()
+        if band_now and self.band_picker.get() != band_now:
+            self.band_picker.set(band_now)
+
         self.filter_label.configure(text=f"{s.filter_hz} Hz")
         self.mode_label.configure(text=s.mode)
         self.channel_now.configure(

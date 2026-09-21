@@ -94,6 +94,8 @@ class uBITX_Link:
         self._tx_write_timer = None
         # The most recent thing the dial asked for while a write was running.
         self._tx_write_next = None
+        self._tx_write_mode = None
+        self._tx_write_next_mode = None
 
         # ALL OF THIS BEFORE THE READER.
         #
@@ -1779,14 +1781,37 @@ class uBITX_Link:
 
         self._begin_tx_write(hz)
 
-    def _begin_tx_write(self, vfo_hz):
+    def copy_active_to_other(self):
         """
-        Starts, or queues, a borrow-write-return for a VFO value.
+        Copies the active VFO's frequency and mode to the other one.
+
+        THE FIRMWARE HAS NO COMMAND FOR THIS, so it is done the only way the
+        rig allows: the same borrow the transmit write uses. The rig writes
+        only to whichever VFO is primary, so the other one has to be made
+        primary for a moment.
+
+        Worth noticing that "write to the VFO that is not primary" is the
+        real operation here, and transmit-in-split was only its first use.
+        """
+        which = self._model.active
+        self._begin_borrowed_write(self._model.frequency(which),
+                                   mode=self._model.mode_of(which))
+
+    def _begin_tx_write(self, vfo_hz):
+        """Transmit's entry to the borrow. Carries no mode change."""
+        self._begin_borrowed_write(vfo_hz)
+
+    def _begin_borrowed_write(self, vfo_hz, mode=None):
+        """
+        Starts, or queues, a borrow-write-return against the non-primary VFO.
 
         TAKES A VFO VALUE, not a displayed one. set_role_frequency has
-        already applied role_to_vfo_hz, and the follow-up path below re-enters
-        here rather than going back through that -- converting a second time
-        would add the sidetone twice.
+        already applied role_to_vfo_hz, and the follow-up path re-enters here
+        rather than going back through that -- converting a second time would
+        add the sidetone twice.
+
+        `mode` is written alongside the frequency while the slot is borrowed,
+        for callers that are copying a whole VFO rather than retuning one.
         """
         hz = vfo_hz
 
@@ -1799,9 +1824,11 @@ class uBITX_Link:
             # LATEST is right: the intermediate frequencies were never wanted,
             # only passed through on the way to this one.
             self._tx_write_next = int(hz)
+            self._tx_write_next_mode = mode
             return
 
         self._tx_write_hz = int(hz)
+        self._tx_write_mode = mode
         self._tx_write_state = "awaiting-borrow"
 
         # The borrow is a mechanism, not a state worth showing. Without this
@@ -1866,18 +1893,33 @@ class uBITX_Link:
             # confirmation and never sees the cv it is waiting for.
             if self._tx_write_next is not None:
                 pending, self._tx_write_next = self._tx_write_next, None
+                pending_mode = self._tx_write_next_mode
+                self._tx_write_next_mode = None
                 if pending != self._model.frequency(self._model.tx_vfo):
-                    self.root.after(FOLLOW_UP_DELAY_MS,
-                                    lambda hz=pending: self._begin_tx_write(hz))
+                    self.root.after(
+                        FOLLOW_UP_DELAY_MS,
+                        lambda hz=pending, m=pending_mode:
+                            self._begin_borrowed_write(hz, mode=m))
 
     def _write_then_return(self, hz):
         """
-        Sends the frequency, then hands the primary slot back.
+        Sends the frequency, and the mode if one was asked for, then hands
+        the primary slot back.
 
-        The write is not acknowledged and nothing waits for it. The toggle
+        Neither write is acknowledged and nothing waits for them. The toggle
         that follows is, which is what the sequence is really protecting.
         """
         self.set_frequency(hz)
+
+        if self._tx_write_mode is not None:
+            mode, self._tx_write_mode = self._tx_write_mode, None
+            # After a settle of its own: two commands back to back while the
+            # rig is mid-write is the same hazard as writing mid-toggle.
+            self.root.after(STEP_SETTLE_MS,
+                            lambda m=mode: self.set_mode(m))
+            self.root.after(STEP_SETTLE_MS * 2, self.toggle_vfo)
+            return
+
         self.root.after(STEP_SETTLE_MS, self.toggle_vfo)
 
     def _arm_tx_write_timeout(self):
@@ -2347,3 +2389,5 @@ class uBITX_Link:
 
     def lenMemoryQueue(self):
         return len(self.memoryQueue)
+
+
