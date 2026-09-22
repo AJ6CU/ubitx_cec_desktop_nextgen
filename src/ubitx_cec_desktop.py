@@ -69,6 +69,7 @@ from scustomtkinter import (
     sCTkButtonPrimary, sCTkButtonSecondary, sCTkButtonTertiary,
     sCTkSMeterBar, sCTkDialContinuous, sCTkSpinbox,
     sCTkSegmentedButton, sCTkSwitch, sCTkComboBox, sCTkEntryPrimary,
+    sCTkOptionMenuPrimary, sCTkMessagebox,
     sCTkCheckBox, sCTkFrequencyDisplay, sCTkSlider,
     sCTkProgressBar, sCTkTableview,
 )
@@ -96,7 +97,7 @@ CW_TONE_HZ = 500
 TURN_ACCUMULATE_SECONDS = 0.6
 
 # The Channels tab.
-RADIO_BANK = "Radio (20 slots)"
+RADIO_SET = "Radio (20 slots)"
 # (heading, width, anchor) for each column of the channel table.
 CHANNEL_COLUMNS = (("#", 40, "center"), ("label", 90, "w"),
                    ("frequency", 130, "e"), ("mode", 84, "center"),
@@ -1049,16 +1050,16 @@ class UbitxCecDesktop(sCTk):
 
     def _build_channels(self, page):
         """
-        One list, one bank selector, and every action working on what is in
+        One list, one set selector, and every action working on what is in
         front of you.
 
         The rig's twenty memory slots and SDR++'s channel sets are shown as
-        banks of one kind. A channel is a channel wherever it is kept, and
+        sets of one kind. A channel is a channel wherever it is kept, and
         tuning to one works the same way: the rig is told, and SDR++ follows.
 
         FIRST PASS: reading and tuning. The rig's memories are read the first
         time this tab is opened (see _on_tab), and fill in as the replies
-        arrive. Editing, writing back to the rig, copying between banks and
+        arrive. Editing, writing back to the rig, copying between sets and
         scanning come next; their buttons are here but disabled, so the
         layout does not move when they arrive.
         """
@@ -1070,8 +1071,8 @@ class UbitxCecDesktop(sCTk):
         # reading starts -- and what the tab is doing, right beside it.
         #
         # The status used to trail off the end of the header, after the
-        # bank's buttons, like a pan handle. Here it has a place of its own,
-        # and the header below is left to the bank alone.
+        # set's buttons, like a pan handle. Here it has a place of its own,
+        # and the header below is left to the set alone.
         now_row = sCTkFrame(page, fg_color="transparent", border_width=0)
         now_row.grid(row=0, column=0, sticky="ew", padx=10, pady=(10, 0))
         sCTkLabelTertiary(now_row, text="now",
@@ -1087,8 +1088,8 @@ class UbitxCecDesktop(sCTk):
         # first and the note after it: at the start of the run the bar has a
         # fixed position, so the note's changing length cannot push it about.
         # See _refresh_channels, which packs the bar before the note.
-        self.bank_note = sCTkLabelTertiary(now_row, text="", font=("Arial", 10))
-        self.bank_note.pack(side="left", padx=(20, 0))
+        self.set_note = sCTkLabelTertiary(now_row, text="", font=("Arial", 10))
+        self.set_note.pack(side="left", padx=(20, 0))
 
         # A MOVING BAR while the rig is read or written. The count in the note
         # is easy to miss -- a read-back starting on its own after a write
@@ -1100,15 +1101,25 @@ class UbitxCecDesktop(sCTk):
         head = sCTkFrame(page, fg_color="transparent", border_width=0)
         head.grid(row=1, column=0, sticky="ew", padx=10, pady=(6, 4))
 
-        sCTkLabelTertiary(head, text="bank",
+        sCTkLabelTertiary(head, text="set",
                           font=("Arial", 11)).pack(side="left", padx=(0, 6))
-        self.bank_picker = sCTkComboBox(
-            head, width=200, command=self._on_bank, values=self._bank_names())
-        self.bank_picker.pack(side="left")
-        self.bank_picker.set(RADIO_BANK)
+        self.set_picker = sCTkComboBox(
+            head, width=200, command=self._on_set_chosen, values=self._set_names())
+        self.set_picker.pack(side="left")
+        self.set_picker.set(RADIO_SET)
 
-        # WHOLE-BANK ACTIONS sit beside the selector, since they act on the
-        # bank it chose rather than on a row. For the rig's bank: read it,
+        # THE SET MENU. Its items follow the set on show -- see
+        # _update_channel_buttons -- and choosing one runs it and puts the
+        # button back to "⋯". An option menu rather than a plain button, so
+        # it opens a themed list with nothing more than the library's own
+        # widget.
+        self.set_menu = sCTkOptionMenuPrimary(
+            head, values=["⋯"], width=54, command=self._on_set_menu)
+        self.set_menu.set("⋯")
+        self.set_menu.pack(side="left", padx=(6, 0))
+
+        # WHOLE-SET ACTIONS sit beside the selector, since they act on the
+        # set it chose rather than on a row. For the rig's set: read it,
         # write the draft, or throw the draft away. They are HIDDEN for a
         # set, not disabled -- a set is never read from or written to the
         # rig, and a control that is always greyed out there looked broken
@@ -1127,7 +1138,45 @@ class UbitxCecDesktop(sCTk):
             self.radio_actions, text="Discard", width=76,
             command=self._discard_draft)
         self.discard_button.pack(side="left", padx=2)
-        self._bank_kind_shown = "radio"
+        self._set_kind_shown = "radio"
+        self._menu_kind_shown = None
+
+        # ASKING FOR A NAME happens here in the header, not in a pop-up:
+        # the field opens beside the set selector, Enter confirms and Escape
+        # cancels. Built once, shown only while in use.
+        self.name_prompt = sCTkFrame(head, fg_color="transparent", border_width=0)
+        self.name_prompt_label = sCTkLabelSecondary(self.name_prompt, text="")
+        self.name_prompt_label.pack(side="left", padx=(12, 6))
+        self.name_entry = sCTkEntryPrimary(self.name_prompt, width=180)
+        self.name_entry.pack(side="left")
+        self.name_entry.bind("<Return>", lambda e: self._name_prompt_ok())
+        self.name_entry.bind("<Escape>", lambda e: self._close_prompts())
+        self.name_ok_button = sCTkButtonPrimary(
+            self.name_prompt, text="OK", width=64, command=self._name_prompt_ok)
+        self.name_ok_button.pack(side="left", padx=(6, 2))
+        sCTkButtonSecondary(self.name_prompt, text="Cancel", width=70,
+                            command=self._close_prompts).pack(side="left", padx=2)
+        self._name_prompt_action = None
+        self._name_prompt_unchanged = None
+
+        # COPY TO asks where, in the same way: a destination set, and for
+        # the rig's set a slot as well, which appears only then.
+        self.copy_prompt = sCTkFrame(head, fg_color="transparent", border_width=0)
+        self.copy_prompt_label = sCTkLabelSecondary(self.copy_prompt, text="")
+        self.copy_prompt_label.pack(side="left", padx=(12, 6))
+        self.copy_target = sCTkOptionMenuPrimary(
+            self.copy_prompt, values=[""], width=170,
+            command=lambda value: self._update_copy_prompt())
+        self.copy_target.pack(side="left")
+        self.copy_slot = sCTkOptionMenuPrimary(
+            self.copy_prompt, values=[f"slot {n}" for n in range(1, CHANNEL_SLOTS + 1)],
+            width=90)
+        self.copy_go = sCTkButtonPrimary(self.copy_prompt, text="Copy", width=64,
+                                         command=self._copy_prompt_ok)
+        self.copy_go.pack(side="left", padx=(6, 2))
+        self.copy_cancel = sCTkButtonSecondary(self.copy_prompt, text="Cancel",
+                                               width=70, command=self._close_prompts)
+        self.copy_cancel.pack(side="left", padx=2)
 
 
 
@@ -1163,15 +1212,15 @@ class UbitxCecDesktop(sCTk):
         # _channel_cell_editable.
         self.channel_table.bind_cell_editable_callback(self._channel_cell_editable)
 
-        # A short message in place of the bank note -- why an edit was
+        # A short message in place of the set note -- why an edit was
         # refused, say -- cleared after a few seconds. See _notify.
         self._channel_notice = None
         self._notice_timer = None
 
-        self._shown_bank = None         # the bank the table was loaded with
+        self._shown_set = None         # the set the table was loaded with
         self._shown_rows = []           # the rows it is showing, as text
         self._shown_editable = None     # the editable columns last set
-        self._selected_channel = None   # index into the current bank
+        self._selected_channel = None   # index into the current set
 
         actions = sCTkFrame(page, fg_color="transparent", border_width=0)
         actions.grid(row=3, column=0, sticky="ew", padx=10, pady=(6, 10))
@@ -1180,8 +1229,8 @@ class UbitxCecDesktop(sCTk):
             actions, text="Tune to", width=84, command=self._tune_to_selected)
         self.tune_button.pack(side="left", padx=(0, 4))
 
-        # THIS BAR ACTS ON THE SELECTED CHANNEL, whichever bank it is in.
-        # For the rig's bank, changes are held as a DRAFT -- marked in the
+        # THIS BAR ACTS ON THE SELECTED CHANNEL, whichever set it is in.
+        # For the rig's set, changes are held as a DRAFT -- marked in the
         # list, not sent -- until Write to radio above: EEPROM has a limited
         # number of write cycles, and overwriting a stored channel should be
         # a deliberate act. For a set, changes are saved at once.
@@ -1190,7 +1239,7 @@ class UbitxCecDesktop(sCTk):
             command=self._store_vfo_here)
         self.store_button.pack(side="left", padx=(12, 2))
         # "Clear" for the rig's fixed slots, "Delete" for a set, whose
-        # channels come and go -- the label follows the bank on show.
+        # channels come and go -- the label follows the set on show.
         self.clear_button = sCTkButtonSecondary(
             actions, text="Clear", width=70, command=self._clear_channel)
         self.clear_button.pack(side="left", padx=2)
@@ -1199,11 +1248,11 @@ class UbitxCecDesktop(sCTk):
         self.add_button = sCTkButtonSecondary(
             actions, text="Add VFO", width=80, command=self._add_vfo)
 
-        # Copying between banks comes with the next step.
+        # Copies the selected channel to any set -- asks where, in the
+        # header. See _open_copy_prompt.
         self.copy_button = sCTkButtonSecondary(actions, text="Copy to…",
-                                               width=86)
+                                               width=86, command=self._open_copy_prompt)
         self.copy_button.pack(side="left", padx=(12, 2))
-        self.copy_button.state("disabled")
 
 
         # slot -> {"freq", "mode", "label", "show_label"}: edits not yet
@@ -1211,21 +1260,21 @@ class UbitxCecDesktop(sCTk):
         self._radio_draft = {}
         self._draft_version = 0
 
-    # -- the banks ---------------------------------------------------------
-    def _bank_names(self):
+    # -- the sets ---------------------------------------------------------
+    def _set_names(self):
         """The rig's memories first, then SDR++'s channel sets by name."""
-        return [RADIO_BANK] + self.channel_sets.names()
+        return [RADIO_SET] + self.channel_sets.names()
 
-    def _bank_entries(self, bank):
+    def _set_entries(self, chosen_set):
         """
-        The channels in a bank, in one shape whichever bank it is:
+        The channels in a set, in one shape whichever set it is:
         {"number", "label", "freq", "mode", "note"}.
 
         The rig's memories come from the model -- the rig reported them.
         SDR++'s sets come from the configuration, which is where they are
         kept.
         """
-        if bank == RADIO_BANK:
+        if chosen_set == RADIO_SET:
             entries = []
             state = self.model.channels_state
             for i, ch in enumerate(self.model.channels):
@@ -1286,13 +1335,13 @@ class UbitxCecDesktop(sCTk):
 
         return [{"number": j + 1, "label": ch["label"],
                  "freq": ch["freq_hz"], "mode": ch["mode"], "note": ch["name"]}
-                for j, ch in enumerate(self.channel_sets.channels(bank))]
+                for j, ch in enumerate(self.channel_sets.channels(chosen_set))]
 
-    def _on_bank(self, choice):
-        """A different bank was chosen."""
+    def _on_set_chosen(self, choice):
+        """A different set was chosen."""
         self._selected_channel = None
         self.channel_table.clear_selection()
-        self._shown_bank = None         # force a full reload
+        self._shown_set = None         # force a full reload
         self.refresh()
 
     # -- the rows ----------------------------------------------------------
@@ -1301,13 +1350,13 @@ class UbitxCecDesktop(sCTk):
         Keeps the list and its note in step with the model.
 
         Called from refresh(). The rows are rebuilt only when what they show
-        has changed -- a different bank, or more replies from the rig --
+        has changed -- a different set, or more replies from the rig --
         because rebuilding twenty rows on every meter update would be waste.
         """
-        bank = self.bank_picker.get()
+        chosen_set = self.set_picker.get()
         m = self.model
 
-        # Whichever bank is showing: a read or write of the rig is happening
+        # Whichever set is showing: a read or write of the rig is happening
         # either way, and the bar says so.
         busy = m.channels_state in ("reading", "writing")
         if busy:
@@ -1315,7 +1364,7 @@ class UbitxCecDesktop(sCTk):
                 # Packed BEFORE the note, so it sits straight after the
                 # frequency and the note follows it.
                 self.channel_progress.pack(side="left", padx=(20, 0),
-                                           before=self.bank_note)
+                                           before=self.set_note)
                 self._progress_shown = True
             total = m.channels_expected or 1
             self.channel_progress.set(min(1.0, m.channels_progress / total))
@@ -1323,11 +1372,11 @@ class UbitxCecDesktop(sCTk):
             self.channel_progress.pack_forget()
             self._progress_shown = False
 
-        if bank == RADIO_BANK:
+        if chosen_set == RADIO_SET:
             if m.channels_state == "unread":
-                self.bank_note.configure(text="the rig's memories -- not read yet")
+                self.set_note.configure(text="the rig's memories -- not read yet")
             elif m.channels_state == "writing":
-                self.bank_note.configure(
+                self.set_note.configure(
                     text=f"writing to the rig -- {m.channels_progress} of "
                          f"{m.channels_expected} "
                          f"{'channel' if m.channels_expected == 1 else 'channels'}")
@@ -1338,11 +1387,11 @@ class UbitxCecDesktop(sCTk):
                 # each of which is two reads -- its text and its show flag.
                 done = m.channels_done
                 if done["Freq"] < CHANNEL_SLOTS:
-                    self.bank_note.configure(
+                    self.set_note.configure(
                         text=f"reading channels -- {done['Freq']} of {CHANNEL_SLOTS}")
                 else:
                     labels = (done["Label"] + done["ShowLabel"]) // 2
-                    self.bank_note.configure(
+                    self.set_note.configure(
                         text=f"reading labels -- {labels} of {LABEL_SLOTS}")
             else:
                 used = sum(1 for i in range(len(m.channels))
@@ -1356,30 +1405,30 @@ class UbitxCecDesktop(sCTk):
                     text += (f" -- {len(m.channels_write_failed)} "
                              f"{'write was' if len(m.channels_write_failed) == 1 else 'writes were'}"
                              f" not acknowledged; the list shows what the rig holds")
-                self.bank_note.configure(text=text)
+                self.set_note.configure(text=text)
         else:
             # The application's, not SDR++'s, since the sets moved to their
             # own file -- see channel_sets.py.
-            self.bank_note.configure(text="a channel set -- saved as you edit")
+            self.set_note.configure(text="a channel set -- saved as you edit")
 
         # A notice, while it lasts, takes the note's place.
         if self._channel_notice:
-            self.bank_note.configure(text=self._channel_notice)
+            self.set_note.configure(text=self._channel_notice)
 
         self._update_channel_buttons()
 
         rows = [[str(e["number"]), e["label"],
                  self.model.formatted(e["freq"]) if e["freq"] else "",
                  e["mode"], e["note"]]
-                for e in self._bank_entries(bank)]
+                for e in self._set_entries(chosen_set)]
 
-        # A different bank, or a different number of rows, reloads the table.
+        # A different set, or a different number of rows, reloads the table.
         # Otherwise only the rows that changed are updated, IN PLACE: during a
         # read the list changes with every reply, and rebuilding all hundred
         # cells each time is slow and flickers.
-        if bank != self._shown_bank or len(rows) != len(self._shown_rows):
+        if chosen_set != self._shown_set or len(rows) != len(self._shown_rows):
             self.channel_table.load_dataset(rows)
-            self._shown_bank = bank
+            self._shown_set = chosen_set
         else:
             for index, (new, old) in enumerate(zip(rows, self._shown_rows)):
                 if new != old:
@@ -1394,7 +1443,7 @@ class UbitxCecDesktop(sCTk):
         self.channel_table.select_row(index)
         self._update_channel_buttons()
 
-    # -- editing the rig's bank -------------------------------------------
+    # -- editing the rig's set -------------------------------------------
     def _radio_channel(self, slot):
         """A slot as it currently stands: the draft if edited, else the rig's."""
         if slot in self._radio_draft:
@@ -1406,8 +1455,8 @@ class UbitxCecDesktop(sCTk):
                 "label": ch["label"] or "", "show_label": ch["show_label"]}
 
     def _can_edit_radio(self):
-        """True when the rig's bank is showing, fully read, with a slot chosen."""
-        return (self.bank_picker.get() == RADIO_BANK
+        """True when the rig's set is showing, fully read, with a slot chosen."""
+        return (self.set_picker.get() == RADIO_SET
                 and self.model.channels_state == "read"
                 and self._selected_channel is not None)
 
@@ -1419,9 +1468,9 @@ class UbitxCecDesktop(sCTk):
         self.refresh()
 
     def _set_shown(self):
-        """The channel set on show, or None when it is the rig's bank."""
-        bank = self.bank_picker.get()
-        return None if bank == RADIO_BANK else bank
+        """The channel set on show, or None when it is the rig's set."""
+        chosen_set = self.set_picker.get()
+        return None if chosen_set == RADIO_SET else chosen_set
 
     def _store_vfo_here(self):
         """
@@ -1429,7 +1478,7 @@ class UbitxCecDesktop(sCTk):
 
         The receive VFO's own frequency -- what the rig tunes to when it
         recalls the channel -- and its mode. The label is kept. Into the draft
-        for the rig's bank; saved at once for a set.
+        for the rig's set; saved at once for a set.
         """
         m = self.model
         freq, mode = m.frequency(m.rx_vfo), m.mode_of(m.rx_vfo)
@@ -1483,6 +1532,205 @@ class UbitxCecDesktop(sCTk):
         self._selected_channel = len(self.channel_sets.channels(name)) - 1
         self.refresh()
         self.channel_table.select_row(self._selected_channel)
+
+    # -- the set menu ------------------------------------------------------
+    def _on_set_menu(self, choice):
+        """An item was chosen from the set menu."""
+        self.set_menu.set("⋯")          # back to rest; the item runs below
+        current = self._set_shown()
+        if choice == "New set…":
+            self._ask_name("New set", "", self._make_new_set)
+        elif choice == "Duplicate…" and current:
+            self._ask_name(f"Copy '{current}' as", f"{current} copy",
+                           lambda name: self._make_duplicate(current, name))
+        elif choice == "Rename…" and current:
+            self._ask_name(f"Rename '{current}' to", current,
+                           lambda name: self._make_rename(current, name),
+                           unchanged=current)
+        elif choice == "Delete set…" and current:
+            self._delete_set(current)
+        elif choice == "Save as a set…":
+            self._ask_name("Save the rig's memories as", "Radio memories",
+                           self._save_rig_as_set)
+
+    def _ask_name(self, prompt, initial, action, unchanged=None):
+        """
+        Opens the name field in the header; `action(name)` runs on OK.
+
+        `unchanged` is a name that may be confirmed as it stands -- a set's
+        own name when renaming it -- which then simply closes the field.
+        """
+        self._close_prompts()
+        self._name_prompt_action = action
+        self._name_prompt_unchanged = unchanged
+        self.name_prompt_label.configure(text=prompt)
+        self.name_entry.delete(0, "end")
+        if initial:
+            self.name_entry.insert(0, initial)
+        self.name_prompt.pack(side="left")
+        self.name_entry.focus_set()
+        self.name_entry.select_range(0, "end")
+
+    def _name_prompt_ok(self):
+        """
+        Checks the name, and runs the action if it will do.
+
+        A name that will not do -- empty, or already a set's -- keeps the
+        field open and says why, rather than closing and losing the typing.
+        """
+        name = self.name_entry.get()
+        # Confirming a set's own name when renaming it is not a clash --
+        # there is simply nothing to do.
+        if self._name_prompt_unchanged is not None and \
+                name.strip() == self._name_prompt_unchanged:
+            self._close_prompts()
+            return
+        problem = self.channel_sets.check_new_name(name, reserved=(RADIO_SET,))
+        if problem:
+            self._notify(problem)
+            self.name_entry.focus_set()
+            return
+        action = self._name_prompt_action
+        self._close_prompts()
+        if action:
+            action(name)
+
+    def _close_prompts(self):
+        self.name_prompt.pack_forget()
+        self.copy_prompt.pack_forget()
+        self._name_prompt_action = None
+
+    def _show_set(self, name):
+        """Refreshes the set list and shows `name`."""
+        self.set_picker.configure(values=self._set_names())
+        self.set_picker.set(name)
+        self._on_set_chosen(name)
+
+    def _make_new_set(self, name):
+        self._show_set(self.channel_sets.create_set(name))
+
+    def _make_duplicate(self, current, name):
+        self._show_set(self.channel_sets.duplicate_set(current, name))
+
+    def _make_rename(self, current, name):
+        self._show_set(self.channel_sets.rename_set(current, name))
+
+    def _delete_set(self, name):
+        """
+        Deletes a whole set, after asking. It cannot be undone, so this is
+        the one action here that stops to confirm -- in a proper dialog, not
+        the header, where a confirmation would be too easy to click through.
+        """
+        count = len(self.channel_sets.channels(name))
+        sure = sCTkMessagebox.askyesno(
+            "Delete set",
+            f"Delete the set '{name}' and its {count} "
+            f"{'channel' if count == 1 else 'channels'}? This cannot be undone.",
+            yes_text="Delete", no_text="Keep it", master=self)
+        if sure:
+            self.channel_sets.delete_set(name)
+            self._show_set(RADIO_SET)
+
+    def _save_rig_as_set(self, name):
+        """
+        Copies the rig's twenty slots into a new set -- a backup of its
+        memories in the channel file.
+
+        What the RIG holds, not the draft: this is a record of the radio,
+        and an unwritten edit is not in it yet. Empty slots are left out;
+        each channel's name records the slot it came from.
+        """
+        channels = []
+        for i, ch in enumerate(self.model.channels):
+            if ch is None or not ch["freq"]:
+                continue
+            channels.append({"freq_hz": ch["freq"], "mode": ch["mode"],
+                             "label": ch["label"] or "", "name": f"rig slot {i + 1}"})
+        self._show_set(self.channel_sets.create_set(name, channels))
+
+    # -- copying a channel ---------------------------------------------------
+    def _source_channel(self, index):
+        """
+        The channel at `index` in the set on show, in one shape whichever
+        set it is: {"freq", "mode", "label", "name"}.
+        """
+        if index is None:
+            return None
+        name = self._set_shown()
+        if name is None:
+            ch = self._radio_channel(index)
+            return {"freq": ch["freq"], "mode": ch["mode"],
+                    "label": ch["label"], "name": ""}
+        channels = self.channel_sets.channels(name)
+        if not 0 <= index < len(channels):
+            return None
+        ch = channels[index]
+        return {"freq": ch["freq_hz"], "mode": ch["mode"],
+                "label": ch["label"], "name": ch["name"]}
+
+    def _open_copy_prompt(self):
+        """Asks where the selected channel should go."""
+        source = self._source_channel(self._selected_channel)
+        if not source or not source["freq"]:
+            return
+        self._close_prompts()
+        targets = self.channel_sets.names()
+        # The rig's set only once it has been read: a copy there goes into
+        # the draft, which sits on top of what the rig reported.
+        if self.model.channels_state == "read":
+            targets = [RADIO_SET] + targets
+        if not targets:
+            self._notify("there is no set to copy to -- make a set first")
+            return
+        self.copy_prompt_label.configure(
+            text=f"Copy {self.model.formatted(source['freq'])} to")
+        self.copy_target.configure(values=targets)
+        current = self.set_picker.get()
+        self.copy_target.set(next((t for t in targets if t != current), targets[0]))
+        self._update_copy_prompt()
+        self.copy_prompt.pack(side="left")
+
+    def _update_copy_prompt(self):
+        """The slot choice appears only when the rig's set is the target."""
+        if self.copy_target.get() == RADIO_SET:
+            # The first empty slot, so a copy does not land on a channel by
+            # default. Slot 1 if every slot is in use.
+            empty = next((i for i in range(CHANNEL_SLOTS)
+                          if not self._radio_channel(i)["freq"]), 0)
+            self.copy_slot.set(f"slot {empty + 1}")
+            self.copy_slot.pack(side="left", padx=(6, 0), before=self.copy_go)
+        else:
+            self.copy_slot.pack_forget()
+
+    def _copy_prompt_ok(self):
+        """
+        Copies the selected channel to the chosen set.
+
+        Into a set: added at the end and saved. Into the rig's set: into the
+        DRAFT for the chosen slot, like any other edit there -- written only
+        with Write to radio -- and made to fit the rig: the label cut to five
+        characters, or dropped for slots 10 to 20, and a mode the rig does
+        not have becoming DFT.
+        """
+        source = self._source_channel(self._selected_channel)
+        target = self.copy_target.get()
+        if not source:
+            self._close_prompts()
+            return
+        if target == RADIO_SET:
+            slot = int(self.copy_slot.get().split()[-1]) - 1
+            mode = source["mode"] if source["mode"] in CHANNEL_MODE_CHOICES else "DFT"
+            label = ("".join(ch for ch in source["label"] if 32 <= ord(ch) < 127)
+                     .strip()[:5] if slot < LABEL_SLOTS else "")
+            self._close_prompts()
+            self._change_draft(slot, freq=source["freq"], mode=mode,
+                               label=label, show_label=bool(label))
+            self._notify(f"copied to slot {slot + 1} -- Write to radio to keep it")
+            return
+        self.channel_sets.add(target, {"freq_hz": source["freq"], "mode": source["mode"],
+                                       "label": source["label"], "name": source["name"]})
+        self._close_prompts()
+        self._notify(f"copied to '{target}'")
 
     # -- editing in the table --------------------------------------------
     def _channel_cell_editable(self, row, column):
@@ -1543,7 +1791,7 @@ class UbitxCecDesktop(sCTk):
         return False
 
     def _notify(self, text, seconds=6):
-        """Shows a short message in place of the bank note, for a few seconds."""
+        """Shows a short message in place of the set note, for a few seconds."""
         self._channel_notice = text
         if self._notice_timer is not None:
             self.after_cancel(self._notice_timer)
@@ -1561,7 +1809,7 @@ class UbitxCecDesktop(sCTk):
         """
         A cell changed in the table.
 
-        For the rig's bank, into the draft, to be written later. For a set,
+        For the rig's set, into the draft, to be written later. For a set,
         saved at once.
         """
         name = self._set_shown()
@@ -1624,25 +1872,43 @@ class UbitxCecDesktop(sCTk):
             btn.state("normal" if editing else "disabled")
         self.clear_button.configure(text="Delete" if in_set else "Clear")
 
-        # What belongs to one kind of bank is HIDDEN for the other, not
+        # What belongs to one kind of set is HIDDEN for the other, not
         # disabled. Repacked only when the kind changes.
         kind = "set" if in_set else "radio"
-        if kind != self._bank_kind_shown:
+        if kind != self._set_kind_shown:
             if in_set:
                 self.radio_actions.pack_forget()
                 self.add_button.pack(side="left", padx=2, before=self.copy_button)
             else:
                 self.add_button.pack_forget()
                 self.radio_actions.pack(side="left", padx=(10, 0),
-                                        after=self.bank_picker)
-            self._bank_kind_shown = kind
+                                        after=self.set_menu)
+            self._set_kind_shown = kind
         # Reading waits while the rig is busy reading or writing.
         busy = self.model.channels_state in ("reading", "writing")
         self.reread_button.state("disabled" if busy else "normal")
 
+        # The set menu offers what applies to the set on show. Saving the
+        # rig's memories as a set needs them read first.
+        menu_kind = (kind, self.model.channels_state == "read")
+        if menu_kind != self._menu_kind_shown:
+            if in_set:
+                items = ["New set…", "Duplicate…", "Rename…", "Delete set…"]
+            else:
+                items = ["New set…"]
+                if self.model.channels_state == "read":
+                    items.append("Save as a set…")
+            self.set_menu.configure(values=items)
+            self.set_menu.set("⋯")
+            self._menu_kind_shown = menu_kind
+
+        # Copying needs a channel with a frequency to copy.
+        source = self._source_channel(self._selected_channel) if chosen else None
+        self.copy_button.state("normal" if source and source["freq"] else "disabled")
+
         # Set on the table itself, so a cell that may not be changed never
         # opens an editor at all -- rather than opening one and refusing.
-        # The rig's bank once it is fully read; a set at any time, and its
+        # The rig's set once it is fully read; a set at any time, and its
         # notes too, which for a set is the channel's name.
         if in_set:
             editable = [CHANNEL_LABEL_COLUMN, CHANNEL_FREQ_COLUMN,
@@ -1679,7 +1945,7 @@ class UbitxCecDesktop(sCTk):
         DFT means "whatever the rig was in", and SDR++ sets may hold modes the
         rig does not have.
         """
-        entries = self._bank_entries(self.bank_picker.get())
+        entries = self._set_entries(self.set_picker.get())
         if not 0 <= index < len(entries):
             return
         entry = entries[index]

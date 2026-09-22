@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 """
-ChannelSets -- the application's own banks of channels.
+ChannelSets -- the application's own sets of channels.
 
 WHAT THEY ARE
 
@@ -204,6 +204,54 @@ class ChannelSets:
         channels = self._sets.get(set_name)
         if channels is not None and 0 <= index < len(channels):
             del channels[index]
+            self.save()
+
+    # ------------------------------------------------------------------
+    # Whole sets -- every change is saved
+    # ------------------------------------------------------------------
+    def check_new_name(self, set_name, reserved=()):
+        """
+        Why a name cannot be used for a new or renamed set -- or None if it
+        can.
+
+        `reserved` holds names that are taken although no set has them: the
+        rig's own set shares the set selector with the sets, so a set
+        called the same would be indistinguishable from it.
+        """
+        name = _clean_text(set_name)
+        if not name:
+            return "a set needs a name"
+        if name in self._sets or name in reserved:
+            return f"there is already a set called '{name}'"
+        return None
+
+    def create_set(self, set_name, channels=()):
+        """A new set -- empty, or holding copies of `channels` -- and saves."""
+        name = _clean_text(set_name)
+        self._sets[name] = [_clean_channel(ch) for ch in channels]
+        self.save()
+        return name
+
+    def duplicate_set(self, set_name, new_name):
+        """A copy of a set under a new name, and saves."""
+        return self.create_set(new_name, self._sets.get(set_name, []))
+
+    def rename_set(self, set_name, new_name):
+        """
+        Renames a set, keeping its place in the order, and saves.
+
+        Rebuilt rather than popped and re-added, which would move the set to
+        the end of the set selector's list.
+        """
+        new = _clean_text(new_name)
+        self._sets = {(new if name == set_name else name): channels
+                      for name, channels in self._sets.items()}
+        self.save()
+        return new
+
+    def delete_set(self, set_name):
+        """Removes a whole set, and saves."""
+        if self._sets.pop(set_name, None) is not None:
             self.save()
 
     def save(self):
