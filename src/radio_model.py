@@ -52,6 +52,22 @@ DFT only used for EEPROM channels, 1 reserved for other
 
 MODES = ("DFT", "ERR", "LSB", "USB", "CWL", "CWU")
 
+# The rig's memory channels. All twenty carry a frequency and a mode; only the
+# first nine carry a label, because the tenth label slot is broken in the v2
+# CEC firmware (see EEPROM.py). Slot 10 onward is still a full channel -- it
+# just has no name.
+# Where the conventional sideband changes: lower below, upper above. Used
+# wherever the application has to CHOOSE a sideband -- a channel stored as DFT,
+# or CW arriving from SDR++, which has no CWL/CWU distinction.
+#
+# 10 MHz rather than "20 m and up": the two agree on every band but 30 m
+# (10.1 MHz), which has no voice allocation and whose digital modes run on
+# USB. It is the usual convention, and the uBITX firmware's own default.
+SIDEBAND_SPLIT_HZ = 10_000_000
+
+CHANNEL_SLOTS = 20
+LABEL_SLOTS = 9
+
 
 class RadioModel:
     """
@@ -107,7 +123,31 @@ class RadioModel:
         self.tx_inhibit = False
         self.transmitting = False
 
+        # --- the rig's memory channels ------------------------------------
+        # One entry per slot, None until read. Read the first time the
+        # Channels tab is opened, not at startup: the startup dump is already
+        # long, and this is 38 more replies for something you may not look at.
+        #
+        # Each entry: {"freq": int, "mode": str, "label": str or None,
+        #              "show_label": bool}. label is None for slots 10-20,
+        # which have no label to show.
+        self.channels = [None] * CHANNEL_SLOTS
+        self.channels_state = "unread"      # "unread", "reading" or "read"
+        self.channels_progress = 0          # replies received so far
+        self.channels_expected = 0          # replies a full read produces
+        # Reads the rig never answered, even after retrying: (category, slot).
+        # Kept so the tab can say so, rather than showing those slots as
+        # empty -- which would be the interface guessing.
+        self.channels_failed = []
+        # Reads finished so far, by kind -- so progress can be shown in
+        # channels and labels, which is how the operator thinks of them,
+        # rather than as a count of 38 reads.
+        self.channels_done = {"Freq": 0, "Label": 0, "ShowLabel": 0}
+
         self.cw_tone = 600             # Hz. The TX offset in a CW mode.
+        # Added to the tone to give the full offset. Reported by the rig from
+        # its EEPROM (vh_); zero unless the operator has trimmed it.
+        self.cw_tweak = 0
 
         # THE RIG ROUNDS EVERY FREQUENCY IT IS GIVEN to the active tuning
         # preset. Ask for 14.024.510 with the preset at 100 Hz and it stores
@@ -355,6 +395,32 @@ class RadioModel:
         else:
             self.vfo_b = hz
 
+    def cw_tx_offset(self, mode):
+        """
+        How far the transmit frequency sits from the VFO in a CW mode, signed.
+
+        THE SIGN DEPENDS ON THE SIDEBAND. CWL transmits above the dial and
+        CWU below it:
+
+            CWL   tx = vfo + (tone + tweak)
+            CWU   tx = vfo - (tone + tweak)
+
+        This is what the previous interface did against the real rig -- its
+        theVFO.set_CW_OffsetforTX -- and it is the ONE place the rule lives.
+        The first version here subtracted the tone for both sidebands, so
+        every CWL transmit frequency on screen was out by twice the tone: a
+        500 Hz tone showed a transmit frequency 1 kHz from where the rig
+        actually transmitted.
+
+        Zero outside CW.
+        """
+        magnitude = int(self.cw_tone) + int(self.cw_tweak)
+        if mode == "CWL":
+            return magnitude
+        if mode == "CWU":
+            return -magnitude
+        return 0
+
     def role_frequency(self, role):
         """
         What a role is actually on, offsets included.
@@ -374,8 +440,8 @@ class RadioModel:
         # concerns receive.
         if role == "tx" and self.rit and not self.split and self.rit_base_hz:
             hz = self.rit_base_hz
-        if role == "tx" and self.mode_of(which).startswith("CW"):
-            return hz - self.cw_tone
+        if role == "tx":
+            return hz + self.cw_tx_offset(self.mode_of(which))
         return hz
 
     def tuning_step_hz(self):
@@ -434,9 +500,9 @@ class RadioModel:
         the VFO that is not primary before split has been confirmed -- when
         the "tx" role would still resolve to the active VFO.
         """
-        if self.mode_of(which).startswith("CW"):
-            return int(displayed_hz) + self.cw_tone
-        return int(displayed_hz)
+        # The inverse of role_frequency: what is shown has the offset added,
+        # so what is written has it taken away again.
+        return int(displayed_hz) - self.cw_tx_offset(self.mode_of(which))
 
     def set_role_frequency(self, role, hz):
         """
@@ -567,7 +633,7 @@ class RadioModel:
             if not self.split:
                 return "follows rx"
             if self.mode_of(self.tx_vfo).startswith("CW"):
-                return f"−{self.cw_tone} Hz cw tone"
+                return self.cw_offset_note(self.mode_of(self.tx_vfo))
             return ""
         if self.rit and self.rit_base_hz:
             base = self.formatted(self.rit_base_hz)
@@ -587,6 +653,55 @@ class RadioModel:
             tx = self.formatted(self.role_frequency("tx"))
             return f"rit {self.rit_offset:+d} Hz · tx stays at {tx}"
         return ""
+
+    def cw_offset_note(self, mode):
+        """
+        The CW offset in words, with its real sign -- "+500 Hz cw tone" in
+        CWL, "\u2212500 Hz cw tone" in CWU.
+
+        Every note that names the offset uses this. They used to write the
+        minus sign themselves, which was only right for CWU.
+        """
+        offset = self.cw_tx_offset(mode)
+        if offset == 0:
+            return ""
+        sign = "+" if offset > 0 else "\u2212"
+        return f"{sign}{abs(offset)} Hz cw tone"
+
+    # ------------------------------------------------------------------
+    # Memory channels -- written by the link as the rig reports each slot
+    # ------------------------------------------------------------------
+    def _channel(self, index):
+        """The entry for a slot, created on first report."""
+        if self.channels[index] is None:
+            self.channels[index] = {"freq": 0, "mode": "DFT",
+                                    "label": None, "show_label": False}
+        return self.channels[index]
+
+    def set_channel_freq_mode(self, index, freq, mode):
+        if 0 <= index < CHANNEL_SLOTS:
+            entry = self._channel(index)
+            entry["freq"], entry["mode"] = int(freq), mode
+
+    def set_channel_label(self, index, label):
+        # Only the first nine slots HAVE a label; anything reported beyond
+        # them is not one.
+        if 0 <= index < LABEL_SLOTS:
+            self._channel(index)["label"] = str(label).strip()
+
+    def set_channel_show_label(self, index, show):
+        if 0 <= index < LABEL_SLOTS:
+            self._channel(index)["show_label"] = bool(show)
+
+    @staticmethod
+    def default_sideband(hz):
+        """The conventional sideband for a frequency: "USB" or "LSB"."""
+        return "USB" if int(hz) >= SIDEBAND_SPLIT_HZ else "LSB"
+
+    def channel_is_empty(self, index):
+        """True for a slot holding no frequency -- never written."""
+        entry = self.channels[index]
+        return entry is None or not entry["freq"]
 
     def split_delta_hz(self):
         """How far transmit sits from receive. Zero when simplex."""

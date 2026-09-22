@@ -2,6 +2,8 @@ from time import sleep
 from timeit import default_timer as timer
 import serial
 
+import EEPROM
+
 MODES = ("DFT", "ERR", "LSB", "USB", "CWL", "CWU")
 
 # How long a borrow-write-return step waits for its confirmation before the
@@ -20,6 +22,37 @@ TX_WRITE_TIMEOUT_MS = 2000
 # mode of the VFO it just switched back to -- to arrive and be attributed to
 # the sequence they belong to.
 FOLLOW_UP_DELAY_MS = 250
+
+# Spacing between the memory reads when the Channels tab fills in. The code
+# this replaces sent all 38 at once, each behind the throttle's blocking
+# sleep, and the interface froze for a second and a half behind a "Loading"
+# window. Paced through the event loop instead, nothing freezes, and the tab
+# can show its progress as the replies come in.
+CHANNEL_READ_PACE_MS = 50
+
+# ONE READ AT A TIME. The rig answers memory reads without saying which slot
+# an answer is for, so replies are matched to requests by order. The first
+# version sent all 38 on a timer, and when the Nano dropped two of them --
+# busy, as it is when commands arrive mid-work -- every reply after the gap
+# was filed against the wrong slot. Labels turned up as frequencies:
+#
+#     could not decode Freq slot 18: 'mark1'
+#
+# and every channel after the lost read showed another channel's frequency,
+# plausibly. Now the next read waits for the last reply; one that never comes
+# is withdrawn from the queue and retried, so a lost reply cannot move any
+# other slot.
+CHANNEL_READ_TIMEOUT_MS = 800
+CHANNEL_READ_RETRIES = 2
+
+# What a channel frequency may sensibly be -- globalvars' FREQ_BOUNDS. A slot
+# that was never written holds erased EEPROM, all ones, which decodes to
+# 536,870,911 Hz; anything outside this range is treated as empty.
+CHANNEL_FREQ_MAX_HZ = 60_000_000
+
+# The mode numbers the rig actually uses. 1 is reserved and 6 and 7 do not
+# exist, so they are garbage, not modes.
+CHANNEL_MODES = {0: "DFT", 2: "LSB", 3: "USB", 4: "CWL", 5: "CWU"}
 
 # How long to wait after a confirmation before sending the next command of a
 # sequence.
@@ -599,7 +632,13 @@ class uBITX_Link:
         def vh_UX_Set_CW_Tweak(self, buffer):
             value = self._extract_value(buffer, 10, len(buffer) - 3)
             print("CW Tweak: ", value)
-            # self.cwTX_Tweak = int(value)
+            # Part of the CW transmit offset -- see RadioModel.cw_tx_offset.
+            # Discarded until now; harmless while the rig reports 0, wrong the
+            # moment an operator trims it.
+            try:
+                self._model.cw_tweak = int(value)
+            except (TypeError, ValueError):
+                pass
 
         #
         #   The "vo" if 1, then turn on IFS and use initial value
@@ -909,7 +948,11 @@ class uBITX_Link:
 
         def sh_UX_Get_Memory(self, buffer):
             value = self._extract_value(buffer, 10, len(buffer) - 3)
-            print("sh_UX_Get_Memory", self.connection.lenMemoryQueue())
+            # _radio_link, NOT connection. This handler lives in the reader
+            # class, which has no `connection` -- the line here called
+            # self.connection.lenMemoryQueue() and would have raised on the
+            # first memory reply, had anything asked for one.
+            self._radio_link._on_memory_reply(value)
             # try:
             #     value = self._extract_value(buffer, 10, len(buffer) - 3)
             #     # print("sh_UX_Get_Memory", self.connection.lenMemoryQueue())
@@ -1893,6 +1936,193 @@ class uBITX_Link:
             self.Toggle_Split()
             self.root.after(STEP_SETTLE_MS,
                             lambda: self._begin_borrowed_write(vfo_hz))
+
+    # ------------------------------------------------------------------
+    # Memory channels
+    # ------------------------------------------------------------------
+    def read_channels(self):
+        """
+        Reads the rig's memory channels into the model, one read at a time.
+
+        38 reads: twenty frequency-and-mode slots, then nine labels and nine
+        label flags. See CHANNEL_READ_TIMEOUT_MS for why one at a time.
+        """
+        if self._model.channels_state == "reading":
+            return
+
+        requests = []
+        for category, key in (("Freq", "channel_freq_Mode"),
+                              ("Label", "channel_Label"),
+                              ("ShowLabel", "channel_ShowLabel")):
+            spec = EEPROM.Mem_Address[key]
+            base = spec[EEPROM.lsb]
+            for slot in range(spec[EEPROM.totalSlots]):
+                requests.append((category, slot, [
+                    self.toRadioCommandDict["TS_CMD_READMEM"],
+                    base,
+                    spec[EEPROM.msb],
+                    spec[EEPROM.memLength],
+                    spec[EEPROM.charFlag]]))
+                base += spec[EEPROM.memOffset]
+
+        self._channel_requests = requests
+        self._channel_attempts = 0
+        self._channel_timer = None
+        model = self._model
+        model.channels_state = "reading"
+        model.channels_progress = 0
+        model.channels_expected = len(requests)
+        model.channels_failed = []
+        model.channels_done = {"Freq": 0, "Label": 0, "ShowLabel": 0}
+        model.changed()
+        self._send_next_channel_request()
+
+    def _send_next_channel_request(self):
+        """
+        Sends the read at the head of the list, and waits for its reply.
+
+        The request stays at the head until it is answered or given up on, so
+        a retry sends exactly the same read.
+        """
+        requests = getattr(self, "_channel_requests", None)
+        if not requests:
+            self._model.channels_state = "read"
+            self._model.changed()
+            return
+        category, slot, command = requests[0]
+        self.memoryQueue.append(category)
+        self.sendCommandToMCU(bytes(command))
+        self._channel_timer = self.root.after(CHANNEL_READ_TIMEOUT_MS,
+                                              self._channel_read_timed_out)
+
+    def _channel_read_timed_out(self):
+        """
+        The rig did not answer. Withdraw the request, then retry or give up.
+
+        WITHDRAWN FROM THE QUEUE FIRST. Its entry is still there, and left in
+        place it would claim the next reply -- the misalignment this whole
+        arrangement exists to prevent.
+        """
+        self._channel_timer = None
+        if self.memoryQueue:
+            self.memoryQueue.pop()
+        category, slot, _ = self._channel_requests[0]
+
+        self._channel_attempts += 1
+        if self._channel_attempts <= CHANNEL_READ_RETRIES:
+            print(f"[chan] no reply for {category} slot {slot + 1}; "
+                  f"retrying ({self._channel_attempts} of {CHANNEL_READ_RETRIES})")
+            self._send_next_channel_request()
+            return
+
+        print(f"[chan] giving up on {category} slot {slot + 1}")
+        self._model.channels_failed.append((category, slot))
+        self._finish_channel_request()
+
+    def _finish_channel_request(self):
+        """This read is done with, answered or not. On to the next."""
+        category = self._channel_requests[0][0]
+        self._model.channels_done[category] += 1
+        self._channel_requests.pop(0)
+        self._channel_attempts = 0
+        self._model.channels_progress += 1
+        self._model.changed()
+        self.root.after(CHANNEL_READ_PACE_MS, self._send_next_channel_request)
+
+    def _on_memory_reply(self, value):
+        """
+        The answer to the read now outstanding, decoded into the model.
+
+        Only one read is ever outstanding, so the reply belongs to the request
+        at the head of the list. One that arrives with nothing outstanding --
+        a straggler from a read already given up on -- is ignored rather than
+        filed against whatever is sent next.
+        """
+        if not self.memoryQueue or not getattr(self, "_channel_requests", None):
+            print("[chan] a memory reply arrived with nothing outstanding; ignored")
+            return
+        category = self.memoryQueue.pop(0)
+        if self._channel_timer is not None:
+            self.root.after_cancel(self._channel_timer)
+            self._channel_timer = None
+
+        expected, slot, _ = self._channel_requests[0]
+        if category != expected:
+            print(f"[chan] reply for {category} while waiting on {expected}; ignored")
+            return
+
+        decode = {"Freq": self._decode_channel_freq,
+                  "Label": self._decode_channel_label,
+                  "ShowLabel": self._decode_channel_show_label}[category]
+        try:
+            decode(slot, value)
+        except (TypeError, ValueError) as err:
+            print(f"[chan] could not decode {category} slot {slot + 1}: "
+                  f"{value!r} ({err})")
+        self._finish_channel_request()
+
+    # -- decoding. Every value from EEPROM is distrusted: a slot that was
+    # -- never written holds whatever the chip was left with.
+    def _decode_channel_freq(self, slot, value):
+        """
+        32 bits: the frequency in the low 29, the mode number in the top 3.
+
+        An unwritten slot reads as erased EEPROM -- all ones -- which decodes
+        to 536 MHz in mode 7. A frequency out of range makes the slot EMPTY,
+        whatever the mode says. A believable frequency with a mode number the
+        rig does not use keeps the frequency and shows the mode as unknown.
+        """
+        raw = int(str(value).strip(), 16)
+        freq = raw & 0x1FFFFFFF
+        number = (raw >> 29) & 0x7
+        if not 0 < freq <= CHANNEL_FREQ_MAX_HZ:
+            self._model.set_channel_freq_mode(slot, 0, "")
+            return
+        self._model.set_channel_freq_mode(slot, freq, CHANNEL_MODES.get(number, "?"))
+
+    def _decode_channel_label(self, slot, value):
+        """
+        Five characters -- printable ones only.
+
+        Erased EEPROM reads as 0xFF bytes, and a label written short is padded
+        with NULs; neither is text. Everything outside printable ASCII is
+        removed, so a slot never written shows no label rather than a row of
+        boxes.
+        """
+        text = "".join(ch for ch in str(value) if 32 <= ord(ch) < 127)
+        self._model.set_channel_label(slot, text.strip())
+
+    def _decode_channel_show_label(self, slot, value):
+        """One byte: zero means do not show the label, anything else show it."""
+        text = str(value)
+        self._model.set_channel_show_label(slot, bool(text) and ord(text[0]) != 0)
+
+    def tune_to(self, hz, mode=None):
+        """
+        Puts receive on a frequency, and in a mode, as one operation.
+
+        THE MODE WAITS FOR THE RIG TO SETTLE. Sent straight after the
+        frequency, it was dropped: the Nano is still carrying out the
+        frequency write, and a command arriving then is lost -- the rig
+        answered the frequency and never the mode, so tuning to a USB channel
+        from CWL arrived in CWL. The same behaviour the transmit borrow paces
+        for, with the same interval.
+
+        The mode is skipped when the rig is already in it, and when it is not
+        one the rig has -- a channel may say DFT, `?`, or an SDR++ mode.
+        """
+        self.set_role_frequency("rx", hz)
+        # DFT is "the default for the band", not "no mode". Treated as no
+        # mode, it left the rig in whatever it was last in -- a DFT channel
+        # on 20 m tuned from a CWL one stayed in CWL.
+        if mode == "DFT":
+            mode = self._model.default_sideband(hz)
+        if mode not in ("LSB", "USB", "CWL", "CWU"):
+            return
+        if mode == self._model.mode_of(self._model.rx_vfo):
+            return
+        self.root.after(STEP_SETTLE_MS,
+                        lambda m=mode: self.set_mode_everywhere(m))
 
     def copy_active_to_other(self):
         """

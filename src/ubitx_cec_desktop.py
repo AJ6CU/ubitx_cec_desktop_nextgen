@@ -55,8 +55,11 @@ import time
 
 import customtkinter as ctk
 
-from radio_model import RadioModel
+import globalvars as gv
+from configuration import ConfigurationManager
+from radio_model import RadioModel, LABEL_SLOTS, CHANNEL_SLOTS
 from stub_radio import StubRadio
+from sdr_link import SDR_Link
 from ubitx_link import uBITX_Link
 
 from scustomtkinter import (
@@ -65,7 +68,7 @@ from scustomtkinter import (
     sCTkButtonPrimary, sCTkButtonSecondary, sCTkButtonTertiary,
     sCTkSMeterBar, sCTkDialContinuous, sCTkSpinbox,
     sCTkSegmentedButton, sCTkSwitch, sCTkComboBox, sCTkEntryPrimary,
-    sCTkCheckBox, sCTkFrequencyDisplay,
+    sCTkCheckBox, sCTkFrequencyDisplay, sCTkSlider, sCTkScrollableFrame,
 )
 
 # ---------------------------------------------------------------------------
@@ -89,6 +92,11 @@ CW_TONE_HZ = 500
 # Long enough that a wheel spin accumulates as one gesture, short enough that
 # the next deliberate turn starts from where the radio actually is.
 TURN_ACCUMULATE_SECONDS = 0.6
+
+# The Channels tab.
+RADIO_BANK = "Radio (20 slots)"
+CHANNEL_COLUMNS = (("#", 34), ("label", 90), ("frequency", 130),
+                   ("mode", 60), ("", 320))
 
 FILTER_DEFAULTS = {"LSB": 2600, "USB": 2600, "CWL": 500, "CWU": 500}
 
@@ -404,7 +412,8 @@ class RolePanel(sCTkFrame):
             held = radio.formatted(radio.rit_base_hz)
             if radio.mode_of(radio.tx_vfo).startswith("CW"):
                 self.note.configure(
-                    text=f"held by rit at {held}  ·  −{radio.cw_tone} Hz cw tone")
+                    text=f"held by rit at {held}  ·  "
+                         f"{radio.cw_offset_note(radio.mode_of(radio.tx_vfo))}")
             else:
                 self.note.configure(text=f"held by rit at {held}")
         elif is_tx and not radio.split:
@@ -413,7 +422,8 @@ class RolePanel(sCTkFrame):
                 # of split a CW transmit frequency was quietly offset with
                 # nothing on screen explaining the difference from receive.
                 self.note.configure(
-                    text=f"follows rx  ·  −{radio.cw_tone} Hz cw tone")
+                    text=f"follows rx  ·  "
+                         f"{radio.cw_offset_note(radio.mode_of(radio.tx_vfo))}")
             else:
                 self.note.configure(text="follows rx — turn Split on to set it")
         elif radio.locked:
@@ -422,7 +432,10 @@ class RolePanel(sCTkFrame):
             # radio.cw_tone, not a module constant: the rig reports the tone
             # and it is settable, so a fixed number here describes whatever
             # the default happened to be rather than what is applied.
-            self.note.configure(text=f"−{radio.cw_tone} Hz cw tone")
+            # The sign comes from the model: +tone in CWL, -tone in CWU. The
+            # minus written here before was only ever right for CWU.
+            self.note.configure(
+                text=radio.cw_offset_note(radio.mode_of(radio.tx_vfo)))
         elif not is_tx and radio.rit:
             # From the MODEL, not composed here. This used to take the VFO as
             # the "base" -- which under the rig's RIT is the frequency being
@@ -454,9 +467,20 @@ class UbitxCecDesktop(sCTk):
         self._geometry_timer = None
         self.bind("<Configure>", self._on_configure)
 
-        # on_change is refresh, schedule is `after` -- so a burst of reports
-        # becomes one redraw. See RadioModel.changed().
-        self.model = RadioModel(on_change=self.refresh, schedule=self.after)
+        # CONFIGURATION FIRST. It reads ~/.ubitx_cec_desktop.ini -- the same
+        # file the previous version used, so every setting carries over -- and
+        # the SDR controller reads it in its own constructor, for the server
+        # address and the filter defaults. It is a module-level global because
+        # that is how globalvars has always published it, and the controller
+        # expects it there.
+        gv.config = ConfigurationManager(self)
+
+        # on_change is _model_changed rather than refresh: the view redraws,
+        # and SDR++ is brought into step, from the same notification. schedule
+        # is `after`, so a burst of reports becomes one of each. See
+        # RadioModel.changed().
+        self.model = RadioModel(on_change=self._model_changed,
+                                schedule=self.after)
         # #
         # #   open port to the ubitx
         # #
@@ -465,6 +489,12 @@ class UbitxCecDesktop(sCTk):
         RS232 = serial.Serial(port, BAUD, timeout=5, stopbits=1, parity=serial.PARITY_NONE, xonxoff=0, rtscts=0, write_timeout=1)
 
         self.connection = uBITX_Link(self, RS232, self.model, 250)
+
+        # SDR++, as a second transport beside the rig. Built now so the model's
+        # notifications can reach it, but not CONNECTED until the interface
+        # exists to report whether that worked -- see _start_sdr.
+        self.sdr = SDR_Link(self, self.model, self.connection)
+        self.sdr.on_status = self._show_sdr_status
 
         #   initialize radio connection
         #
@@ -493,10 +523,22 @@ class UbitxCecDesktop(sCTk):
         # calls back into a interface that does not exist yet. The flag keeps
         # that harmless rather than relying on construction order.
         self._ready = False
+
+        # WHICH RECEIVER YOU ARE LISTENING THROUGH -- "SDR" or "Rig". An
+        # application choice, not something the rig reports, so it lives
+        # here rather than in the model. It decides what Mute silences and
+        # whether volume does anything. Starts on SDR if SDR++ is switched
+        # on in the settings, since that is how the station is set up.
+        self._listen_source = ("SDR" if str(gv.config.get_SDR_Switch()) == "True"
+                               else "Rig")
+        # The computer's audio, muted from this application. Not rig state
+        # either, and the rig's own speaker is tracked in the model.
+        self._sdr_muted = False
         # state() repaints, so it is called only when the value changes.
         self._offset_state = None
 
         self.notebook = sCTkNotebook(self, side="left", tab_width=30,
+                                     command=self._on_tab,
                                      tab_style="rounded",
                                      text_orientation="auto",
                                      show_page_border=True)
@@ -517,6 +559,10 @@ class UbitxCecDesktop(sCTk):
         self.refresh()
         self._tick()
 
+        # Idle rather than immediate: the window should be up before a
+        # connection attempt that can take a moment when SDR++ is not there.
+        self.after_idle(self._start_sdr)
+
     # -- window position ---------------------------------------------------
     def _remembered_geometry(self):
         """Where it was last time, or a sensible default."""
@@ -535,7 +581,54 @@ class UbitxCecDesktop(sCTk):
     def _on_close(self):
         self._save_geometry()
         self.after_cancel(self.connection.reader_process_id)
+        self.sdr.disconnect()
         self.destroy()
+
+    # -- SDR++ ---------------------------------------------------------------
+    def _model_changed(self):
+        """
+        The model changed: redraw, and bring SDR++ into step.
+
+        One notification, two consumers. SDR++ follows the MODEL rather than
+        being told separately by each handler, so every way the receive
+        frequency can change -- the dial, a band change, a split offset, a
+        click in SDR++ itself coming back from the rig -- reaches it the same
+        way, and none can be forgotten.
+        """
+        self.refresh()
+        # getattr, because the rig link is built first and its startup dump
+        # schedules notifications of its own -- one could run before the SDR
+        # link exists.
+        sdr = getattr(self, "sdr", None)
+        if sdr is not None:
+            sdr.follow()
+
+    def _start_sdr(self):
+        """Connects to SDR++ at startup, if it is switched on in the settings."""
+        # The slider starts where the level really is. Read here rather than
+        # while building, because on macOS it runs osascript, and the window
+        # should be up first.
+        self.volume_slider.set(self.sdr.get_volume())
+
+        # Put the rig where the listening choice needs it: quiet if SDR++ is
+        # the receiver, speaking if the rig is. Done now rather than while
+        # building, because it sends a command to the rig.
+        self._set_listen_source(self._listen_source)
+        if str(gv.config.get_SDR_Switch()) == "True":
+            self.sdr.connect()
+        else:
+            self._show_sdr_status(False)
+
+    def _reconnect_sdr(self):
+        """The status-strip button: try SDR++ again."""
+        self.sdr_status.configure(text="sdr — connecting…")
+        self.update_idletasks()
+        self.sdr.connect()
+
+    def _show_sdr_status(self, connected):
+        """Says whether SDR++ is connected, on the status strip."""
+        self.sdr_status.configure(
+            text="sdr ok" if connected else "sdr — reconnect")
 
     def _on_configure(self, event):
         """
@@ -658,11 +751,12 @@ class UbitxCecDesktop(sCTk):
         sCTkButtonSecondary(actions, text="A→B", width=64,
                             command=self._copy_AtoB).pack(side="left", padx=2)
 
-        for key, label in (("locked", "Lock"), ("muted", "Mute")):
-            btn = sCTkButtonSecondary(actions, text=label, width=64,
-                                      command=lambda k=key: self._toggle(k))
-            btn.pack(side="left", padx=2)
-            self._toggles[key] = btn
+        # Lock, then TX off, then Mute and its volume -- the two "stop"
+        # controls together, and the two audio controls together.
+        self._toggles["locked"] = sCTkButtonSecondary(
+            actions, text="Lock", width=64,
+            command=lambda: self._toggle("locked"))
+        self._toggles["locked"].pack(side="left", padx=2)
 
         # Transmit inhibit lives on Operate, not behind a tab. It is the
         # control you want when something is wrong -- a bad SWR, the wrong
@@ -672,6 +766,25 @@ class UbitxCecDesktop(sCTk):
             actions, text="TX off", width=68,
             command=lambda: self._toggle("tx_inhibit"))
         self._toggles["tx_inhibit"].pack(side="left", padx=2)
+
+        # Wider than Lock: its label says which receiver it mutes.
+        self._toggles["muted"] = sCTkButtonSecondary(
+            actions, text="Mute", width=78,
+            command=lambda: self._toggle("muted"))
+        self._toggles["muted"].pack(side="left", padx=2)
+
+        # Volume on Operate, beside the Mute it goes with -- it is something
+        # you reach for while operating, not a setting. Asked of the SDR
+        # rather than done here: see SDR_Link.set_volume. Active only when
+        # listening through SDR++; the rig has no volume command, its level
+        # is the knob on the front panel.
+        #
+        # 143 wide, up from 110: at 110 the knob took a large share of the
+        # track, leaving little travel to set a level with.
+        self.volume_slider = sCTkSlider(
+            actions, from_=0, to=100, width=143,
+            command=lambda value: self.sdr.set_volume(value))
+        self.volume_slider.pack(side="left", padx=(4, 2))
 
         # Role controls ----------------------------------------------------
         #
@@ -801,7 +914,7 @@ class UbitxCecDesktop(sCTk):
 
         self.sdr_status = sCTkButtonTertiary(
             strip, text="sdr — reconnect", width=130, height=22,
-            command=lambda: self.sdr_status.configure(text="sdr ok"))
+            command=self._reconnect_sdr)
         self.sdr_status.pack(side="right")
 
         # NOT part of the design. The real radio transmits from the key or the
@@ -836,14 +949,47 @@ class UbitxCecDesktop(sCTk):
             font=("Arial", 11), wraplength=640, justify="left").pack(anchor="w", pady=(2, 12))
 
         row = sCTkFrame(wrap, fg_color="transparent", border_width=0)
-        row.pack(anchor="w", pady=4)
-        sCTkLabelSecondary(row, text="receiver",
-                           font=("Arial", 12, "bold")).pack(side="left", padx=(0, 10))
-        sCTkSegmentedButton(row, values=["SDR", "Rig"]).pack(side="left")
+        row.pack(anchor="w", pady=(8, 0))
+        # THE MOST CONSEQUENTIAL CHOICE ON THIS TAB, so it looks like one.
+        #
+        # A segmented button rather than a switch: it shows BOTH receivers
+        # and which one is chosen, which is exactly the question. A switch
+        # means on or off, and with a receiver named on each side you are
+        # left working out which way the knob points.
+        #
+        # It was a small control under a lowercase "receiver", level with
+        # the switches below it, and read as one more option among them
+        # rather than the thing that decides what those options do.
+        sCTkLabelSecondary(row, text="Listen through",
+                           font=("Arial", 15, "bold")).pack(side="left", padx=(0, 14))
+        # dynamic_resizing=False, or `width` is IGNORED: by default each
+        # segment shrinks to its own text, which is what made the first
+        # enlargement look no different. Off, the width is shared equally,
+        # so each segment is 140 wide around a three-letter word and reads
+        # as a button rather than a label with a border.
+        self.receiver_picker = sCTkSegmentedButton(
+            row, values=["SDR", "Rig"], command=self._set_listen_source,
+            width=280, height=40, font=("Arial", 15, "bold"),
+            dynamic_resizing=False)
+        self.receiver_picker.pack(side="left")
+        self.receiver_picker.set(self._listen_source)
+
         sCTkLabelTertiary(
-            row,
-            text="which receiver the audio and the signal meter come from",
-            font=("Arial", 10)).pack(side="left", padx=12)
+            wrap,
+            text="Decides where the audio and the signal meter come from.",
+            font=("Arial", 11)).pack(anchor="w", pady=(4, 14))
+
+        # Volume moved to Operate, beside Mute. What is said here is how the
+        # choice above changes the audio.
+        sCTkLabelTertiary(
+            wrap,
+            text="Listening through SDR++ quiets the rig's speaker, and the "
+                 "volume on Operate is then the computer's output volume -- "
+                 "SDR++ cannot set its own level, so every application follows "
+                 "it. Listening through the rig, the level is its front-panel "
+                 "knob.",
+            font=("Arial", 10), wraplength=640,
+            justify="left").pack(anchor="w", pady=(4, 8))
 
         for label, note in (("ATT", "rig front end only"),
                             ("IFS", "rig front end only"),
@@ -861,15 +1007,15 @@ class UbitxCecDesktop(sCTk):
         One list, one bank selector, and every action working on what is in
         front of you.
 
-        The two channel systems -- the rig's twenty EEPROM slots and the
-        unlimited file banks -- are shown as banks of one kind. That removes
-        the separate copy-from-the-radio function: moving a channel from the
-        radio to a file is a copy like any other.
+        The rig's twenty memory slots and SDR++'s channel sets are shown as
+        banks of one kind. A channel is a channel wherever it is kept, and
+        tuning to one works the same way: the rig is told, and SDR++ follows.
 
-        EVERYTHING ACTS ON THE BANK YOU ARE LOOKING AT. New goes here, delete
-        removes from here, scan scans here. No target selector to keep in your
-        head, and Copy is the only action needing a destination -- which it
-        asks for when you press it.
+        FIRST PASS: reading and tuning. The rig's memories are read the first
+        time this tab is opened (see _on_tab), and fill in as the replies
+        arrive. Editing, writing back to the rig, copying between banks and
+        scanning come next; their buttons are here but disabled, so the
+        layout does not move when they arrive.
         """
         page.grid_columnconfigure(0, weight=1)
         page.grid_rowconfigure(1, weight=1)
@@ -879,160 +1025,237 @@ class UbitxCecDesktop(sCTk):
 
         sCTkLabelTertiary(head, text="bank",
                           font=("Arial", 11)).pack(side="left", padx=(0, 6))
-
-        # "New bank…" as the last entry is how one gets created: the place you
-        # go to choose a bank is the place you would look to add one, and it
-        # keeps bank management off the page entirely.
         self.bank_picker = sCTkComboBox(
-            head, width=200, command=self._on_bank,
-            values=["Radio (20 slots)", "Default set", "Contest", "Nets",
-                    "New bank…"])
+            head, width=200, command=self._on_bank, values=self._bank_names())
         self.bank_picker.pack(side="left")
-
-        sCTkButtonSecondary(head, text="⋯", width=34).pack(side="left", padx=4)
+        self.bank_picker.set(RADIO_BANK)
 
         self.bank_note = sCTkLabelTertiary(head, text="", font=("Arial", 10))
         self.bank_note.pack(side="left", padx=10)
 
-        self.bank_dirty = sCTkButtonPrimary(head, text="Write to radio",
-                                            width=120)
-        self.bank_dirty.pack(side="right")
-
-        # What the radio is on RIGHT NOW, read-only.
-        #
-        # Clicking down a list or watching a scan, the question is always
-        # "where am I actually listening?" -- and the answer was on another
-        # tab. Repeating it here is duplication, but the alternative is
-        # switching tabs to find out what the tab you left just did.
         self.channel_now = sCTkLabelSecondary(head, text="",
                                               font=("Arial", 13))
         self.channel_now.pack(side="right", padx=14)
         sCTkLabelTertiary(head, text="now",
                           font=("Arial", 10)).pack(side="right")
 
-        # The table -------------------------------------------------------
-        table = sCTkFrame(page, border_width=1, corner_radius=6)
-        table.grid(row=1, column=0, sticky="nsew", padx=10, pady=2)
+        # Twenty rows will not fit the window, so the list scrolls.
+        self.channel_list = sCTkScrollableFrame(page, border_width=1,
+                                                corner_radius=6)
+        self.channel_list.grid(row=1, column=0, sticky="nsew", padx=10, pady=2)
 
-        header = sCTkFrame(table, fg_color="transparent", border_width=0)
-        header.pack(fill="x", padx=8, pady=(6, 2))
-        for text, width in (("#", 34), ("label", 120), ("frequency", 130),
-                            ("mode", 70), ("station", 240), ("group", 90)):
+        header = sCTkFrame(self.channel_list, fg_color="transparent",
+                           border_width=0)
+        header.pack(fill="x", padx=4, pady=(4, 2))
+        for text, width in CHANNEL_COLUMNS:
             sCTkLabelTertiary(header, text=text, width=width,
                               font=("Arial", 11, "bold"),
                               anchor="w").pack(side="left")
 
-        channels = (
-            ("1", "20M-FT8", "14.074.000", "USB", "20m FT8 digital", "Digital"),
-            ("2", "40M-LSB", "7.200.000", "LSB", "40m voice calling", "Voice"),
-            ("3", "WX1", "14.032.000", "CW", "NOAA weather 1", "Utility"),
-            ("4", "HAM2", "3.532.000", "CW", "2m hailing", "Nets"),
-            ("5", "", "", "", "", ""),
-        )
-        for number, label, freq, mode, station, group in channels:
-            self._channel_row(table, number, label, freq, mode, station, group)
+        self._channel_rows = []         # rebuilt when the bank or data changes
+        self._channel_view = None       # what the rows were last built from
+        self._selected_channel = None   # index into the current bank
 
-        # Actions ---------------------------------------------------------
         actions = sCTkFrame(page, fg_color="transparent", border_width=0)
         actions.grid(row=2, column=0, sticky="ew", padx=10, pady=(6, 10))
 
-        sCTkButtonPrimary(actions, text="Tune to", width=84).pack(side="left", padx=(0, 4))
+        self.tune_button = sCTkButtonPrimary(
+            actions, text="Tune to", width=84, command=self._tune_to_selected)
+        self.tune_button.pack(side="left", padx=(0, 4))
+        self.reread_button = sCTkButtonSecondary(
+            actions, text="Read again", width=96,
+            command=self.connection.read_channels)
+        self.reread_button.pack(side="left", padx=2)
+
+        # The second pass. Present and disabled, so nothing shifts later.
         for label, width in (("Store VFO here", 120), ("Copy to…", 86),
-                             ("Clear", 70)):
-            sCTkButtonSecondary(actions, text=label,
-                                width=width).pack(side="left", padx=2)
+                             ("Clear", 70), ("Write to radio", 118)):
+            btn = sCTkButtonSecondary(actions, text=label, width=width)
+            btn.pack(side="left", padx=2)
+            btn.state("disabled")
 
-        sCTkLabelTertiary(actions, text="scan",
-                          font=("Arial", 11)).pack(side="left", padx=(20, 4))
-        sCTkButtonSecondary(actions, text="▶ start", width=76).pack(side="left", padx=2)
-        dwell = sCTkEntryPrimary(actions, width=48)
-        dwell.pack(side="left", padx=2)
-        dwell.insert(0, "5")
-        sCTkLabelTertiary(actions, text="seconds on each",
-                          font=("Arial", 10)).pack(side="left", padx=4)
+    # -- the banks ---------------------------------------------------------
+    def _bank_names(self):
+        """The rig's memories first, then SDR++'s channel sets by name."""
+        return [RADIO_BANK] + list(gv.config.get_scan_channels_registry())
 
-        self._on_bank("Radio (20 slots)")
-
-    def _channel_row(self, parent, number, label, freq, mode, station, group):
+    def _bank_entries(self, bank):
         """
-        One channel, editable in place.
+        The channels in a bank, in one shape whichever bank it is:
+        {"number", "label", "freq", "mode", "note"}.
 
-        Editing in the table rather than in a form below it: the value you
-        want to change is the one you are looking at, and a form means
-        selecting a row, moving your eye, editing, and confirming that the
-        right row was selected. Double-click anywhere on the row to tune to
-        it.
+        The rig's memories come from the model -- the rig reported them.
+        SDR++'s sets come from the configuration, which is where they are
+        kept.
         """
-        row = sCTkFrame(parent, fg_color="transparent", border_width=0)
-        row.pack(fill="x", padx=8, pady=1)
+        if bank == RADIO_BANK:
+            entries = []
+            state = self.model.channels_state
+            for i, ch in enumerate(self.model.channels):
+                if ch is None or not ch["freq"]:
+                    # "empty" only once the rig has SAID so. Before its reply
+                    # arrives, a slot is unknown, not empty -- claiming
+                    # otherwise would be the interface guessing.
+                    # Every slot the rig ANSWERED has an entry, empty or not,
+                    # so one with no entry after the read has finished is one
+                    # it never answered -- "could not be read", not "empty".
+                    if ch is not None:
+                        note = "empty"
+                    elif state == "read":
+                        note = "could not be read -- try Read again"
+                    elif state == "reading":
+                        note = "…"
+                    else:
+                        note = "not read yet"
+                    entries.append({"number": i + 1, "label": "", "freq": 0,
+                                    "mode": "", "note": note})
+                    continue
+                label = ch["label"] if ch["label"] is not None else ""
+                note = ("" if i < LABEL_SLOTS
+                        else "no label -- only slots 1 to 9 carry one")
+                entries.append({"number": i + 1, "label": label,
+                                "freq": ch["freq"], "mode": ch["mode"],
+                                "note": note})
+            return entries
 
-        empty = not label
-        sCTkLabelTertiary(row, text=number, width=34,
-                          font=("Arial", 11), anchor="w").pack(side="left")
-
-        if empty:
-            sCTkLabelTertiary(row, text="— empty —", width=560,
-                              font=("Arial", 11), anchor="w").pack(side="left")
-            return
-
-        for value, width in ((label, 120), (freq, 130), (mode, 70),
-                             (station, 240)):
-            field = sCTkEntryPrimary(row, width=width - 6)
-            field.pack(side="left", padx=(0, 6))
-            field.insert(0, value)
-            field.bind("<Double-Button-1>", lambda e: self._tune_to_channel())
-
-        sCTkComboBox(row, values=["Voice", "Digital", "Nets", "Utility"],
-                     width=84).pack(side="left")
-
-    def _tune_to_channel(self):
-        """Double-clicking a row puts it on the active VFO."""
-        self.notebook.set("Operate")
+        registry = gv.config.get_scan_channels_registry()
+        return [{"number": j + 1, "label": ch.get("label", ""),
+                 "freq": int(ch.get("freq_hz", 0)), "mode": ch.get("mode", ""),
+                 "note": ch.get("name", "")}
+                for j, ch in enumerate(registry.get(bank, []))]
 
     def _on_bank(self, choice):
+        """A different bank was chosen."""
+        self._selected_channel = None
+        self._channel_view = None       # force the rows to rebuild
+        self.refresh()
+
+    # -- the rows ----------------------------------------------------------
+    def _refresh_channels(self):
         """
-        Reacts to the bank changing, including the request to make a new one.
+        Keeps the list and its note in step with the model.
+
+        Called from refresh(). The rows are rebuilt only when what they show
+        has changed -- a different bank, or more replies from the rig --
+        because rebuilding twenty rows on every meter update would be waste.
         """
-        if choice == "New bank…":
-            self._new_bank()
+        bank = self.bank_picker.get()
+        m = self.model
+
+        if bank == RADIO_BANK:
+            if m.channels_state == "unread":
+                self.bank_note.configure(text="the rig's memories -- not read yet")
+            elif m.channels_state == "reading":
+                # In CHANNELS and LABELS, not reads. There are 38 reads, but
+                # nobody thinks of the rig as having 38 of anything: the
+                # frequencies come first, one per channel, then the labels,
+                # each of which is two reads -- its text and its show flag.
+                done = m.channels_done
+                if done["Freq"] < CHANNEL_SLOTS:
+                    self.bank_note.configure(
+                        text=f"reading channels -- {done['Freq']} of {CHANNEL_SLOTS}")
+                else:
+                    labels = (done["Label"] + done["ShowLabel"]) // 2
+                    self.bank_note.configure(
+                        text=f"reading labels -- {labels} of {LABEL_SLOTS}")
+            else:
+                used = sum(1 for i in range(len(m.channels))
+                           if not m.channel_is_empty(i))
+                text = f"the rig's memories -- {used} of {len(m.channels)} in use"
+                if m.channels_failed:
+                    text += (f", {len(m.channels_failed)} "
+                             f"{'read' if len(m.channels_failed) == 1 else 'reads'}"
+                             f" unanswered")
+                self.bank_note.configure(text=text)
+            view = (bank, m.channels_state, m.channels_progress)
+        else:
+            self.bank_note.configure(text="an SDR++ channel set")
+            view = (bank,)
+
+        if view == self._channel_view:
             return
+        self._channel_view = view
 
-        is_radio = choice.startswith("Radio")
-        # The radio's memories are edited in place and written DELIBERATELY.
-        # EEPROM has a finite number of writes and the value lives in the
-        # hardware, so a keystroke should not reach it. File banks have
-        # neither constraint and save as you type.
-        self.bank_note.configure(
-            text="the rig's own memories — edits are written when you say so"
-            if is_radio else "a file bank — edits save as you make them")
-        self.bank_dirty.state("normal" if is_radio else "disabled")
+        for row in self._channel_rows:
+            row.destroy()
+        self._channel_rows = []
+        for index, entry in enumerate(self._bank_entries(bank)):
+            self._channel_rows.append(self._channel_row(index, entry))
+        self._paint_selection()
 
-    def _new_bank(self):
-        """Asks for a name, then leaves you in the new bank."""
-        win = ctk.CTkToplevel(self)
-        win.title("New bank")
-        win.geometry("320x150")
-        win.transient(self)
+    def _channel_row(self, index, entry):
+        """
+        One channel. Click to select it; double-click to tune to it.
 
-        body = sCTkFrame(win, fg_color="transparent", border_width=0)
-        body.pack(fill="both", expand=True, padx=16, pady=14)
-        sCTkLabelSecondary(body, text="Name", font=("Arial", 11)).pack(anchor="w")
-        field = sCTkEntryPrimary(body, width=220)
-        field.pack(anchor="w", pady=(2, 12))
-        field.focus_set()
+        Read-only in this pass -- the fields become editable with the rest of
+        the editing.
+        """
+        row = sCTkFrame(self.channel_list, border_width=0, corner_radius=4)
+        row.pack(fill="x", padx=4, pady=1)
 
-        row = sCTkFrame(body, fg_color="transparent", border_width=0)
-        row.pack(anchor="w")
-        sCTkButtonPrimary(row, text="Create", width=80,
-                          command=win.destroy).pack(side="left", padx=(0, 6))
-        sCTkButtonSecondary(row, text="Cancel", width=80,
-                            command=win.destroy).pack(side="left")
+        freq = self.model.formatted(entry["freq"]) if entry["freq"] else ""
+        texts = (str(entry["number"]), entry["label"], freq,
+                 entry["mode"], entry["note"])
+        cells = [row]
+        for (heading, width), text in zip(CHANNEL_COLUMNS, texts):
+            cell = sCTkLabelSecondary(row, text=text or " ", width=width,
+                                      font=("Arial", 12), anchor="w")
+            cell.pack(side="left")
+            cells.append(cell)
 
-        # The picker fell to the new entry when it was chosen; put it back so
-        # cancelling does not leave "New bank…" showing as the current bank.
-        win.protocol("WM_DELETE_WINDOW",
-                     lambda: (self.bank_picker.set("Radio (20 slots)"),
-                              win.destroy()))
+        for widget in cells:
+            widget.bind("<Button-1>", lambda e, i=index: self._select_channel(i))
+            widget.bind("<Double-Button-1>",
+                        lambda e, i=index: self._tune_to_channel(i))
+        return row
+
+    def _select_channel(self, index):
+        self._selected_channel = index
+        self._paint_selection()
+
+    def _paint_selection(self):
+        for i, row in enumerate(self._channel_rows):
+            row.configure(fg_color=("#DBEAFE", "#1E3A5F")
+                          if i == self._selected_channel else "transparent")
+
+    # -- tuning ------------------------------------------------------------
+    def _tune_to_selected(self):
+        if self._selected_channel is not None:
+            self._tune_to_channel(self._selected_channel)
+
+    def _tune_to_channel(self, index):
+        """
+        Puts the receiver on a channel, through the rig.
+
+        A COMMAND like any other control: the rig is told, the model changes
+        when it confirms, and SDR++ follows the model. Nothing here writes a
+        frequency directly.
+
+        The mode is changed only when the channel has one the rig can use.
+        DFT means "whatever the rig was in", and SDR++ sets may hold modes the
+        rig does not have.
+        """
+        entries = self._bank_entries(self.bank_picker.get())
+        if not 0 <= index < len(entries):
+            return
+        entry = entries[index]
+        if not entry["freq"]:
+            return
+        self._select_channel(index)
+        # One call, not two. Sent back to back, the rig dropped the mode --
+        # see uBITX_Link.tune_to, which knows how long to wait between them.
+        self.connection.tune_to(entry["freq"], entry["mode"])
+
+    def _on_tab(self, name):
+        """
+        A tab was clicked.
+
+        The rig's memories are read the first time Channels is opened, not at
+        startup -- the startup dump is already long, and this adds 38 replies
+        for something you may not look at.
+        """
+        if name == "Channels" and self.model.channels_state == "unread":
+            self.connection.read_channels()
 
     def _build_cw(self, page):
         wrap = sCTkFrame(page, fg_color="transparent", border_width=0)
@@ -1185,8 +1408,46 @@ class UbitxCecDesktop(sCTk):
         {"split": self.connection.Toggle_Split,
          "rit": self.connection.Toggle_RIT,
          "locked": self.connection.Toggle_Lock,
-         "muted": self.connection.Toggle_Speaker,
+         "muted": self._mute_pressed,
          "tx_inhibit": self.connection.Toggle_Stop}[key]()
+
+    def _mute_pressed(self):
+        """
+        Mutes whichever receiver you are listening through.
+
+        It used to mute the rig's speaker whatever you were listening to, so
+        with SDR++ as the receiver, Mute silenced the wrong thing -- the rig,
+        which was already meant to be quiet -- and left SDR++ playing.
+        """
+        if self._listen_source == "SDR":
+            self._sdr_muted = not self._sdr_muted
+            self.sdr.set_muted(self._sdr_muted)
+            self.refresh()
+        else:
+            self.connection.Toggle_Speaker()
+
+    def _set_listen_source(self, source):
+        """
+        Chooses which receiver you are listening through.
+
+        LISTENING THROUGH SDR++ SILENCES THE RIG, and switching back restores
+        it -- otherwise you hear both at once. On the uBITX that is the
+        rig's own "SDR mode" (TS_CMD_SDR, which Toggle_Speaker sends): it
+        routes the audio out for an SDR and quiets the speaker.
+
+        The command is a TOGGLE, so it is sent only when the rig is not
+        already where it needs to be, judged by model.muted.
+        """
+        self._listen_source = source
+        rig_should_be_muted = (source == "SDR")
+        # Only once built. Setting the picker's starting value must not
+        # reach the rig: its state is not known yet, and a second toggle at
+        # startup would cancel the first.
+        if self._ready and self.model.muted != rig_should_be_muted:
+            self.connection.Toggle_Speaker()
+        self.volume_slider.configure(
+            state="normal" if source == "SDR" else "disabled")
+        self.refresh()
 
     def _split_offset(self, khz):
         """
@@ -1285,13 +1546,13 @@ class UbitxCecDesktop(sCTk):
                 break
 
     def _filter_reset(self):
-        """Back to the widest useful setting for the current mode."""
-        # The FILTER belongs to the SDR, not the rig -- there is no uBITX
-        # command for it. Stays on the stub until that backend is wired.
-        self.rig.set_filter(FILTER_DEFAULTS.get(self.model.mode, 2600))
+        """Back to the configured default width for the current mode."""
+        # SDR++'s, not the rig's -- the uBITX has no filter command. The
+        # defaults come from the configuration, so they match the Setup page.
+        self.sdr.reset_filter()
 
     def _filter(self, delta):
-        self.rig.set_filter(self.model.filter_hz + delta)
+        self.sdr.set_filter(self.model.filter_hz + delta)
 
     def _about(self):
         """
@@ -1501,7 +1762,15 @@ class UbitxCecDesktop(sCTk):
 
         # Latched controls read as lit or unlit.
         for key, btn in self._toggles.items():
-            on = getattr(s, key)
+            if key == "muted":
+                # Lit for whichever receiver Mute acts on, and says which, so
+                # there is no doubt what pressing it will silence.
+                on = (self._sdr_muted if self._listen_source == "SDR"
+                      else s.muted)
+                btn.configure(text=("Mute SDR" if self._listen_source == "SDR"
+                                    else "Mute rig"))
+            else:
+                on = getattr(s, key)
             btn.configure(fg_color=("#0F6E56", "#0F6E56") if on else
                           ("#E2E8F0", "#1F2937"))
 
@@ -1540,8 +1809,20 @@ class UbitxCecDesktop(sCTk):
         if band_now and self.band_picker.get() != band_now:
             self.band_picker.set(band_now)
 
+        # The mode button follows the model too. It only changed when clicked,
+        # so a mode set anywhere else -- SDR++, or the rig's own buttons --
+        # reached the model and never showed: the filter moved, the transmit
+        # readout moved, and the button went on naming the old mode.
+        #
+        # Safe for the same reason as the band picker: a segmented button's
+        # set() does not fire its command, so this cannot loop back into
+        # _on_mode.
+        if s.mode and self.mode_picker.get() != s.mode:
+            self.mode_picker.set(s.mode)
+
         self.filter_label.configure(text=f"{s.filter_hz} Hz")
         self.mode_label.configure(text=s.mode)
+        self._refresh_channels()
         self.channel_now.configure(
             text=f"{s.role_text('rx')}   {s.mode}")
 
