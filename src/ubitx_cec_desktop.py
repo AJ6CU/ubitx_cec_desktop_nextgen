@@ -57,6 +57,7 @@ import customtkinter as ctk
 
 import globalvars as gv
 from configuration import ConfigurationManager
+from channel_sets import ChannelSets, LABEL_MAX as SET_LABEL_MAX
 from radio_model import RadioModel, LABEL_SLOTS, CHANNEL_SLOTS
 from stub_radio import StubRadio
 from sdr_link import SDR_Link
@@ -68,7 +69,8 @@ from scustomtkinter import (
     sCTkButtonPrimary, sCTkButtonSecondary, sCTkButtonTertiary,
     sCTkSMeterBar, sCTkDialContinuous, sCTkSpinbox,
     sCTkSegmentedButton, sCTkSwitch, sCTkComboBox, sCTkEntryPrimary,
-    sCTkCheckBox, sCTkFrequencyDisplay, sCTkSlider, sCTkScrollableFrame,
+    sCTkCheckBox, sCTkFrequencyDisplay, sCTkSlider,
+    sCTkProgressBar, sCTkTableview,
 )
 
 # ---------------------------------------------------------------------------
@@ -95,8 +97,46 @@ TURN_ACCUMULATE_SECONDS = 0.6
 
 # The Channels tab.
 RADIO_BANK = "Radio (20 slots)"
-CHANNEL_COLUMNS = (("#", 34), ("label", 90), ("frequency", 130),
-                   ("mode", 60), ("", 320))
+# (heading, width, anchor) for each column of the channel table.
+CHANNEL_COLUMNS = (("#", 40, "center"), ("label", 90, "w"),
+                   ("frequency", 130, "e"), ("mode", 84, "center"),
+                   ("notes", 210, "w"))
+CHANNEL_LABEL_COLUMN = 1
+CHANNEL_FREQ_COLUMN = 2
+CHANNEL_MODE_COLUMN = 3
+CHANNEL_NOTES_COLUMN = 4
+# What a channel's mode may be set to. DFT is "the band's usual sideband".
+CHANNEL_MODE_CHOICES = ["LSB", "USB", "CWL", "CWU", "DFT"]
+
+
+def parse_frequency(text):
+    """
+    A frequency as typed, in hertz -- or None if it is not one.
+
+    Accepts the forms people actually type:
+
+        14074000       hertz
+        14.074.000     grouped, the way the list shows it ("." or ",")
+        14.074         megahertz, with a decimal
+
+    Two groups means a decimal in megahertz; three or more means grouped
+    hertz. Anything outside 100 kHz to 60 MHz is refused -- above that the
+    rig cannot tune, and below it a mistyped kilohertz figure ("7074") would
+    otherwise be stored as 7 kHz.
+    """
+    text = str(text).strip().replace(" ", "")
+    if not text:
+        return None
+    parts = text.replace(",", ".").split(".")
+    if not all(part.isdigit() for part in parts):
+        return None
+    if len(parts) == 1:
+        hz = int(parts[0])
+    elif len(parts) == 2:
+        hz = int(parts[0]) * 1_000_000 + int(parts[1].ljust(6, "0")[:6])
+    else:
+        hz = int("".join(parts))
+    return hz if 100_000 <= hz <= 60_000_000 else None
 
 FILTER_DEFAULTS = {"LSB": 2600, "USB": 2600, "CWL": 500, "CWU": 500}
 
@@ -474,6 +514,11 @@ class UbitxCecDesktop(sCTk):
         # that is how globalvars has always published it, and the controller
         # expects it there.
         gv.config = ConfigurationManager(self)
+
+        # The channel sets, owned here -- see channel_sets.py. The Channels
+        # tab edits them and the scanner will read them; nothing else keeps a
+        # copy.
+        self.channel_sets = ChannelSets(gv.config)
 
         # on_change is _model_changed rather than refresh: the view redraws,
         # and SDR++ is brought into step, from the same notification. schedule
@@ -1018,10 +1063,42 @@ class UbitxCecDesktop(sCTk):
         layout does not move when they arrive.
         """
         page.grid_columnconfigure(0, weight=1)
-        page.grid_rowconfigure(1, weight=1)
+        page.grid_rowconfigure(2, weight=1)       # the table's row takes the slack
+
+        # THE TOP ROW: where the radio is, at the left -- the one thing on
+        # this tab about the radio rather than the list, so it is where
+        # reading starts -- and what the tab is doing, right beside it.
+        #
+        # The status used to trail off the end of the header, after the
+        # bank's buttons, like a pan handle. Here it has a place of its own,
+        # and the header below is left to the bank alone.
+        now_row = sCTkFrame(page, fg_color="transparent", border_width=0)
+        now_row.grid(row=0, column=0, sticky="ew", padx=10, pady=(10, 0))
+        sCTkLabelTertiary(now_row, text="now",
+                          font=("Arial", 11)).pack(side="left", padx=(0, 8))
+        # PRIMARY, and styled by the theme alone -- no font of its own. The
+        # value is the most important on the tab, and the primary tier is how
+        # the library says so; a font set here would make it primary in name
+        # only.
+        self.channel_now = sCTkLabelPrimary(now_row, text="")
+        self.channel_now.pack(side="left")
+
+        # Beside the frequency, not across the window from it. The BAR comes
+        # first and the note after it: at the start of the run the bar has a
+        # fixed position, so the note's changing length cannot push it about.
+        # See _refresh_channels, which packs the bar before the note.
+        self.bank_note = sCTkLabelTertiary(now_row, text="", font=("Arial", 10))
+        self.bank_note.pack(side="left", padx=(20, 0))
+
+        # A MOVING BAR while the rig is read or written. The count in the note
+        # is easy to miss -- a read-back starting on its own after a write
+        # went unnoticed -- and a bar in motion is not. Shown only while busy.
+        self.channel_progress = sCTkProgressBar(now_row, width=180, height=10)
+        self.channel_progress.set(0)
+        self._progress_shown = False
 
         head = sCTkFrame(page, fg_color="transparent", border_width=0)
-        head.grid(row=0, column=0, sticky="ew", padx=10, pady=(10, 4))
+        head.grid(row=1, column=0, sticky="ew", padx=10, pady=(6, 4))
 
         sCTkLabelTertiary(head, text="bank",
                           font=("Arial", 11)).pack(side="left", padx=(0, 6))
@@ -1030,54 +1107,114 @@ class UbitxCecDesktop(sCTk):
         self.bank_picker.pack(side="left")
         self.bank_picker.set(RADIO_BANK)
 
-        self.bank_note = sCTkLabelTertiary(head, text="", font=("Arial", 10))
-        self.bank_note.pack(side="left", padx=10)
+        # WHOLE-BANK ACTIONS sit beside the selector, since they act on the
+        # bank it chose rather than on a row. For the rig's bank: read it,
+        # write the draft, or throw the draft away. They are HIDDEN for a
+        # set, not disabled -- a set is never read from or written to the
+        # rig, and a control that is always greyed out there looked broken
+        # rather than irrelevant. Disabled keeps one meaning: "not yet".
+        self.radio_actions = sCTkFrame(head, fg_color="transparent", border_width=0)
+        self.radio_actions.pack(side="left", padx=(10, 0))
+        self.reread_button = sCTkButtonSecondary(
+            self.radio_actions, text="Read from radio", width=120,
+            command=self.connection.read_channels)
+        self.reread_button.pack(side="left", padx=2)
+        self.write_button = sCTkButtonPrimary(
+            self.radio_actions, text="Write to radio", width=130,
+            command=self._write_to_radio)
+        self.write_button.pack(side="left", padx=2)
+        self.discard_button = sCTkButtonSecondary(
+            self.radio_actions, text="Discard", width=76,
+            command=self._discard_draft)
+        self.discard_button.pack(side="left", padx=2)
+        self._bank_kind_shown = "radio"
 
-        self.channel_now = sCTkLabelSecondary(head, text="",
-                                              font=("Arial", 13))
-        self.channel_now.pack(side="right", padx=14)
-        sCTkLabelTertiary(head, text="now",
-                          font=("Arial", 10)).pack(side="right")
 
-        # Twenty rows will not fit the window, so the list scrolls.
-        self.channel_list = sCTkScrollableFrame(page, border_width=1,
-                                                corner_radius=6)
-        self.channel_list.grid(row=1, column=0, sticky="nsew", padx=10, pady=2)
 
-        header = sCTkFrame(self.channel_list, fg_color="transparent",
-                           border_width=0)
-        header.pack(fill="x", padx=4, pady=(4, 2))
-        for text, width in CHANNEL_COLUMNS:
-            sCTkLabelTertiary(header, text=text, width=width,
-                              font=("Arial", 11, "bold"),
-                              anchor="w").pack(side="left")
+        # An sCTkTableview, so the label and frequency are EDITED IN PLACE:
+        # click a row to select it, click its label or frequency again to
+        # edit that cell. The value you want to change is the one you are
+        # looking at. Double-click still tunes -- edit_trigger="select" keeps
+        # the double-click free for that. It scrolls, since twenty rows do
+        # not fit the window.
+        # height is a CEILING: the table scrolls past it rather than asking
+        # to be tall enough for all twenty rows, which pushed the header row
+        # out of the window. The grid stretches it to the space there is.
+        self.channel_table = sCTkTableview(
+            page, columns=[h for h, _, _ in CHANNEL_COLUMNS], height=240,
+            num_rows=0, edit_trigger="select", editable_columns=[],
+            column_choices={CHANNEL_MODE_COLUMN: CHANNEL_MODE_CHOICES})
+        for index, (_, width, anchor) in enumerate(CHANNEL_COLUMNS):
+            self.channel_table.set_column_properties(index, width, anchor)
+        # "nsw", not "nsew": as wide as its columns, with the scrollbar
+        # beside them. Stretched across the window, the scrollbar sat at the
+        # far edge with a wide empty band between it and the notes.
+        self.channel_table.grid(row=2, column=0, sticky="nsw", padx=10, pady=2)
+        self.channel_table.bind_selection_callback(
+            lambda row, values: self._select_channel(row))
+        self.channel_table.bind_activate_callback(
+            lambda row, values: self._tune_to_channel(row))
+        self.channel_table.bind_validation_callback(self._check_channel_edit,
+                                                    with_row=True)
+        self.channel_table.bind_edit_callback(self._channel_edited)
+        # Some cells are read-only whatever their column -- decided per CELL,
+        # before an editor opens, since refusing the edit only afterwards let
+        # a label be typed and then silently thrown away. See
+        # _channel_cell_editable.
+        self.channel_table.bind_cell_editable_callback(self._channel_cell_editable)
 
-        self._channel_rows = []         # rebuilt when the bank or data changes
-        self._channel_view = None       # what the rows were last built from
+        # A short message in place of the bank note -- why an edit was
+        # refused, say -- cleared after a few seconds. See _notify.
+        self._channel_notice = None
+        self._notice_timer = None
+
+        self._shown_bank = None         # the bank the table was loaded with
+        self._shown_rows = []           # the rows it is showing, as text
+        self._shown_editable = None     # the editable columns last set
         self._selected_channel = None   # index into the current bank
 
         actions = sCTkFrame(page, fg_color="transparent", border_width=0)
-        actions.grid(row=2, column=0, sticky="ew", padx=10, pady=(6, 10))
+        actions.grid(row=3, column=0, sticky="ew", padx=10, pady=(6, 10))
 
         self.tune_button = sCTkButtonPrimary(
             actions, text="Tune to", width=84, command=self._tune_to_selected)
         self.tune_button.pack(side="left", padx=(0, 4))
-        self.reread_button = sCTkButtonSecondary(
-            actions, text="Read again", width=96,
-            command=self.connection.read_channels)
-        self.reread_button.pack(side="left", padx=2)
 
-        # The second pass. Present and disabled, so nothing shifts later.
-        for label, width in (("Store VFO here", 120), ("Copy to…", 86),
-                             ("Clear", 70), ("Write to radio", 118)):
-            btn = sCTkButtonSecondary(actions, text=label, width=width)
-            btn.pack(side="left", padx=2)
-            btn.state("disabled")
+        # THIS BAR ACTS ON THE SELECTED CHANNEL, whichever bank it is in.
+        # For the rig's bank, changes are held as a DRAFT -- marked in the
+        # list, not sent -- until Write to radio above: EEPROM has a limited
+        # number of write cycles, and overwriting a stored channel should be
+        # a deliberate act. For a set, changes are saved at once.
+        self.store_button = sCTkButtonSecondary(
+            actions, text="Store VFO here", width=120,
+            command=self._store_vfo_here)
+        self.store_button.pack(side="left", padx=(12, 2))
+        # "Clear" for the rig's fixed slots, "Delete" for a set, whose
+        # channels come and go -- the label follows the bank on show.
+        self.clear_button = sCTkButtonSecondary(
+            actions, text="Clear", width=70, command=self._clear_channel)
+        self.clear_button.pack(side="left", padx=2)
+        # Only a set can grow; the rig has twenty slots, always. Shown only
+        # for a set -- see _update_channel_buttons.
+        self.add_button = sCTkButtonSecondary(
+            actions, text="Add VFO", width=80, command=self._add_vfo)
+
+        # Copying between banks comes with the next step.
+        self.copy_button = sCTkButtonSecondary(actions, text="Copy to…",
+                                               width=86)
+        self.copy_button.pack(side="left", padx=(12, 2))
+        self.copy_button.state("disabled")
+
+
+        # slot -> {"freq", "mode", "label", "show_label"}: edits not yet
+        # written. Overlaid on what the rig reported when the list is drawn.
+        self._radio_draft = {}
+        self._draft_version = 0
 
     # -- the banks ---------------------------------------------------------
     def _bank_names(self):
         """The rig's memories first, then SDR++'s channel sets by name."""
-        return [RADIO_BANK] + list(gv.config.get_scan_channels_registry())
+        return [RADIO_BANK] + self.channel_sets.names()
 
     def _bank_entries(self, bank):
         """
@@ -1092,6 +1229,33 @@ class UbitxCecDesktop(sCTk):
             entries = []
             state = self.model.channels_state
             for i, ch in enumerate(self.model.channels):
+                if i in self._radio_draft:
+                    # An edit not yet written. Shown as it WILL be, and
+                    # marked, so the list never passes it off as the rig's.
+                    d = self._radio_draft[i]
+                    label = d["label"] if i < LABEL_SLOTS else ""
+                    if d["freq"]:
+                        note = "● not written yet"
+                    elif label:
+                        # Labelled but with no frequency -- a label set before
+                        # the VFO is stored, not a cleared slot.
+                        note = "● label only, not written"
+                    else:
+                        note = "● cleared, not written"
+                    entries.append({
+                        "number": i + 1, "label": label,
+                        "freq": d["freq"], "mode": d["mode"] if d["freq"] else "",
+                        "note": note})
+                    continue
+                # A LABEL WITH NO FREQUENCY IS STILL SHOWN. It is what the rig
+                # holds, and hiding it made a label written to an empty slot
+                # look as though the write had failed -- until a frequency was
+                # stored there and the label seemed to appear from nowhere.
+                if ch is not None and not ch["freq"] and i < LABEL_SLOTS and ch["label"]:
+                    entries.append({"number": i + 1, "label": ch["label"],
+                                    "freq": 0, "mode": "",
+                                    "note": "label only"})
+                    continue
                 if ch is None or not ch["freq"]:
                     # "empty" only once the rig has SAID so. Before its reply
                     # arrives, a slot is unknown, not empty -- claiming
@@ -1102,7 +1266,7 @@ class UbitxCecDesktop(sCTk):
                     if ch is not None:
                         note = "empty"
                     elif state == "read":
-                        note = "could not be read -- try Read again"
+                        note = "could not be read"
                     elif state == "reading":
                         note = "…"
                     else:
@@ -1111,23 +1275,24 @@ class UbitxCecDesktop(sCTk):
                                     "mode": "", "note": note})
                     continue
                 label = ch["label"] if ch["label"] is not None else ""
-                note = ("" if i < LABEL_SLOTS
-                        else "no label -- only slots 1 to 9 carry one")
+                # No note for slots 10-20: that they carry no label shows
+                # in the label cell itself, which will not open. A note saying
+                # so on eleven rows was noise.
+                note = ""
                 entries.append({"number": i + 1, "label": label,
                                 "freq": ch["freq"], "mode": ch["mode"],
                                 "note": note})
             return entries
 
-        registry = gv.config.get_scan_channels_registry()
-        return [{"number": j + 1, "label": ch.get("label", ""),
-                 "freq": int(ch.get("freq_hz", 0)), "mode": ch.get("mode", ""),
-                 "note": ch.get("name", "")}
-                for j, ch in enumerate(registry.get(bank, []))]
+        return [{"number": j + 1, "label": ch["label"],
+                 "freq": ch["freq_hz"], "mode": ch["mode"], "note": ch["name"]}
+                for j, ch in enumerate(self.channel_sets.channels(bank))]
 
     def _on_bank(self, choice):
         """A different bank was chosen."""
         self._selected_channel = None
-        self._channel_view = None       # force the rows to rebuild
+        self.channel_table.clear_selection()
+        self._shown_bank = None         # force a full reload
         self.refresh()
 
     # -- the rows ----------------------------------------------------------
@@ -1142,9 +1307,30 @@ class UbitxCecDesktop(sCTk):
         bank = self.bank_picker.get()
         m = self.model
 
+        # Whichever bank is showing: a read or write of the rig is happening
+        # either way, and the bar says so.
+        busy = m.channels_state in ("reading", "writing")
+        if busy:
+            if not self._progress_shown:
+                # Packed BEFORE the note, so it sits straight after the
+                # frequency and the note follows it.
+                self.channel_progress.pack(side="left", padx=(20, 0),
+                                           before=self.bank_note)
+                self._progress_shown = True
+            total = m.channels_expected or 1
+            self.channel_progress.set(min(1.0, m.channels_progress / total))
+        elif self._progress_shown:
+            self.channel_progress.pack_forget()
+            self._progress_shown = False
+
         if bank == RADIO_BANK:
             if m.channels_state == "unread":
                 self.bank_note.configure(text="the rig's memories -- not read yet")
+            elif m.channels_state == "writing":
+                self.bank_note.configure(
+                    text=f"writing to the rig -- {m.channels_progress} of "
+                         f"{m.channels_expected} "
+                         f"{'channel' if m.channels_expected == 1 else 'channels'}")
             elif m.channels_state == "reading":
                 # In CHANNELS and LABELS, not reads. There are 38 reads, but
                 # nobody thinks of the rig as having 38 of anything: the
@@ -1166,57 +1352,315 @@ class UbitxCecDesktop(sCTk):
                     text += (f", {len(m.channels_failed)} "
                              f"{'read' if len(m.channels_failed) == 1 else 'reads'}"
                              f" unanswered")
+                if m.channels_write_failed:
+                    text += (f" -- {len(m.channels_write_failed)} "
+                             f"{'write was' if len(m.channels_write_failed) == 1 else 'writes were'}"
+                             f" not acknowledged; the list shows what the rig holds")
                 self.bank_note.configure(text=text)
-            view = (bank, m.channels_state, m.channels_progress)
         else:
-            self.bank_note.configure(text="an SDR++ channel set")
-            view = (bank,)
+            # The application's, not SDR++'s, since the sets moved to their
+            # own file -- see channel_sets.py.
+            self.bank_note.configure(text="a channel set -- saved as you edit")
 
-        if view == self._channel_view:
-            return
-        self._channel_view = view
+        # A notice, while it lasts, takes the note's place.
+        if self._channel_notice:
+            self.bank_note.configure(text=self._channel_notice)
 
-        for row in self._channel_rows:
-            row.destroy()
-        self._channel_rows = []
-        for index, entry in enumerate(self._bank_entries(bank)):
-            self._channel_rows.append(self._channel_row(index, entry))
-        self._paint_selection()
+        self._update_channel_buttons()
 
-    def _channel_row(self, index, entry):
-        """
-        One channel. Click to select it; double-click to tune to it.
+        rows = [[str(e["number"]), e["label"],
+                 self.model.formatted(e["freq"]) if e["freq"] else "",
+                 e["mode"], e["note"]]
+                for e in self._bank_entries(bank)]
 
-        Read-only in this pass -- the fields become editable with the rest of
-        the editing.
-        """
-        row = sCTkFrame(self.channel_list, border_width=0, corner_radius=4)
-        row.pack(fill="x", padx=4, pady=1)
-
-        freq = self.model.formatted(entry["freq"]) if entry["freq"] else ""
-        texts = (str(entry["number"]), entry["label"], freq,
-                 entry["mode"], entry["note"])
-        cells = [row]
-        for (heading, width), text in zip(CHANNEL_COLUMNS, texts):
-            cell = sCTkLabelSecondary(row, text=text or " ", width=width,
-                                      font=("Arial", 12), anchor="w")
-            cell.pack(side="left")
-            cells.append(cell)
-
-        for widget in cells:
-            widget.bind("<Button-1>", lambda e, i=index: self._select_channel(i))
-            widget.bind("<Double-Button-1>",
-                        lambda e, i=index: self._tune_to_channel(i))
-        return row
+        # A different bank, or a different number of rows, reloads the table.
+        # Otherwise only the rows that changed are updated, IN PLACE: during a
+        # read the list changes with every reply, and rebuilding all hundred
+        # cells each time is slow and flickers.
+        if bank != self._shown_bank or len(rows) != len(self._shown_rows):
+            self.channel_table.load_dataset(rows)
+            self._shown_bank = bank
+        else:
+            for index, (new, old) in enumerate(zip(rows, self._shown_rows)):
+                if new != old:
+                    self.channel_table.set_row(index, new)
+        self._shown_rows = rows
 
     def _select_channel(self, index):
+        """A row was chosen -- by a click, or by tuning to it."""
         self._selected_channel = index
-        self._paint_selection()
+        # From code, so it does not call back here; harmless if the table
+        # already has this row selected, as it does after a click.
+        self.channel_table.select_row(index)
+        self._update_channel_buttons()
 
-    def _paint_selection(self):
-        for i, row in enumerate(self._channel_rows):
-            row.configure(fg_color=("#DBEAFE", "#1E3A5F")
-                          if i == self._selected_channel else "transparent")
+    # -- editing the rig's bank -------------------------------------------
+    def _radio_channel(self, slot):
+        """A slot as it currently stands: the draft if edited, else the rig's."""
+        if slot in self._radio_draft:
+            return dict(self._radio_draft[slot])
+        ch = self.model.channels[slot]
+        if ch is None:
+            return {"freq": 0, "mode": "DFT", "label": "", "show_label": False}
+        return {"freq": ch["freq"], "mode": ch["mode"],
+                "label": ch["label"] or "", "show_label": ch["show_label"]}
+
+    def _can_edit_radio(self):
+        """True when the rig's bank is showing, fully read, with a slot chosen."""
+        return (self.bank_picker.get() == RADIO_BANK
+                and self.model.channels_state == "read"
+                and self._selected_channel is not None)
+
+    def _change_draft(self, slot, **values):
+        channel = self._radio_channel(slot)
+        channel.update(values)
+        self._radio_draft[slot] = channel
+        self._draft_version += 1
+        self.refresh()
+
+    def _set_shown(self):
+        """The channel set on show, or None when it is the rig's bank."""
+        bank = self.bank_picker.get()
+        return None if bank == RADIO_BANK else bank
+
+    def _store_vfo_here(self):
+        """
+        The receive frequency and mode, into the chosen channel.
+
+        The receive VFO's own frequency -- what the rig tunes to when it
+        recalls the channel -- and its mode. The label is kept. Into the draft
+        for the rig's bank; saved at once for a set.
+        """
+        m = self.model
+        freq, mode = m.frequency(m.rx_vfo), m.mode_of(m.rx_vfo)
+        name = self._set_shown()
+        if name is not None:
+            if self._selected_channel is not None:
+                self.channel_sets.update(name, self._selected_channel,
+                                         freq_hz=freq, mode=mode)
+                self.refresh()
+            return
+        if not self._can_edit_radio():
+            return
+        self._change_draft(self._selected_channel, freq=freq, mode=mode)
+
+    def _clear_channel(self):
+        """Empties a rig slot (into the draft), or deletes a set's channel."""
+        name = self._set_shown()
+        if name is not None:
+            if self._selected_channel is None:
+                return
+            self.channel_sets.delete(name, self._selected_channel)
+            # The row that moved up into its place is selected, or the new
+            # last row if the last was deleted -- so Delete can be pressed
+            # again, down a list, without reaching for the mouse each time.
+            remaining = len(self.channel_sets.channels(name))
+            self._selected_channel = (min(self._selected_channel, remaining - 1)
+                                      if remaining else None)
+            self.channel_table.select_row(self._selected_channel)
+            self.refresh()
+            return
+        if not self._can_edit_radio():
+            return
+        self._change_draft(self._selected_channel, freq=0, mode="DFT",
+                           label="", show_label=False)
+
+    def _add_vfo(self):
+        """
+        The receive frequency and mode, as a new channel at the end of a set.
+
+        Carries the filter width in use, which the SDR++ sets have always
+        stored with a channel. The label and name start empty, ready to be
+        typed into the new row, which is selected.
+        """
+        name = self._set_shown()
+        if name is None:
+            return
+        m = self.model
+        self.channel_sets.add(name, {"freq_hz": m.frequency(m.rx_vfo),
+                                     "mode": m.mode_of(m.rx_vfo),
+                                     "bandwidth": m.filter_hz})
+        self._selected_channel = len(self.channel_sets.channels(name)) - 1
+        self.refresh()
+        self.channel_table.select_row(self._selected_channel)
+
+    # -- editing in the table --------------------------------------------
+    def _channel_cell_editable(self, row, column):
+        """
+        Whether one cell may be edited, beyond its column being editable.
+
+        A label only in slots 1 to 9 -- the rest carry none. A mode only where
+        the slot has a frequency: an empty slot has no channel to be in a
+        mode. Type the frequency first, and the mode becomes editable.
+        """
+        name = self._set_shown()
+        if name is not None:
+            # A set: every label may be edited, and so may the notes -- which
+            # for a set is the channel's name. The mode, as for the rig, only
+            # where there is a frequency.
+            if column == CHANNEL_MODE_COLUMN:
+                channels = self.channel_sets.channels(name)
+                return row < len(channels) and bool(channels[row]["freq_hz"])
+            return True
+        if column == CHANNEL_LABEL_COLUMN:
+            return row < LABEL_SLOTS
+        if column == CHANNEL_MODE_COLUMN:
+            return bool(self._radio_channel(row)["freq"])
+        return True
+
+    def _check_channel_edit(self, row, column, value):
+        """
+        Checks an edit to a label or frequency cell before the table keeps it.
+
+        Returns the value TIDIED -- the label trimmed to five printable
+        characters, the frequency written the way the list shows frequencies
+        -- or False to refuse it, when the cell reverts to what it was.
+        """
+        name = self._set_shown()
+        if name is not None:
+            if column == CHANNEL_LABEL_COLUMN:
+                return "".join(ch for ch in value if 32 <= ord(ch) < 127).strip()[:SET_LABEL_MAX]
+            if column == CHANNEL_NOTES_COLUMN:
+                return "".join(ch for ch in value if 32 <= ord(ch) < 127).strip()
+        elif self.model.channels_state != "read":
+            return False
+        if column == CHANNEL_LABEL_COLUMN:
+            if row >= LABEL_SLOTS:
+                return False                 # slots 10-20 carry no label
+            return "".join(ch for ch in value if 32 <= ord(ch) < 127).strip()[:5]
+        if column == CHANNEL_FREQ_COLUMN:
+            hz = parse_frequency(value)
+            if hz:
+                return self.model.formatted(hz)
+            # SAID, not just reverted. A frequency that silently turns back
+            # into the old one looks like the edit was never made.
+            if value.strip():
+                self._notify(f"'{value.strip()}' isn't a frequency -- "
+                             f"try 14.074 or 14.074.000")
+            return False
+        if column == CHANNEL_MODE_COLUMN:
+            return value if value in CHANNEL_MODE_CHOICES else False
+        return False
+
+    def _notify(self, text, seconds=6):
+        """Shows a short message in place of the bank note, for a few seconds."""
+        self._channel_notice = text
+        if self._notice_timer is not None:
+            self.after_cancel(self._notice_timer)
+        self._notice_timer = self.after(int(seconds * 1000), self._clear_notice)
+        # Idle, not now: this is called from inside the table's own save, and
+        # redrawing the rows in the middle of it would race with that.
+        self.after_idle(self.refresh)
+
+    def _clear_notice(self):
+        self._channel_notice = None
+        self._notice_timer = None
+        self.refresh()
+
+    def _channel_edited(self, row, column, value):
+        """
+        A cell changed in the table.
+
+        For the rig's bank, into the draft, to be written later. For a set,
+        saved at once.
+        """
+        name = self._set_shown()
+        if name is not None:
+            fields = {CHANNEL_LABEL_COLUMN: "label", CHANNEL_MODE_COLUMN: "mode",
+                      CHANNEL_NOTES_COLUMN: "name"}
+            if column == CHANNEL_FREQ_COLUMN:
+                hz = parse_frequency(value)
+                if hz:
+                    self.channel_sets.update(name, row, freq_hz=hz)
+            elif column in fields:
+                self.channel_sets.update(name, row, **{fields[column]: value})
+            self.refresh()
+            return
+        if column == CHANNEL_LABEL_COLUMN:
+            self._change_draft(row, label=value, show_label=bool(value))
+        elif column == CHANNEL_FREQ_COLUMN:
+            hz = parse_frequency(value)
+            if hz:
+                # The slot keeps its mode. One that had none -- empty, or
+                # label only -- becomes DFT, which tunes to the band's usual
+                # sideband.
+                mode = self._radio_channel(row)["mode"]
+                if mode not in ("LSB", "USB", "CWL", "CWU", "DFT"):
+                    mode = "DFT"
+                self._change_draft(row, freq=hz, mode=mode)
+        elif column == CHANNEL_MODE_COLUMN:
+            self._change_draft(row, mode=value)
+
+    def _discard_draft(self):
+        self._radio_draft = {}
+        self._draft_version += 1
+        if self._selected_channel is not None:
+            self._select_channel(self._selected_channel)
+        self.refresh()
+
+    def _write_to_radio(self):
+        """
+        Sends the draft to the rig, which then reads everything back.
+
+        The draft is let go at once. What the list shows next comes from the
+        read-back -- the rig's own account -- so a write that did not take
+        appears as the value the rig still holds, with the note saying so,
+        rather than as a draft that looks written.
+        """
+        if not self._radio_draft or self.model.channels_state != "read":
+            return
+        channels = [(slot, d["freq"], d["mode"], d["label"], d["show_label"])
+                    for slot, d in sorted(self._radio_draft.items())]
+        self._radio_draft = {}
+        self._draft_version += 1
+        self.connection.write_channels(channels)
+
+    def _update_channel_buttons(self):
+        """Enables what can be done now, and names how much would be written."""
+        in_set = self._set_shown() is not None
+        chosen = self._selected_channel is not None
+        editing = (chosen if in_set else self._can_edit_radio())
+        for btn in (self.store_button, self.clear_button):
+            btn.state("normal" if editing else "disabled")
+        self.clear_button.configure(text="Delete" if in_set else "Clear")
+
+        # What belongs to one kind of bank is HIDDEN for the other, not
+        # disabled. Repacked only when the kind changes.
+        kind = "set" if in_set else "radio"
+        if kind != self._bank_kind_shown:
+            if in_set:
+                self.radio_actions.pack_forget()
+                self.add_button.pack(side="left", padx=2, before=self.copy_button)
+            else:
+                self.add_button.pack_forget()
+                self.radio_actions.pack(side="left", padx=(10, 0),
+                                        after=self.bank_picker)
+            self._bank_kind_shown = kind
+        # Reading waits while the rig is busy reading or writing.
+        busy = self.model.channels_state in ("reading", "writing")
+        self.reread_button.state("disabled" if busy else "normal")
+
+        # Set on the table itself, so a cell that may not be changed never
+        # opens an editor at all -- rather than opening one and refusing.
+        # The rig's bank once it is fully read; a set at any time, and its
+        # notes too, which for a set is the channel's name.
+        if in_set:
+            editable = [CHANNEL_LABEL_COLUMN, CHANNEL_FREQ_COLUMN,
+                        CHANNEL_MODE_COLUMN, CHANNEL_NOTES_COLUMN]
+        elif self.model.channels_state == "read":
+            editable = [CHANNEL_LABEL_COLUMN, CHANNEL_FREQ_COLUMN, CHANNEL_MODE_COLUMN]
+        else:
+            editable = []
+        if editable != self._shown_editable:
+            self.channel_table.configure(editable_columns=editable)
+            self._shown_editable = editable
+
+        pending = len(self._radio_draft)
+        ready = pending and self.model.channels_state == "read"
+        self.write_button.configure(
+            text=(f"Write {pending} to radio" if pending else "Write to radio"))
+        self.write_button.state("normal" if ready else "disabled")
+        self.discard_button.state("normal" if pending else "disabled")
 
     # -- tuning ------------------------------------------------------------
     def _tune_to_selected(self):

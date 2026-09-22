@@ -54,9 +54,19 @@ class SDRPlusPlusController:
         self.DEFAULT_FILTER_FALLBACKS["USB"] = gv.config.get_sdr_ssb_filter_default_hz()
         self.DEFAULT_FILTER_FALLBACKS["LSB"] = gv.config.get_sdr_ssb_filter_default_hz()
 
-        # Managed Scan Array targeting active subset pointer
+        # THE CHANNEL SETS ARE NO LONGER KEPT HERE. The application owns them
+        # -- see channel_sets.py -- and scans them itself, since not every SDR
+        # can scan. This controller used to load its own copy at startup and
+        # save it back on any change, which beside the Channels tab meant two
+        # copies, the stale one liable to be written over an edit.
+        #
+        # Its channel and scan methods remain for now, as the reference for
+        # the scanning being brought into the application, but nothing calls
+        # them. They are given NOTHING to work with rather than an empty set:
+        # a stray call then fails at once, where an empty set could be saved
+        # over the operator's channels without a word.
         self.scan_channels: List[Dict[str, Union[int, str]]] = []
-        self._load_channels_from_json()
+        self.scan_sets_dict = None
 
         # Scanner runtime properties
         self.is_scanning = False

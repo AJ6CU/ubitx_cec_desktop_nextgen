@@ -54,6 +54,10 @@ CHANNEL_FREQ_MAX_HZ = 60_000_000
 # exist, so they are garbage, not modes.
 CHANNEL_MODES = {0: "DFT", 2: "LSB", 3: "USB", 4: "CWL", 5: "CWU"}
 
+# Writing takes longer than reading -- the chip is programming EEPROM cells --
+# so a write is given longer to be acknowledged before it is retried.
+CHANNEL_WRITE_TIMEOUT_MS = 1500
+
 # How long to wait after a confirmation before sending the next command of a
 # sequence.
 #
@@ -1053,6 +1057,10 @@ class uBITX_Link:
 
             value = self._extract_value(buffer, 10, len(buffer) - 3)
             print("vn_UX_ACK_Memory_Write: ", value)
+            # The value is the ADDRESS that was written -- 358 is 0x166, the
+            # CW key type -- so each acknowledgement names its own write, and
+            # can be matched to it without counting.
+            self._radio_link._on_memory_written(value)
             # if self.CurrentDebug:
             #     print("vn get called:", "buffer =", buffer)
             #     print("buffer=", buffer)
@@ -1946,8 +1954,12 @@ class uBITX_Link:
 
         38 reads: twenty frequency-and-mode slots, then nine labels and nine
         label flags. See CHANNEL_READ_TIMEOUT_MS for why one at a time.
+
+        Not while WRITING, either: reads and writes share the rig's
+        attention, and a read slipped in among the writes would be answered
+        between them and upset both.
         """
-        if self._model.channels_state == "reading":
+        if self._model.channels_state in ("reading", "writing"):
             return
 
         requests = []
@@ -2546,89 +2558,148 @@ class uBITX_Link:
         #
         # self.sendCommandToMCU(bytes(command))
 
-    def Write_EEPROM_Channel_FreqMode(self, channelNum, freq, mode):
-        print("write EEPROM Channel FreqMode")
+    # ------------------------------------------------------------------
+    # Writing memory channels
+    # ------------------------------------------------------------------
+    def _channel_write_commands(self, slot, freq, mode, label, show_label):
+        """
+        The EEPROM writes one channel needs, as (address, command) pairs.
 
-        # encoded_data = (int(freq) & 0x1FFFFFFF) + ((int(EEPROM.Text_To_ModeNum[mode]) & 0x7) << 29)
-        #
-        # encodedBytes = self.Freq_Encode(str(encoded_data))
-        #
-        # lsb = (channelNum * EEPROM.Mem_Address["channel_freq_Mode"][EEPROM.memOffset]) + \
-        #       EEPROM.Mem_Address["channel_freq_Mode"][EEPROM.lsb]
-        # msb = EEPROM.Mem_Address["channel_freq_Mode"][EEPROM.msb]
-        # totalBytes = EEPROM.Mem_Address["channel_freq_Mode"][EEPROM.memLength]
-        #
-        # checksum = (lsb + msb + totalBytes) % 256
-        #
-        # command = [self.toRadioCommandDict["TS_CMD_WRITEMEM"],
-        #            lsb,
-        #            msb,
-        #            totalBytes,
-        #            checksum,
-        #            encodedBytes[0], encodedBytes[1], encodedBytes[2], encodedBytes[3]
-        #            ]
-        #
-        # self.sendCommandToMCU(bytes(command))
+        A frequency-and-mode write for every slot. A label and a show-label
+        write only for slots 1 to 9 -- the first nine carry a label, and the
+        tenth label slot is broken in the v2 firmware. The code this replaces
+        checked `channelNum > 9`, which let slot index 9 through and would
+        have written into that broken slot; this stops at the ninth.
+        """
+        commands = []
 
-    def Write_EEPROM_Channel_Label(self, channelNum, label):
-        print("write EEPROM Channel Label")
+        spec = EEPROM.Mem_Address["channel_freq_Mode"]
+        mode_number = EEPROM.Text_To_ModeNum.get(mode, 0)   # "?", "" -> DFT
+        encoded = (int(freq) & 0x1FFFFFFF) | ((mode_number & 0x7) << 29)
+        commands.append(self._eeprom_write(spec, slot, self.Freq_Encode(encoded)))
 
-        # if channelNum > EEPROM.Mem_Address["channel_ShowLabel"][EEPROM.totalSlots]:
-        #     return
-        #
-        # lsb = ((channelNum * EEPROM.Mem_Address["channel_Label"][EEPROM.memOffset]) +
-        #        EEPROM.Mem_Address["channel_Label"][EEPROM.lsb])
-        # msb = EEPROM.Mem_Address["channel_Label"][EEPROM.msb]
-        # totalBytes = EEPROM.Mem_Address["channel_Label"][EEPROM.memLength]
-        #
-        # # strip blanks
-        # noBlankLabel = label.strip()
-        # labelBytes = bytes(noBlankLabel.ljust(totalBytes), 'utf-8')
-        #
-        # checksum = (lsb + msb + totalBytes) % 256
-        #
-        # command = [self.toRadioCommandDict["TS_CMD_WRITEMEM"],
-        #            lsb,
-        #            msb,
-        #            totalBytes,
-        #            checksum,
-        #            labelBytes[0], labelBytes[1], labelBytes[2], labelBytes[3], labelBytes[4]
-        #            ]
-        #
-        # self.sendCommandToMCU(bytes(command))
+        if slot < EEPROM.Mem_Address["channel_Label"][EEPROM.totalSlots]:
+            spec = EEPROM.Mem_Address["channel_Label"]
+            length = spec[EEPROM.memLength]
+            text = "".join(ch for ch in str(label or "").strip()
+                           if 32 <= ord(ch) < 127)[:length]
+            commands.append(self._eeprom_write(
+                spec, slot, text.ljust(length).encode("ascii")))
 
-    def Write_EEPROM_Channel_ShowLabel(self, channelNum, showLabel):
-        print("write EEPROM Channel ShowLabel")
+            spec = EEPROM.Mem_Address["channel_ShowLabel"]
+            commands.append(self._eeprom_write(
+                spec, slot, bytes([0x3 if show_label else 0x0])))
+        return commands
 
-        #
-        #   Don't write to EEPROMs showLabels 10+
-        #
-        # if channelNum > EEPROM.Mem_Address["channel_ShowLabel"][EEPROM.totalSlots]:
-        #     return
-        #
-        # lsb = (channelNum * EEPROM.Mem_Address["channel_ShowLabel"][EEPROM.memOffset]) + \
-        #       EEPROM.Mem_Address["channel_ShowLabel"][EEPROM.lsb]
-        # msb = EEPROM.Mem_Address["channel_ShowLabel"][EEPROM.msb]
-        # totalBytes = EEPROM.Mem_Address["channel_ShowLabel"][EEPROM.memLength]
-        #
-        # checksum = (lsb + msb + totalBytes) % 256
-        #
-        # if showLabel == 'Yes':
-        #     value = 0x3
-        # else:
-        #     value = 0x0
-        #
-        # command = [self.toRadioCommandDict["TS_CMD_WRITEMEM"],
-        #            lsb,
-        #            msb,
-        #            totalBytes,
-        #            checksum,
-        #            value
-        #            ]
-        #
-        # self.sendCommandToMCU(bytes(command))
+    def _eeprom_write(self, spec, slot, data):
+        """One TS_CMD_WRITEMEM command for a slot, and the address it writes."""
+        lsb = spec[EEPROM.lsb] + slot * spec[EEPROM.memOffset]
+        msb = spec[EEPROM.msb]
+        length = spec[EEPROM.memLength]
+        checksum = (lsb + msb + length) % 256
+        command = [self.toRadioCommandDict["TS_CMD_WRITEMEM"],
+                   lsb, msb, length, checksum] + list(data)
+        return (msb << 8) | lsb, command
 
-        # print("Updated Spectrum Options", command)
+    def write_channels(self, channels):
+        """
+        Writes channels to the rig's EEPROM, then reads them all back.
+
+        `channels` is a list of (slot, freq, mode, label, show_label).
+
+        ONE WRITE AT A TIME, each confirmed by an acknowledgement naming the
+        address it wrote, so an acknowledgement cannot be credited to the
+        wrong write. One not acknowledged is retried, then given up on.
+
+        READ BACK AFTERWARDS, in full. The list then shows what the rig
+        actually holds rather than what was sent, so a write that did not
+        take shows its old value -- the rig is the authority here, as it is
+        everywhere else in this application.
+        """
+        if self._model.channels_state in ("reading", "writing"):
+            return
+        writes = []
+        for slot, freq, mode, label, show_label in channels:
+            for address, command in self._channel_write_commands(
+                    slot, freq, mode, label, show_label):
+                writes.append((slot, address, command))
+        if not writes:
+            return
+
+        self._channel_writes = writes
+        self._channel_write_attempts = 0
+        self._channel_write_timer = None
+        model = self._model
+        # Progress in CHANNELS, not writes: a channel is one write or three,
+        # depending on whether it carries a label, and "7 of 21" would be as
+        # meaningless as the 38 reads were.
+        model.channels_state = "writing"
+        model.channels_progress = 0
+        model.channels_expected = len(channels)
+        model.channels_write_failed = []
+        model.changed()
+        self._send_next_channel_write()
+
+    def _send_next_channel_write(self):
+        writes = getattr(self, "_channel_writes", None)
+        if not writes:
+            # All written. Read the lot back so the list shows the rig's
+            # values, not ours.
+            self._model.channels_state = "read"
+            self.read_channels()
+            return
+        _, address, command = writes[0]
+        self.sendCommandToMCU(bytes(command))
+        self._channel_write_timer = self.root.after(
+            CHANNEL_WRITE_TIMEOUT_MS, self._channel_write_timed_out)
+
+    def _channel_write_timed_out(self):
+        self._channel_write_timer = None
+        _, address, _ = self._channel_writes[0]
+        self._channel_write_attempts += 1
+        if self._channel_write_attempts <= CHANNEL_READ_RETRIES:
+            print(f"[chan] write to {address} not acknowledged; retrying "
+                  f"({self._channel_write_attempts} of {CHANNEL_READ_RETRIES})")
+            self._send_next_channel_write()
+            return
+        print(f"[chan] giving up on the write to {address}")
+        self._model.channels_write_failed.append(address)
+        self._finish_channel_write()
+
+    def _finish_channel_write(self):
+        slot = self._channel_writes.pop(0)[0]
+        self._channel_write_attempts = 0
+        # A channel is done when its last write is: the next one queued is
+        # for another slot, or there is none.
+        if not self._channel_writes or self._channel_writes[0][0] != slot:
+            self._model.channels_progress += 1
+        self._model.changed()
+        self.root.after(STEP_SETTLE_MS, self._send_next_channel_write)
+
+    def _on_memory_written(self, value):
+        """
+        An acknowledgement. Matched by the address it names.
+
+        One naming any other address is not the write outstanding -- a late
+        acknowledgement of a retried write, or a setting written elsewhere --
+        and is ignored rather than allowed to advance the sequence.
+        """
+        writes = getattr(self, "_channel_writes", None)
+        if not writes:
+            return
+        try:
+            address = int(str(value).strip())
+        except ValueError:
+            return
+        _, expected, _ = writes[0]
+        if address != expected:
+            print(f"[chan] acknowledgement for {address} while waiting on "
+                  f"{expected}; ignored")
+            return
+        if self._channel_write_timer is not None:
+            self.root.after_cancel(self._channel_write_timer)
+            self._channel_write_timer = None
+        self._finish_channel_write()
 
     def startFrequencySpectrumScan(self, freq, count):
         print("startFrequencySpectrumScan")

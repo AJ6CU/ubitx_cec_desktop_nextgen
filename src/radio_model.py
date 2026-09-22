@@ -143,6 +143,9 @@ class RadioModel:
         # channels and labels, which is how the operator thinks of them,
         # rather than as a count of 38 reads.
         self.channels_done = {"Freq": 0, "Label": 0, "ShowLabel": 0}
+        # Addresses whose write the rig never acknowledged, from the last
+        # "Write to radio". The read-back that follows shows what they hold.
+        self.channels_write_failed = []
 
         self.cw_tone = 600             # Hz. The TX offset in a CW mode.
         # Added to the tone to give the full offset. Reported by the rig from
