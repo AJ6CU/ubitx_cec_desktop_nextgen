@@ -160,8 +160,35 @@ style names.
 <a name="the-ubitx-interface"></a>
 ### The uBITX interface
 
-**Build the redesign**, using `ubitx_mockup.py` as the reference. The mockup
-is a working interface with simulated data; nothing in it talks to a radio.
+**Finish the redesign.** The mockup is now the working desktop
+(`ubitx_cec_desktop.py`): Operate, RX and Channels are built and talk to the
+rig and SDR++. Still to do, roughly in order of value:
+
+* **The rig connection dialog.** The serial port is hardcoded. `comportManager`
+  handled serial or network, retries and saving the choice; it needs to come
+  back, with its bugs fixed (see below).
+* **The meters.** `cp_`, `al_` (S-meter) and `vm_` (power and SWR) are
+  unwired, so both meters are empty. Wiring them also lets the scanner stop
+  on a signal, which it cannot do today.
+* **The CW tab** -- key type (`ck_`), speed (`vs_`), the two delays (`vy_`,
+  `ve_`): each needs its report stored and a command to change it.
+* **The RX tab** -- ATT (`vf_`) and IFS (`ci_`, `vi_`), the same way.
+* **Lock, mute and TX-stop are handled as toggles.** RIT and split turned out
+  to report their state (`1`/`0`); these probably do too. Press each and read
+  the console. Mute matters most: choosing SDR++ as the receiver silences the
+  rig by toggling it, judged by `model.muted`, which starts out assuming the
+  speaker is on.
+* **The CW offset switch (`ch_`).** The old code offset the transmit readout
+  only when it was on; the new code always does. Right for this rig, wrong
+  for one with it off.
+* **Log QSO, the Setup tab, EEPROM backup and restore.** Setup's fields do
+  not yet read or save the configuration -- including the MCU headroom, which
+  the link hardcodes as 0.04 while the settings file holds its own value.
+* **Launching SDR++ at startup** when autostart is set.
+* **Tidying once the old application is retired:** the settings file's scan
+  and channel entries, the SDR++ controller's dormant channel and scan
+  methods, `globalvars`' Nextion leftovers, and the "simulate transmit"
+  button, now that the rig reports transmit itself.
 
 **Test SDRangel's REST API.** The highest-value open question: does it report
 signal strength, and does it accept filter, AGC and noise-reduction changes?
@@ -207,11 +234,15 @@ products differ completely:
 do rather than pretending. Each backend declares what it supports, and the
 `SDR Software` setting under Setup is where the choice is made.
 
-| Backend  | Transport      | Signal strength      | Filter width | AGC / NR |
-| :---     | :---           | :---                 | :---         | :---     |
-| SDR++    | rigctl socket  | no — simulated today | yes          | no       |
-| Gqrx     | rigctl socket  | `l STRENGTH`         | via `M`      | no       |
-| SDRangel | REST           | expected             | expected     | expected |
+| Backend  | Transport      | Signal strength        | Filter width | AGC / NR | Volume |
+| :---     | :---           | :---                   | :---         | :---     | :---   |
+| SDR++    | rigctl socket  | no — meter left empty  | yes          | no       | the computer's master volume |
+| Gqrx     | rigctl socket  | `l STRENGTH`           | via `M`      | no       | not yet known |
+| SDRangel | REST           | expected               | expected     | expected | its own audio gain, expected |
+
+The boundary is ready for this. Only `SDR_Link` talks to the controller, and
+volume already goes through it, so SDR++ answers with the system volume and
+another backend can answer with its own -- without the Operate tab changing.
 
 ---
 
@@ -221,11 +252,10 @@ do rather than pretending. Each backend declares what it supports, and the
 These affect what is running today, not just the rebuild.
 
 **The SDR connection blocks the interface.** `SDRPlusPlusController` drives
-rigctl from the Tk `after()` loop with blocking sockets. `settimeout(2.0)` at
-connect means a slow SDR freezes the whole interface for two seconds, and the
-`recv` calls that flush acknowledgements set no timeout at all -- so an
-unresponsive SDR blocks indefinitely and the only way out is to kill the
-application.
+rigctl from the Tk `after()` loop with blocking sockets. *Partly fixed:* the
+socket now times out after one second instead of never, so an unresponsive
+SDR drops the connection rather than freezing the application for good. A
+one-second freeze on a stalled read is still possible.
 
 The rig does not have this problem: it is paced by the MCU headroom settings
 and the Nano always answers. The SDR has no such protection, and it is the
@@ -234,15 +264,13 @@ Both transports are single-threaded today -- neither imports `threading` --
 so anything introduced there is new, and its results must reach the interface
 through the Tk loop rather than directly.
 
-**Twenty-nine `xx_UX_` handlers still report and store nothing.** They print
-and their `theVFO` calls are commented out, so the rig tells us and the model
-never hears. Eight are wired -- split, RIT, lock, mute, TX-stop, transmit
-state, firmware, callsign -- plus frequency and mode. The rest are the tuning
-presets, the CW settings, ATT and IFS, the memory reads, and the meters.
-
-The meters are the ones worth doing next: `cp_`, `al_` and `vm_` are what
-would make the S-meter and power bars show something real rather than
-nothing. Until then the interface has no signal reading at all.
+**Some `xx_UX_` handlers still store nothing.** Wired since this was first
+written: the tuning presets, the CW tone and tweak, and the memory reads and
+write acknowledgements. Still unwired: the meters, the CW settings, ATT and
+IFS, and the CW offset switch -- listed with the rest of the remaining work
+under [The uBITX interface](#the-ubitx-interface). Some are deliberately
+ignored: `vr_` (its value is a firmware figure, not the RIT base), `c0_`, the
+greenbox lines, `cm_`, `vv_` and the spectrum reports.
 
 **`comportManager.py` line 225 is missing its parentheses.**
 
@@ -402,3 +430,33 @@ and still refuse to run.
 **`grep -c` counts lines, not occurrences.** A count quoted as a verification
 target is wrong whenever a line contains the pattern twice. A count that goes
 *down* after an additive change is a reliable signal that something was lost.
+
+**The Nano drops a command that arrives while it is busy.** Not while it is
+READING -- the 40 ms headroom covers that -- but while it is still CARRYING
+OUT the last one: a frequency write, a toggle. A channel's mode sent straight
+after its frequency was lost exactly so. Wait `STEP_SETTLE_MS` after a
+command the rig takes time over. See `ARCHITECTURE.md` on headroom and
+settle.
+
+**Replies matched by order break on one lost reply.** Memory reads say
+nothing about which slot they answer, so they are matched by position -- and
+when two were dropped, every later reply was filed against the wrong slot,
+plausibly. Send one at a time and wait for each. Where a reply names what it
+answers, as the write acknowledgement names its address, match by that.
+
+**Erased EEPROM reads as all ones.** A channel slot never written decodes to
+536,870,911 Hz in mode 7. Distrust every value read from EEPROM: range-check
+frequencies, check mode numbers against the ones that exist, keep only
+printable characters in labels.
+
+**Code that worked is not proof of what a report means.** `cs_` was taken
+to carry no state because the old handler never read its value. The rig
+showed otherwise. Press the control and read the console.
+
+**A test that cannot fail proves nothing.** A check for a fixed bug has to
+fail on the unfixed code first. The scanner's stray-timer fix passed its
+first test with and without the fix, because the timer never landed in the
+window that mattered; only a test that reproduced the stop showed the fix
+working. Twice in the same session a test "failure" was the test's own mistake -- a
+four-character byte string, a stand-in missing a method -- which is the
+other half of the same rule: check the check.
