@@ -61,6 +61,7 @@ from channel_sets import ChannelSets, LABEL_MAX as SET_LABEL_MAX
 from radio_model import RadioModel, LABEL_SLOTS, CHANNEL_SLOTS
 from stub_radio import StubRadio
 from sdr_link import SDR_Link
+from scanner import Scanner
 from ubitx_link import uBITX_Link
 
 from scustomtkinter import (
@@ -542,6 +543,12 @@ class UbitxCecDesktop(sCTk):
         self.sdr = SDR_Link(self, self.model, self.connection)
         self.sdr.on_status = self._show_sdr_status
 
+        # The scanner, run by the application rather than the SDR -- see
+        # scanner.py. It tunes the rig; the SDR follows the rig as ever.
+        self.scanner = Scanner(self, self.model, self.connection)
+        self.scanner.on_step = self._scan_reached
+        self.scanner.on_stop = self._scan_stopped
+
         #   initialize radio connection
         #
         # NOTHING IS SEEDED. The model starts at zero and the rig's own
@@ -648,6 +655,11 @@ class UbitxCecDesktop(sCTk):
         sdr = getattr(self, "sdr", None)
         if sdr is not None:
             sdr.follow()
+        # The scanner watches too: transmitting, or the frequency changing
+        # under it, stops the scan. getattr for the same reason as the SDR.
+        scanner = getattr(self, "scanner", None)
+        if scanner is not None:
+            scanner.watch()
 
     def _start_sdr(self):
         """Connects to SDR++ at startup, if it is switched on in the settings."""
@@ -1254,6 +1266,20 @@ class UbitxCecDesktop(sCTk):
                                                width=86, command=self._open_copy_prompt)
         self.copy_button.pack(side="left", padx=(12, 2))
 
+        # SCAN the set on show, from the selected channel, looping. The time
+        # on each channel is saved with the sets -- see ChannelSets.
+        self.scan_button = sCTkButtonPrimary(actions, text="▶ Scan", width=90,
+                                             command=self._toggle_scan)
+        self.scan_button.pack(side="left", padx=(24, 4))
+        self.dwell_entry = sCTkEntryPrimary(actions, width=48)
+        self.dwell_entry.pack(side="left")
+        self.dwell_entry.insert(0, str(self.channel_sets.dwell_seconds))
+        self.dwell_entry.bind("<Return>", lambda e: self._read_dwell())
+        self.dwell_entry.bind("<FocusOut>", lambda e: self._read_dwell())
+        sCTkLabelTertiary(actions, text="seconds on each",
+                          font=("Arial", 11)).pack(side="left", padx=4)
+        self._scan_set_name = None
+
 
         # slot -> {"freq", "mode", "label", "show_label"}: edits not yet
         # written. Overlaid on what the rig reported when the list is drawn.
@@ -1338,7 +1364,9 @@ class UbitxCecDesktop(sCTk):
                 for j, ch in enumerate(self.channel_sets.channels(chosen_set))]
 
     def _on_set_chosen(self, choice):
-        """A different set was chosen."""
+        """A different set was chosen -- which also ends a scan of the last."""
+        if self.scanner.running and choice != self._scan_set_name:
+            self.scanner.stop("stopped -- another set chosen")
         self._selected_channel = None
         self.channel_table.clear_selection()
         self._shown_set = None         # force a full reload
@@ -1410,6 +1438,18 @@ class UbitxCecDesktop(sCTk):
             # The application's, not SDR++'s, since the sets moved to their
             # own file -- see channel_sets.py.
             self.set_note.configure(text="a channel set -- saved as you edit")
+
+        # A running scan says where it is. Beneath a notice, which is more
+        # urgent and short-lived.
+        if self.scanner.running and self.scanner.index is not None:
+            entries = self._set_entries(self._scan_set_name)
+            i = self.scanner.index
+            if 0 <= i < len(entries):
+                usable = sum(1 for e in entries if e["freq"])
+                what = entries[i]["label"] or self.model.formatted(entries[i]["freq"])
+                self.set_note.configure(
+                    text=f"scanning -- channel {i + 1} ({what}), "
+                         f"{usable} to scan in '{self._scan_set_name}'")
 
         # A notice, while it lasts, takes the note's place.
         if self._channel_notice:
@@ -1906,6 +1946,18 @@ class UbitxCecDesktop(sCTk):
         source = self._source_channel(self._selected_channel) if chosen else None
         self.copy_button.state("normal" if source and source["freq"] else "disabled")
 
+        # Scan: Stop while running. Otherwise only with something to scan --
+        # and for the rig's set, only once it is read and not being written.
+        if self.scanner.running:
+            self.scan_button.configure(text="■ Stop")
+            self.scan_button.state("normal")
+        else:
+            self.scan_button.configure(text="▶ Scan")
+            scannable = any(e["freq"] for e in self._set_entries(self.set_picker.get()))
+            if not in_set and self.model.channels_state != "read":
+                scannable = False
+            self.scan_button.state("normal" if scannable else "disabled")
+
         # Set on the table itself, so a cell that may not be changed never
         # opens an editor at all -- rather than opening one and refusing.
         # The rig's set once it is fully read; a set at any time, and its
@@ -1933,6 +1985,41 @@ class UbitxCecDesktop(sCTk):
         if self._selected_channel is not None:
             self._tune_to_channel(self._selected_channel)
 
+    # -- scanning -----------------------------------------------------------
+    def _toggle_scan(self):
+        """Starts a scan of the set on show, or stops the one running."""
+        if self.scanner.running:
+            self.scanner.stop("stopped")
+            return
+        self._read_dwell()
+        name = self.set_picker.get()
+        self._scan_set_name = name
+        # The channels are FETCHED at every step, not copied now, so an edit
+        # made during the scan is honoured on the next pass.
+        self.scanner.start(lambda: self._set_entries(name),
+                           start_index=self._selected_channel or 0,
+                           dwell_seconds=self.channel_sets.dwell_seconds)
+        self.refresh()
+
+    def _read_dwell(self):
+        """Takes the time on each channel from its box, and saves it."""
+        seconds = self.channel_sets.set_dwell_seconds(self.dwell_entry.get())
+        # The box shows what was kept -- a number out of range comes back
+        # within it, and anything unreadable shows the value still in use.
+        self.dwell_entry.delete(0, "end")
+        self.dwell_entry.insert(0, str(seconds))
+
+    def _scan_reached(self, index):
+        """The scan arrived at a channel: show it."""
+        self._selected_channel = index
+        self.channel_table.select_row(index)
+        self.refresh()
+
+    def _scan_stopped(self, reason):
+        """The scan ended -- by request, or because the operator took over."""
+        self._notify(f"scan {reason}")
+        self.refresh()
+
     def _tune_to_channel(self, index):
         """
         Puts the receiver on a channel, through the rig.
@@ -1941,10 +2028,14 @@ class UbitxCecDesktop(sCTk):
         when it confirms, and SDR++ follows the model. Nothing here writes a
         frequency directly.
 
-        The mode is changed only when the channel has one the rig can use.
-        DFT means "whatever the rig was in", and SDR++ sets may hold modes the
-        rig does not have.
+        The mode is changed only when the channel has one the rig can use;
+        DFT tunes to the band's usual sideband. A set may hold modes the rig
+        does not have.
+
+        Tuning by hand ends a scan: the operator has chosen a channel.
         """
+        if self.scanner.running:
+            self.scanner.stop("stopped -- you chose a channel")
         entries = self._set_entries(self.set_picker.get())
         if not 0 <= index < len(entries):
             return

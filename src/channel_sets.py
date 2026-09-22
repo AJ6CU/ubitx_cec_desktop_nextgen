@@ -19,9 +19,15 @@ than settings, so it can be backed up, copied between machines or shared on
 its own. JSON rather than INI, because the sets are nested lists, which INI
 holds badly.
 
-The top level is {"version": 1, "sets": {...}}, so scan settings can sit
-beside the sets later without a second file, and a future change of layout
-can be recognised by its version.
+The top level is {"version": 1, "sets": {...}, "scan": {...}}: the scan
+settings sit beside the sets, and a future change of layout can be recognised
+by its version.
+
+SCANNING IS BY SET. The previous application also kept a separate "scan set"
+list in the settings file ("Scan Set Settings"), choosing channels to scan
+apart from the sets themselves. That concept is gone: you scan the set on
+show. Only the time spent on each channel remains a setting, and it lives
+here, moved over once from "Scan On Station Time".
 
 MOVING OVER
 
@@ -110,6 +116,7 @@ class ChannelSets:
         self._config = config
         self.path = path or DEFAULT_PATH
         self._sets = {}
+        self._scan = {"dwell_seconds": self._dwell_from_settings()}
         self.load()
 
     # ------------------------------------------------------------------
@@ -132,6 +139,12 @@ class ChannelSets:
                 with open(self.path, "r", encoding="utf-8") as handle:
                     data = json.load(handle)
                 self._sets = self._from_registry(data.get("sets", {}))
+                # A file from before scanning moved here has no "scan" part;
+                # it keeps the value taken from the settings file.
+                scan = data.get("scan")
+                if isinstance(scan, dict):
+                    self._scan["dwell_seconds"] = self._clean_dwell(
+                        scan.get("dwell_seconds"), self._scan["dwell_seconds"])
                 return
             except (OSError, ValueError, AttributeError) as err:
                 kept = f"{self.path}.damaged-{time.strftime('%Y%m%d-%H%M%S')}"
@@ -149,6 +162,39 @@ class ChannelSets:
         registry = self._config.get_scan_channels_registry() or {}
         self._sets = self._from_registry(registry)
         self.save()
+
+    def _dwell_from_settings(self):
+        """
+        The time on each channel from the settings file, in seconds -- where
+        it lived before, as "Scan On Station Time" in milliseconds. Five
+        seconds if it cannot be read.
+        """
+        try:
+            return self._clean_dwell(self._config.get_Scan_On_Station_Time() / 1000, 5)
+        except Exception:
+            return 5
+
+    @staticmethod
+    def _clean_dwell(value, fallback):
+        """A dwell time in whole seconds, 1 to 120, or `fallback`."""
+        try:
+            return max(1, min(120, int(round(float(value)))))
+        except (TypeError, ValueError):
+            return fallback
+
+    # ------------------------------------------------------------------
+    # Scan settings
+    # ------------------------------------------------------------------
+    @property
+    def dwell_seconds(self):
+        """Seconds the scan spends on each channel."""
+        return self._scan["dwell_seconds"]
+
+    def set_dwell_seconds(self, seconds):
+        """Sets the time on each channel, 1 to 120 seconds, and saves."""
+        self._scan["dwell_seconds"] = self._clean_dwell(seconds, self._scan["dwell_seconds"])
+        self.save()
+        return self._scan["dwell_seconds"]
 
     @staticmethod
     def _from_registry(registry):
@@ -266,7 +312,8 @@ class ChannelSets:
         """
         data = {"version": FILE_VERSION,
                 "sets": {set_name: [dict(ch) for ch in channels]
-                         for set_name, channels in self._sets.items()}}
+                         for set_name, channels in self._sets.items()},
+                "scan": dict(self._scan)}
         temporary = self.path + ".saving"
         try:
             with open(temporary, "w", encoding="utf-8") as handle:
