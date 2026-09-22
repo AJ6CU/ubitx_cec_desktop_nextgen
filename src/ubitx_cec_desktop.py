@@ -59,7 +59,6 @@ import globalvars as gv
 from configuration import ConfigurationManager
 from channel_sets import ChannelSets, LABEL_MAX as SET_LABEL_MAX
 from radio_model import RadioModel, LABEL_SLOTS, CHANNEL_SLOTS
-from stub_radio import StubRadio
 from sdr_link import SDR_Link
 from scanner import Scanner
 from ubitx_link import uBITX_Link
@@ -154,9 +153,10 @@ SPLIT_OFFSETS = (("up 1", 1), ("up 2", 2), ("up 5", 5),
 # Sizing. The frequency is the thing you read, so it takes what the window
 # can spare; the dials are what you reach for, so they follow.
 #
-# The panel's height comes from whichever is taller -- the readout stack or
-# the dial canvas -- so pushing one much past the other only adds empty
-# space. They are kept roughly in step for that reason.
+# The dial runs the panel's full height, beside the header line and the
+# readout stack together; the panel is as tall as the taller of the two. They
+# are kept roughly in step, since pushing one much past the other only adds
+# empty space.
 FREQ_FONT_SIZE = 56
 KNOB_DIAMETER = 118
 
@@ -220,6 +220,31 @@ class RolePanel(sCTkFrame):
         # up under the wheel.
         self._dial_state = None
 
+        # THE DIAL RUNS THE FULL HEIGHT OF THE PANEL, beside the header as
+        # well as the readout. It was in the body, under the header, and as
+        # the tallest thing there it set the body's height -- leaving an
+        # empty band under the frequency, with the header line stacked on
+        # top of that. Now the header and readout share the dial's height
+        # rather than adding to it.
+        #
+        # Built and packed FIRST so it claims the right-hand side before the
+        # header and body take what is left. fg_color transparent so the knob
+        # sits on the panel's own colour -- the dial's theme block carries
+        # its own background, which reads as a darker rectangle otherwise.
+        # width and height are the CANVAS, knob_diameter the knob drawn on
+        # it; set together, with just enough margin for the tick marks the
+        # dial draws outside the knob.
+        self.dial = sCTkDialContinuous(
+            self, divisions=24, knob_diameter=KNOB_DIAMETER,
+            width=KNOB_DIAMETER + 10, height=KNOB_DIAMETER + 10,
+            fg_color="transparent",
+            command=self._on_turn,
+            left_click_callback=lambda: self._click_step(-1),
+            right_click_callback=lambda: self._click_step(+1),
+            double_click_command=lambda d: d.set_pressed(True),
+            shift_double_click_command=lambda d: d.set_pressed(False))
+        self.dial.pack(side="right", padx=(4, 6), pady=2)
+
         header = sCTkFrame(self, fg_color="transparent", border_width=0)
         header.pack(fill="x", padx=8, pady=(5, 0))
 
@@ -256,32 +281,10 @@ class RolePanel(sCTkFrame):
         body = sCTkFrame(self, fg_color="transparent", border_width=0)
         body.pack(fill="x", padx=8, pady=(0, 5))
 
-        # PACKED BEFORE the readout, which expands.
-        #
-        # Tk gives space to packed children in order, and `left` has
-        # expand=True -- so a wide readout took what it wanted and the dial
-        # got whatever was left, which at a large font size was not much. The
-        # dial has a fixed size it should always get; the readout is the one
-        # that should give way.
+        # The readout and its note. The dial was packed first, on the panel
+        # itself, so it always gets its fixed size; the readout is the one
+        # that gives way.
         left = sCTkFrame(body, fg_color="transparent", border_width=0)
-
-        # fg_color transparent so the knob sits on the panel's own colour.
-        # The dial's theme block carries its own background, which reads as a
-        # darker rectangle behind the knob when it differs from the frame.
-        # width and height are the CANVAS; knob_diameter is the knob drawn on
-        # it. Left at their defaults the canvas is 120x120 whatever the knob
-        # does, so a bigger knob just fills more of the same box -- and a
-        # smaller one leaves a wide margin. Both are set together, with just
-        # enough margin for the tick marks the dial draws outside the knob.
-        self.dial = sCTkDialContinuous(
-            body, divisions=24, knob_diameter=KNOB_DIAMETER,
-            width=KNOB_DIAMETER + 10, height=KNOB_DIAMETER + 10,
-            fg_color="transparent",
-            command=self._on_turn,
-            left_click_callback=lambda: self._click_step(-1),
-            right_click_callback=lambda: self._click_step(+1),
-            double_click_command=lambda d: d.set_pressed(True),
-            shift_double_click_command=lambda d: d.set_pressed(False))
 
         # The LIBRARY widget now, not a local class.
         #
@@ -297,9 +300,6 @@ class RolePanel(sCTkFrame):
         self.note = sCTkLabelTertiary(left, text="", font=("Arial", 10))
         self.note.pack(anchor="w")
 
-        self.dial.pack(side="right", padx=(4, 0), pady=0)
-
-        # Now the readout, with whatever room the dial did not take.
         left.pack(side="left", fill="x", expand=True)
 
     def _on_digit(self, step):
@@ -542,6 +542,8 @@ class UbitxCecDesktop(sCTk):
         # exists to report whether that worked -- see _start_sdr.
         self.sdr = SDR_Link(self, self.model, self.connection)
         self.sdr.on_status = self._show_sdr_status
+        self.sdr.on_audio = self._sdr_audio_changed
+        self.sdr.on_signal = self._update_s_meter
 
         # The scanner, run by the application rather than the SDR -- see
         # scanner.py. It tunes the rig; the SDR follows the rig as ever.
@@ -568,7 +570,6 @@ class UbitxCecDesktop(sCTk):
         # a command is sent, and the confirmation updates the display -- the
         # shape the real rig imposes, kept so the controls are wired
         # correctly for it.
-        self.rig = StubRadio(self.model, self.after)
         self._toggles = {}
 
         # refresh() touches widgets from every tab, and sCTkSpinbox.set()
@@ -584,9 +585,9 @@ class UbitxCecDesktop(sCTk):
         # on in the settings, since that is how the station is set up.
         self._listen_source = ("SDR" if str(gv.config.get_SDR_Switch()) == "True"
                                else "Rig")
-        # The computer's audio, muted from this application. Not rig state
-        # either, and the rig's own speaker is tracked in the model.
-        self._sdr_muted = False
+        # The SDR's mute is NOT kept here: SDR_Link.muted reports it -- the
+        # SDR's own mute where it has one, which can also be changed in the
+        # SDR itself, and only otherwise the computer's.
         # state() repaints, so it is called only when the value changes.
         self._offset_state = None
 
@@ -595,7 +596,9 @@ class UbitxCecDesktop(sCTk):
                                      tab_style="rounded",
                                      text_orientation="auto",
                                      show_page_border=True)
-        self.notebook.pack(expand=True, fill="both", padx=10, pady=10)
+        # Vertical margins kept small: the window's height is better left to
+        # the SDR's window beside it.
+        self.notebook.pack(expand=True, fill="both", padx=10, pady=4)
 
         self._build_operate(self.notebook.add("Operate"))
         self._build_rx(self.notebook.add("RX"))
@@ -623,13 +626,22 @@ class UbitxCecDesktop(sCTk):
             with open(GEOMETRY_FILE) as handle:
                 return json.load(handle)["geometry"]
         except Exception:
-            # Sized for a 13" MacBook Air, which is 1470 points wide.
+            # A first start -- nothing remembered yet. Size only: where the
+            # window belongs depends on where the SDR's window sits on each
+            # screen, so the window manager places it.
             #
-            # Two ten-digit readouts at 56pt plus their dials do not fit in
-            # much less, and the first symptom of trying is a dial squeezed
-            # to nothing rather than anything that says "too narrow". Wider
-            # than the screen would be worse, so this is the screen.
-            return "1440x520"
+            # macOS: 1455x360, MEASURED -- the size the finished layout was
+            # set to by hand on a 13" MacBook Air (1470 points wide), read
+            # back from the geometry file. Two ten-digit readouts at 56pt
+            # plus their dials do not fit in much less width, and the first
+            # symptom of trying is a dial squeezed to nothing rather than
+            # anything that says "too narrow".
+            #
+            # Elsewhere: the earlier estimate, until someone measures one.
+            # Fonts and window borders differ enough that the Mac figure may
+            # clip there.
+            import sys
+            return "1455x360" if sys.platform == "darwin" else "1440x520"
 
     def _on_close(self):
         self._save_geometry()
@@ -663,11 +675,6 @@ class UbitxCecDesktop(sCTk):
 
     def _start_sdr(self):
         """Connects to SDR++ at startup, if it is switched on in the settings."""
-        # The slider starts where the level really is. Read here rather than
-        # while building, because on macOS it runs osascript, and the window
-        # should be up first.
-        self.volume_slider.set(self.sdr.get_volume())
-
         # Put the rig where the listening choice needs it: quiet if SDR++ is
         # the receiver, speaking if the rig is. Done now rather than while
         # building, because it sends a command to the rig.
@@ -684,9 +691,101 @@ class UbitxCecDesktop(sCTk):
         self.sdr.connect()
 
     def _show_sdr_status(self, connected):
-        """Says whether SDR++ is connected, on the status strip."""
+        """
+        Says whether the SDR is connected -- and, since what it can do is
+        only known once it is, sets up everything that depends on that.
+        """
         self.sdr_status.configure(
             text="sdr ok" if connected else "sdr — reconnect")
+
+        # What the SDR cannot do is GREYED, not left to fail when pressed.
+        has_filter = "filter" in self.sdr.capabilities
+        for btn in self.filter_buttons:
+            btn.state("normal" if has_filter else "disabled")
+
+        self.audio_note.configure(
+            text="Listening through the SDR quiets the rig's speaker. "
+                 f"{self.sdr.audio_description()} Listening through the rig, "
+                 "the level is its front-panel knob.")
+
+        # Squelch: live with its range where the SDR has one; otherwise
+        # greyed, saying why.
+        if self.sdr.has_squelch:
+            bottom, top = self.sdr.squelch_range()
+            self.squelch_slider.configure(from_=bottom, to=top, state="normal")
+            self.squelch_reset.state("normal")
+            self.squelch_auto.state("normal" if self.sdr.can_auto_squelch else "disabled")
+            self.squelch_note.configure(text="")
+        else:
+            self.squelch_slider.configure(state="disabled")
+            self.squelch_auto.state("disabled")
+            self.squelch_reset.state("disabled")
+            self.squelch_value.configure(text="")
+            self.squelch_note.configure(
+                text=(f"not available with {self.sdr.profile.name}"
+                      if connected else "needs a connected SDR"))
+        self._sdr_audio_changed()
+
+    def _squelch_moved(self, value):
+        """The squelch slider moved: show the value now, send it when it settles."""
+        self._show_squelch_value(value)
+        self.sdr.set_squelch(value)
+
+    def _show_squelch_value(self, threshold=None):
+        """
+        The squelch threshold. The signal it is compared against is on the
+        S-meter, where a reading belongs -- beside the threshold it read as
+        part of the squelch setting.
+        """
+        if not self.sdr.has_squelch:
+            return
+        # The SLIDER'S position, not the SDR's value: while it is being
+        # dragged, the SDR has not been sent the new threshold yet -- that
+        # waits for the slider to settle -- and reading the SDR here, five
+        # times a second with each signal reading, flicked the label back to
+        # the old threshold mid-drag. The slider also follows the SDR when
+        # the threshold is changed there, so it is right either way.
+        if threshold is None:
+            threshold = self.squelch_slider.get()
+        self.squelch_value.configure(text=self.sdr.squelch_text(threshold))
+
+    def _update_s_meter(self):
+        """
+        Redraws the S-meter alone -- called for each new signal reading, and
+        from refresh().
+
+        FROM WHICHEVER RECEIVER YOU ARE LISTENING THROUGH. Through the SDR,
+        its own signal reading where it has one (Gqrx); none for SDR++,
+        which cannot report one -- an empty meter rather than a guess.
+        Through the rig, the rig's own reading, which arrives once its
+        S-meter reports are wired. Silent while transmitting: the meter's
+        other half, power and SWR, is the one that matters then.
+        """
+        # The reading in words too, drawn by the meter on its caption line --
+        # the bar says roughly, this exactly. Only where there is a real
+        # figure: empty removes it.
+        text = ""
+        if self.model.transmitting:
+            value = 0.0
+        elif self._listen_source == "SDR":
+            value = self.sdr.s_units() or 0.0
+            if self.sdr.signal_dbfs is not None:
+                text = f"{self.sdr.signal_dbfs:.0f} dBFS"
+        else:
+            value = self.model.s_value
+        self.s_meter.set(s_value=value, sig_text=text)
+
+    def _sdr_audio_changed(self):
+        """
+        The SDR's audio level or mute changed -- in the SDR itself, or by
+        connecting. The slider moves to match; set() on a slider does not
+        fire its command, so this cannot loop back to the SDR.
+        """
+        self.volume_slider.set(self.sdr.get_volume())
+        if self.sdr.has_squelch and self.sdr.squelch is not None:
+            self.squelch_slider.set(self.sdr.squelch)
+            self._show_squelch_value()
+        self.refresh()
 
     def _on_configure(self, event):
         """
@@ -766,7 +865,7 @@ class UbitxCecDesktop(sCTk):
 
         # The two VFOs -----------------------------------------------------
         vfos = sCTkFrame(page, fg_color="transparent", border_width=0)
-        vfos.grid(row=0, column=0, sticky="ew", padx=6, pady=(6, 2))
+        vfos.grid(row=0, column=0, sticky="ew", padx=6, pady=(2, 2))
         vfos.grid_columnconfigure((0, 1), weight=1, uniform="vfo")
 
         self.panel_rx = RolePanel(vfos, "rx", self)
@@ -792,7 +891,7 @@ class UbitxCecDesktop(sCTk):
 
         # Actions ----------------------------------------------------------
         actions = sCTkFrame(page, fg_color="transparent", border_width=0)
-        actions.grid(row=3, column=0, sticky="ew", padx=6, pady=(8, 2))
+        actions.grid(row=3, column=0, sticky="ew", padx=6, pady=(4, 2))
 
         sCTkButtonPrimary(actions, text="Log QSO", width=96,
                           command=self._log_qso).pack(side="left", padx=(0, 4))
@@ -844,6 +943,25 @@ class UbitxCecDesktop(sCTk):
             command=lambda value: self.sdr.set_volume(value))
         self.volume_slider.pack(side="left", padx=(4, 2))
 
+        # CONNECTION STATUS and the on-top toggle, at the right end of this
+        # row. They had a row of their own at the bottom of the window, which
+        # cost height better left to the SDR's window; the rest of that row
+        # only repeated what is shown elsewhere.
+        self.sdr_status = sCTkButtonTertiary(
+            actions, text="sdr — reconnect", width=130, height=22,
+            command=self._reconnect_sdr)
+        self.sdr_status.pack(side="right")
+        # Only that the serial port opened -- if it had not, the application
+        # would have stopped. The rig's silence cannot say more: it reports
+        # only when something changes. Real status comes with the connection
+        # dialog.
+        sCTkLabelTertiary(actions, text="rig ok",
+                          font=("Arial", 11)).pack(side="right", padx=8)
+        self.on_top_button = sCTkButtonTertiary(
+            actions, text="not on top", width=96, height=22,
+            command=self._toggle_on_top)
+        self.on_top_button.pack(side="right", padx=8)
+
         # Role controls ----------------------------------------------------
         #
         # Three columns. The outer two sit under the frequency they belong to
@@ -854,7 +972,7 @@ class UbitxCecDesktop(sCTk):
         # The middle column takes no spare width, so the two role groups stay
         # pinned under their own panels as the window grows.
         role_row = sCTkFrame(page, fg_color="transparent", border_width=0)
-        role_row.grid(row=2, column=0, sticky="ew", padx=6, pady=(4, 0))
+        role_row.grid(row=2, column=0, sticky="ew", padx=6, pady=(2, 0))
         role_row.grid_columnconfigure(0, weight=1)
         role_row.grid_columnconfigure(1, weight=0)
         role_row.grid_columnconfigure(2, weight=1)
@@ -907,6 +1025,8 @@ class UbitxCecDesktop(sCTk):
         self.offset_note.pack(anchor="e", pady=(2, 0))
 
         # Band and mode, between the two -----------------------------------
+        # Band ABOVE mode, both centred: two short lines rather than one long
+        # one, which leaves the receive controls beside them room to breathe.
         centre = sCTkFrame(role_row, fg_color="transparent", border_width=0)
         centre.grid(row=0, column=1, padx=16)
 
@@ -915,82 +1035,79 @@ class UbitxCecDesktop(sCTk):
         self.band_picker = sCTkSpinbox(
             centre, values=[b[0] for b in self.model.BANDS], wrap=False, width=110,
             command=self._on_band)
-        self.band_picker.pack(side="left", padx=(0, 8))
+        self.band_picker.pack(pady=(0, 6))
 
         # Mode is DIRECT selection, not a rotary: you jump between modes
         # rather than sweeping through them.
         self.mode_picker = sCTkSegmentedButton(
             centre, values=MODES, command=self._on_mode)
-        self.mode_picker.pack(side="left")
+        self.mode_picker.pack()
 
         # Receive controls, under the receive frequency --------------------
-        rx_row = sCTkFrame(role_row, fg_color="transparent", border_width=0)
-        rx_row.grid(row=0, column=0, sticky="w")
+        # Two groups side by side: the FILTER on the left, and the listening
+        # aids on the right -- AGC, NR and Notch, with SQUELCH beneath them,
+        # since it is one of the things you reach for while listening.
+        rx_column = sCTkFrame(role_row, fg_color="transparent", border_width=0)
+        rx_column.grid(row=0, column=0, sticky="w")
 
+        rx_row = sCTkFrame(rx_column, fg_color="transparent", border_width=0)
+        # Top padding lines the filter up with the first line INSIDE the
+        # outlined group beside it -- its border plus its inner padding.
+        rx_row.grid(row=0, column=0, sticky="nw", pady=(4, 0))
         sCTkLabelTertiary(rx_row, text="filter",
                           font=("Arial", 11)).pack(side="left", padx=(0, 6))
-        sCTkButtonSecondary(rx_row, text="wide", width=60,
-                            command=lambda: self._filter(+300)).pack(side="left", padx=2)
-        sCTkButtonSecondary(rx_row, text="narrow", width=60,
-                            command=lambda: self._filter(-300)).pack(side="left", padx=2)
-        sCTkButtonSecondary(rx_row, text="reset", width=56,
-                            command=self._filter_reset).pack(side="left", padx=2)
+        # Kept, so they can be greyed out when the SDR takes no filter width
+        # -- see _show_sdr_status.
+        self.filter_buttons = []
+        for text, width, action in (("wide", 60, lambda: self._filter(+300)),
+                                    ("narrow", 60, lambda: self._filter(-300)),
+                                    ("reset", 56, self._filter_reset)):
+            btn = sCTkButtonSecondary(rx_row, text=text, width=width, command=action)
+            btn.pack(side="left", padx=2)
+            self.filter_buttons.append(btn)
         self.filter_label = sCTkLabelPrimary(rx_row, text="2400 Hz",
                                              font=("Arial", 11))
         self.filter_label.pack(side="left", padx=8)
 
+        # THE SIGNAL CONTROLS, OUTLINED: they go together, and the outline
+        # says so. Set well apart from the filter, so the two groups read as
+        # two. The buttons are CENTRED over the squelch line, which is the
+        # widest thing in the group and so sets its width.
+        aids = sCTkFrame(rx_column, fg_color="transparent", border_width=1)
+        aids.grid(row=0, column=1, sticky="nw", padx=(28, 0))
+        dsp_row = sCTkFrame(aids, fg_color="transparent", border_width=0)
+        dsp_row.pack(pady=(3, 0))
         for label in ("AGC", "NR", "Notch"):
-            btn = sCTkButtonSecondary(rx_row, text=label, width=56)
+            btn = sCTkButtonSecondary(dsp_row, text=label, width=56)
             btn.pack(side="left", padx=2)
             btn.state("disabled")
 
-        self._build_status_strip(page)
+        # SQUELCH, beneath AGC / NR / Notch. The SDR's own, where it has one
+        # (Gqrx), in its own units so it reads as the SDR shows it. Range and
+        # state are set on connecting -- see _show_sdr_status -- and it
+        # follows a change made in the SDR itself, as volume does.
+        sq_row = sCTkFrame(aids, fg_color="transparent", border_width=0)
+        sq_row.pack(padx=10, pady=(3, 3))
+        sCTkLabelTertiary(sq_row, text="squelch",
+                          font=("Arial", 11)).pack(side="left", padx=(2, 6))
+        self.squelch_slider = sCTkSlider(sq_row, from_=-150, to=0, width=120,
+                                         command=self._squelch_moved)
+        self.squelch_slider.pack(side="left")
+        # A and R, as on Gqrx's own squelch: set just above what is heard
+        # now, and open fully. Named as Gqrx names them, since that is where
+        # anyone using them will have met them.
+        self.squelch_auto = sCTkButtonSecondary(sq_row, text="A", width=30,
+                                                command=self.sdr.auto_squelch)
+        self.squelch_auto.pack(side="left", padx=(6, 2))
+        self.squelch_reset = sCTkButtonSecondary(sq_row, text="R", width=30,
+                                                 command=self.sdr.reset_squelch)
+        self.squelch_reset.pack(side="left", padx=2)
+        self.squelch_value = sCTkLabelPrimary(sq_row, text="", font=("Arial", 11))
+        self.squelch_value.pack(side="left", padx=6)
+        self.squelch_note = sCTkLabelTertiary(sq_row, text="", font=("Arial", 10))
+        self.squelch_note.pack(side="left", padx=4)
 
-    def _build_status_strip(self, page):
-        """
-        The bottom line: what the radio is doing, and whether it is reachable.
 
-        Moved here from the top because none of it is something you act on
-        mid-QSO -- it is state you glance at. The frequencies deserve the
-        position your eye lands on first.
-
-        The callsign and firmware version are gone entirely: they never
-        change, so they belong in About rather than occupying the same line
-        as live state.
-        """
-        strip = sCTkFrame(page, fg_color="transparent", border_width=0)
-        strip.grid(row=6, column=0, sticky="ew", padx=6, pady=(0, 6))
-
-        self.tx_chip = sCTkLabelPrimary(strip, text=" RX ", font=("Arial", 11),
-                                        fg_color=("#0F6E56", "#0F6E56"),
-                                        corner_radius=4)
-        self.tx_chip.pack(side="left")
-
-        self.mode_label = sCTkLabelTertiary(strip, text="USB",
-                                            font=("Arial", 11))
-        self.mode_label.pack(side="left", padx=8)
-
-        self.sdr_status = sCTkButtonTertiary(
-            strip, text="sdr — reconnect", width=130, height=22,
-            command=self._reconnect_sdr)
-        self.sdr_status.pack(side="right")
-
-        # NOT part of the design. The real radio transmits from the key or the
-        # PTT, so there is no transmit button to place -- this is here only so
-        # this can show what the panel looks like on air, and it sits
-        # apart from the controls that are real.
-        sCTkButtonTertiary(strip, text="simulate transmit", width=130,
-                           height=22, command=self._toggle_tx
-                           ).pack(side="right", padx=8)
-        sCTkLabelTertiary(strip, text="rig ok",
-                          font=("Arial", 11)).pack(side="right", padx=8)
-
-        self.on_top_button = sCTkButtonTertiary(
-            strip, text="not on top", width=96, height=22,
-            command=self._toggle_on_top)
-        self.on_top_button.pack(side="right", padx=8)
-
-    # -- the other tabs, sketched -----------------------------------------
     def _build_rx(self, page):
         wrap = sCTkFrame(page, fg_color="transparent", border_width=0)
         wrap.pack(fill="both", expand=True, padx=14, pady=12)
@@ -1039,26 +1156,27 @@ class UbitxCecDesktop(sCTk):
 
         # Volume moved to Operate, beside Mute. What is said here is how the
         # choice above changes the audio.
-        sCTkLabelTertiary(
-            wrap,
-            text="Listening through SDR++ quiets the rig's speaker, and the "
-                 "volume on Operate is then the computer's output volume -- "
-                 "SDR++ cannot set its own level, so every application follows "
-                 "it. Listening through the rig, the level is its front-panel "
-                 "knob.",
-            font=("Arial", 10), wraplength=640,
-            justify="left").pack(anchor="w", pady=(4, 8))
+        # What the volume and mute act on depends on the SDR -- its own audio
+        # for Gqrx, the whole computer for SDR++ -- so the note is filled in
+        # on connecting. See _show_sdr_status.
+        self.audio_note = sCTkLabelTertiary(
+            wrap, text="", font=("Arial", 10), wraplength=640, justify="left")
+        self.audio_note.pack(anchor="w", pady=(4, 8))
 
         for label, note in (("ATT", "rig front end only"),
-                            ("IFS", "rig front end only"),
-                            ("Squelch", "awaiting backend"),
-                            ("AGC", "awaiting backend")):
+                            ("IFS", "rig front end only")):
             line = sCTkFrame(wrap, fg_color="transparent", border_width=0)
             line.pack(anchor="w", pady=3)
             sw = sCTkSwitch(line, text=label)
             sw.pack(side="left")
             sCTkLabelTertiary(line, text=note,
                               font=("Arial", 10)).pack(side="left", padx=10)
+
+        line = sCTkFrame(wrap, fg_color="transparent", border_width=0)
+        line.pack(anchor="w", pady=3)
+        sCTkSwitch(line, text="AGC").pack(side="left")
+        sCTkLabelTertiary(line, text="awaiting backend",
+                          font=("Arial", 10)).pack(side="left", padx=10)
 
     def _build_channels(self, page):
         """
@@ -2221,8 +2339,7 @@ class UbitxCecDesktop(sCTk):
         which was already meant to be quiet -- and left SDR++ playing.
         """
         if self._listen_source == "SDR":
-            self._sdr_muted = not self._sdr_muted
-            self.sdr.set_muted(self._sdr_muted)
+            self.sdr.set_muted(not self.sdr.muted)
             self.refresh()
         else:
             self.connection.Toggle_Speaker()
@@ -2275,12 +2392,6 @@ class UbitxCecDesktop(sCTk):
         # had until it began drawing its own target, and fixed the same way.
         self.panel_tx.show_pending(
             self.model.role_frequency("rx") + khz * 1000)
-
-    def _toggle_tx(self):
-        """Simulation only -- the rig reports transmit, it is not commanded."""
-        if self.model.tx_inhibit and not self.model.transmitting:
-            return
-        self.rig.report_transmitting(not self.model.transmitting)
 
     def _swap(self):
         """
@@ -2555,18 +2666,12 @@ class UbitxCecDesktop(sCTk):
         self.panel_rx.update_view(s)
         self.panel_tx.update_view(s)
 
-        # Transmit indicator.
-        self.tx_chip.configure(
-            text=" TX " if s.transmitting else " RX ",
-            fg_color=("#993C1D", "#993C1D") if s.transmitting
-            else ("#0F6E56", "#0F6E56"))
-
         # Latched controls read as lit or unlit.
         for key, btn in self._toggles.items():
             if key == "muted":
                 # Lit for whichever receiver Mute acts on, and says which, so
                 # there is no doubt what pressing it will silence.
-                on = (self._sdr_muted if self._listen_source == "SDR"
+                on = (self.sdr.muted if self._listen_source == "SDR"
                       else s.muted)
                 btn.configure(text=("Mute SDR" if self._listen_source == "SDR"
                                     else "Mute rig"))
@@ -2622,14 +2727,13 @@ class UbitxCecDesktop(sCTk):
             self.mode_picker.set(s.mode)
 
         self.filter_label.configure(text=f"{s.filter_hz} Hz")
-        self.mode_label.configure(text=s.mode)
         self._refresh_channels()
         self.channel_now.configure(
             text=f"{s.role_text('rx')}   {s.mode}")
 
         # Meters. The receive side goes quiet on transmit and the transmit
         # side wakes up -- one instrument, two halves, neither ever dead.
-        self.s_meter.set(s_value=0.0 if s.transmitting else s.s_value)
+        self._update_s_meter()
         self.p_meter.set(pwr_value=s.pwr, swr_value=s.swr)
 
     def _tick(self):
