@@ -88,6 +88,8 @@ class RadioModel:
                 single redraw. Without it, every report redraws immediately.
         """
         self._on_change = on_change
+        # Reports received from the rig -- see changed().
+        self.reports = 0
         self._schedule = schedule
         self._pending = False
 
@@ -207,6 +209,13 @@ class RadioModel:
         observers. Preferences are independent of each other, change rarely,
         and have distant consumers -- exactly the case where per-key is right.
         """
+        # HOW MANY REPORTS HAVE ARRIVED. Only the transport writes to the
+        # model, so this counts what the rig has actually said -- which is
+        # the only way to tell a radio that is answering from one that is
+        # switched off behind an open port. The starting values below are
+        # seeded, so they cannot be used for that.
+        self.reports += 1
+
         if self._on_change is None:
             return
 

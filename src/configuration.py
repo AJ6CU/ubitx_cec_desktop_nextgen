@@ -38,11 +38,6 @@ class ConfigurationManager:
         else:
             print(f"[+] Creating fresh configuration profile at: {self.configuration_file}")
             self.config_data = default_config_data.copy()
-
-            # # Guarantee native fallback keys exist immediately on fresh profile creation
-            # if "Radio IP" not in self.config_data: self.config_data["Radio IP"] = "127.0.0.1"
-            # if "Radio Port" not in self.config_data: self.config_data["Radio Port"] = 4532
-
             self.saveConfig()
 
     def saveConfig(self):
@@ -86,37 +81,29 @@ class ConfigurationManager:
             self.saveConfig()
             return self.config_data[configParameter]
 
-    def getRadioPort(self):
-        return self.getValueOrDefault("Serial Port")
-    def setRadioPort(self, port):
-        self.config_data ["Serial Port"] = port
+    # ------------------------------------------------------------------
+    # The rig's connection
+    # ------------------------------------------------------------------
+    def get_rig_port(self) -> str:
+        """
+        Where the rig is: a serial device -- "/dev/cu.usbserial-A5069RR4",
+        "COM3" -- or a network rig as "socket://host:port". One setting, since
+        one of them is in use and the prefix says which.
+        """
+        return str(self.getValueOrDefault("Rig Port"))
+
+    def set_rig_port(self, port: str):
+        self.config_data["Rig Port"] = str(port).strip()
         self.saveConfig()
+        self._notify_observers("Rig Port", port)
 
+    def get_rig_baud(self) -> int:
+        """The rig's serial speed. 57600 is what KD8CEC firmware uses."""
+        return int(self.getValueOrDefault("Rig Baud"))
 
-    def get_ScanSet_Settings(self, channel):
-        return self.getValueOrDefault("Scan Set Settings")[channel][1]
-
-    def set_ScanSet_Settings(self, channel, scanSet):
-        self.config_data["Scan Set Settings"][channel][1] = scanSet
+    def set_rig_baud(self, baud: int):
+        self.config_data["Rig Baud"] = int(baud)
         self.saveConfig()
-
-
-    def get_Scan_On_Station_Time(self):
-        return int(self.getValueOrDefault("Scan On Station Time"))
-
-    def set_Scan_On_Station_Time(self, time):
-        self.config_data["Scan On Station Time"] = time
-        self.saveConfig()
-
-    # def get_scan_station_time_ms(self) -> int:
-    #     """Fetches memory tracking channel stepping loop duration delay window."""
-    #     return int(self.getValueOrDefault("Scan On Station Time"))
-
-    def set_scan_station_time_ms(self, milliseconds: int):
-        """Sets channel cycle loop timing threshold limits and notifies observers."""
-        self.config_data["Scan On Station Time"] = int(milliseconds)
-        self.saveConfig()
-        self._notify_observers("Scan On Station Time", milliseconds)
 
     def get_MCU_Command_Headroom(self):
         return self.getValueOrDefault("MCU Command Headroom")
@@ -265,25 +252,27 @@ class ConfigurationManager:
         self.config_data["DSP"] = value
         self.saveConfig()
 
-    def get_SDR_Switch(self) -> bool:
-        """Fetches target system communication network socket connector port."""
-        return self.getValueOrDefault("SDR")
+    # ------------------------------------------------------------------
+    # The SDR
+    # ------------------------------------------------------------------
+    def get_sdr_software(self) -> str:
+        """
+        Which SDR program: "sdr++", "gqrx", "rigctld" -- or "none".
 
-    def set_SDR_Switch(self, switch: bool):
-        """Sets target transceiver communications loop connector port and notifies observers."""
-        self.config_data["SDR"] = switch
+        "none" is how the operator says there is no SDR, and the only way:
+        the old separate "SDR" switch is gone, because a switch and a name
+        can disagree about whether there is one.
+        """
+        return str(self.getValueOrDefault("SDR Software")).strip().lower()
+
+    def set_sdr_software(self, sdr_software: str):
+        self.config_data["SDR Software"] = str(sdr_software).strip().lower()
         self.saveConfig()
-        # self._notify_observers("Radio Port", port_val)
+        self._notify_observers("SDR Software", sdr_software)
 
-    def get_SDR_Software(self) -> str:
-        """Fetches target system communication network socket connector port."""
-        return self.getValueOrDefault("SDR Software")
-
-    def set_SDR_Software(self, sdr_software: str):
-        """Sets target transceiver communications loop connector port and notifies observers."""
-        self.config_data["SDR Software"] = sdr_software
-        self.saveConfig()
-        # self._notify_observers("Radio Port", port_val)
+    def sdr_enabled(self) -> bool:
+        """Whether an SDR is to be used at all."""
+        return self.get_sdr_software() not in ("none", "")
 
     def get_SDR_Autostart(self) -> bool:
         """Fetches target system communication network socket connector port."""
@@ -294,7 +283,6 @@ class ConfigurationManager:
         """Sets target transceiver communications loop connector port and notifies observers."""
         self.config_data["SDR Autostart"] = autostart
         self.saveConfig()
-        # self._notify_observers("Radio Port", port_val)
 
 
     def get_Logbook_Switch(self):
@@ -335,25 +323,26 @@ class ConfigurationManager:
         self.config_data["Logbook Name"] = value
         self.saveConfig()
 
-    def get_sdr_server_ip(self) -> str:
-        """Fetches the target transceiver host network string address."""
-        return str(self.getValueOrDefault("Radio IP"))
+    def get_sdr_host(self) -> str:
+        """The SDR's address -- usually 127.0.0.1, the same computer."""
+        return str(self.getValueOrDefault("SDR Host"))
 
-    def set_sdr_server_ip(self, ip_str: str):
-        """Sets target host network address and notifies observers."""
-        self.config_data["Radio IP"] = str(ip_str).strip()
+    def set_sdr_host(self, host: str):
+        self.config_data["SDR Host"] = str(host).strip()
         self.saveConfig()
-        self._notify_observers("Radio IP", ip_str)
+        self._notify_observers("SDR Host", host)
 
-    def get_sdr_tcp_port(self) -> int:
-        """Fetches target system communication network socket connector port."""
-        return int(self.getValueOrDefault("Radio Port"))
+    def get_sdr_port(self) -> int:
+        """
+        The SDR's port. Each program has its own default -- 4532 for SDR++,
+        7356 for Gqrx, 8091 for SDRangel -- see sdr_profiles.
+        """
+        return int(self.getValueOrDefault("SDR Port"))
 
-    def set_sdr_tcp_port(self, port_val: int):
-        """Sets target transceiver communications loop connector port and notifies observers."""
-        self.config_data["Radio Port"] = int(port_val)
+    def set_sdr_port(self, port_val: int):
+        self.config_data["SDR Port"] = int(port_val)
         self.saveConfig()
-        self._notify_observers("Radio Port", port_val)
+        self._notify_observers("SDR Port", port_val)
 
     def get_last_active_frequency(self) -> int:
         """Fetches the previous successful runtime operational base tracking frequency."""
@@ -364,18 +353,6 @@ class ConfigurationManager:
         self.config_data["Last Active Frequency"] = int(freq_hz)
         self.saveConfig()
         self._notify_observers("Last Active Frequency", freq_hz)
-
-    def get_scan_channels_registry(self) -> dict:
-        """Extracts the entire multi-bank scanner registry stack."""
-        data = self.getValueOrDefault("Scan Channels Registry Queue")
-        return data if isinstance(data, dict) else {"DEFAULT SET": []}
-
-
-    def set_scan_channels_registry(self, registry_dict: dict):
-        """Updates and serializes all scanner channel banks to persistent storage."""
-        self.config_data["Scan Channels Registry Queue"] = dict(registry_dict)
-        self.saveConfig()
-        self._notify_observers("Scan Channels Registry Queue", registry_dict)
 
     def get_sdr_filter_width_hz(self) -> int:
         """Pulls stored bandwidth configuration specifications."""

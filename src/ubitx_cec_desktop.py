@@ -58,9 +58,11 @@ import customtkinter as ctk
 import globalvars as gv
 from configuration import ConfigurationManager
 from channel_sets import ChannelSets, LABEL_MAX as SET_LABEL_MAX
+from serial_ports import list_rig_ports, parse_rig_port, open_rig_port
 from radio_model import RadioModel, LABEL_SLOTS, CHANNEL_SLOTS
 from sdr_link import SDR_Link
 from scanner import Scanner
+from sdr_profiles import profile_for
 from ubitx_link import uBITX_Link
 
 from scustomtkinter import (
@@ -71,7 +73,8 @@ from scustomtkinter import (
     sCTkSegmentedButton, sCTkSwitch, sCTkComboBox, sCTkEntryPrimary,
     sCTkOptionMenuPrimary, sCTkMessagebox,
     sCTkCheckBox, sCTkFrequencyDisplay, sCTkSlider,
-    sCTkProgressBar, sCTkTableview,
+    sCTkProgressBar, sCTkTableview, sCTkScrollableFrame,
+    sCTkFrameLabeledSecondary,
 )
 
 # ---------------------------------------------------------------------------
@@ -83,6 +86,15 @@ from scustomtkinter import (
 #     ("15 m", 21_074_000), ("12 m", 24_915_000), ("10 m", 28_074_000),
 # ]
 MODES = ["LSB", "USB", "CWL", "CWU"]
+
+# The SDR programs offered on Setup: the setting's name, and what is shown.
+# "None" first, because it is where a new station starts.
+SDR_CHOICES = (("none", "None"), ("sdr++", "SDR++"), ("gqrx", "Gqrx"),
+               ("rigctld", "rigctld (Hamlib)"))
+
+# Logbook formats: what the setting holds, and what it is called. The setting
+# IS the file's extension -- see _choose_logbook_file.
+LOGBOOK_FORMATS = (("adi", "ADIF"), ("csv", "CSV"))
 CW_TONE_HZ = 500
 
 # The widest useful filter for each mode, and what reset returns to.
@@ -95,6 +107,15 @@ CW_TONE_HZ = 500
 # Long enough that a wheel spin accumulates as one gesture, short enough that
 # the next deliberate turn starts from where the radio actually is.
 TURN_ACCUMULATE_SECONDS = 0.6
+
+# How long the rig has to answer the startup dump before it counts as silent.
+# The reports normally begin within a fraction of a second.
+RIG_ANSWER_MS = 2500
+
+# One row of a Setup group, and the controls in it. Fixed so the rows keep
+# the same pitch whatever kind of control they hold.
+SETTINGS_ROW_HEIGHT = 30
+SETTINGS_CONTROL_HEIGHT = 24
 
 # The Channels tab.
 RADIO_SET = "Radio (20 slots)"
@@ -184,6 +205,25 @@ LATCHING_DIALS = False
 # application's windows -- and the answer would be stale the moment either
 # one moved.
 GEOMETRY_FILE = os.path.expanduser("~/.ubitx_cec_desktop_geometry.json")
+
+
+class NullRig:
+    """
+    Stands in for uBITX_Link when no port is open.
+
+    Every command is accepted and does nothing, so the interface runs with no
+    radio attached -- which is what the operator sees while choosing a port,
+    and what they are left with if none works. The alternative is a check
+    before every command, in every handler, forever.
+
+    It reports NOTHING back, so the model stays empty and the readouts show
+    zeros: obviously "not known", which is the truth.
+    """
+
+    reader_process_id = None
+
+    def __getattr__(self, name):
+        return lambda *args, **kwargs: None
 
 
 # ---------------------------------------------------------------------------
@@ -520,7 +560,7 @@ class UbitxCecDesktop(sCTk):
         # The channel sets, owned here -- see channel_sets.py. The Channels
         # tab edits them and the scanner will read them; nothing else keeps a
         # copy.
-        self.channel_sets = ChannelSets(gv.config)
+        self.channel_sets = ChannelSets()
 
         # on_change is _model_changed rather than refresh: the view redraws,
         # and SDR++ is brought into step, from the same notification. schedule
@@ -528,14 +568,18 @@ class UbitxCecDesktop(sCTk):
         # RadioModel.changed().
         self.model = RadioModel(on_change=self._model_changed,
                                 schedule=self.after)
-        # #
-        # #   open port to the ubitx
-        # #
-        port = "/dev/cu.usbserial-A5069RR4"
-        BAUD = 57600
-        RS232 = serial.Serial(port, BAUD, timeout=5, stopbits=1, parity=serial.PARITY_NONE, xonxoff=0, rtscts=0, write_timeout=1)
-
-        self.connection = uBITX_Link(self, RS232, self.model, 250)
+        # THE RIG'S PORT COMES FROM THE SETTINGS, and opening it may fail:
+        # not plugged in, a different adapter, the radio switched off, a
+        # bridge address that is wrong. None of those should stop the
+        # application -- it starts on the Setup tab instead, saying which.
+        #
+        # Until a port opens, commands go to NullRig and do nothing, so every
+        # control works without knowing whether there is a radio.
+        self.connection = NullRig()
+        self.rig_stream = None          # the open serial port, to be closed
+        self.rig_state = "unchosen"     # unchosen | failed | silent | connected
+        self.rig_note = "no port chosen yet"
+        self._open_rig()
 
         # SDR++, as a second transport beside the rig. Built now so the model's
         # notifications can reach it, but not CONNECTED until the interface
@@ -553,8 +597,10 @@ class UbitxCecDesktop(sCTk):
 
         #   initialize radio connection
         #
-        # NOTHING IS SEEDED. The model starts at zero and the rig's own
-        # report fills it in a moment later.
+        # The model holds starting values -- a frequency, the firmware
+        # string, the callsign -- which the rig's own reports replace a
+        # moment later. They are NOT evidence that a rig is there: only
+        # model.reports says that. See _check_rig_answered.
         #
         # Seeding plausible frequencies here was worse than showing nothing:
         # the readout came up with a number that looked real, and then
@@ -583,8 +629,7 @@ class UbitxCecDesktop(sCTk):
         # here rather than in the model. It decides what Mute silences and
         # whether volume does anything. Starts on SDR if SDR++ is switched
         # on in the settings, since that is how the station is set up.
-        self._listen_source = ("SDR" if str(gv.config.get_SDR_Switch()) == "True"
-                               else "Rig")
+        self._listen_source = "SDR" if gv.config.sdr_enabled() else "Rig"
         # The SDR's mute is NOT kept here: SDR_Link.muted reports it -- the
         # SDR's own mute where it has one, which can also be changed in the
         # SDR itself, and only otherwise the computer's.
@@ -616,8 +661,106 @@ class UbitxCecDesktop(sCTk):
         self._tick()
 
         # Idle rather than immediate: the window should be up before a
-        # connection attempt that can take a moment when SDR++ is not there.
+        # connection attempt that can take a moment when the SDR is not there.
         self.after_idle(self._start_sdr)
+
+        # NOTHING TO TALK TO: start on Setup, which is where it is fixed.
+        # Better than a working-looking panel wired to nothing -- and better
+        # than the traceback a missing port used to cause before any window
+        # existed.
+        if self.rig_state != "connected":
+            self.after_idle(lambda: self.notebook.set("Setup"))
+
+    # -- the rig's connection ----------------------------------------------
+    def _open_rig(self):
+        """
+        Opens the rig's port, as the settings name it.
+
+        THREE THINGS CAN GO WRONG, and each has its own words, because each
+        needs a different thing done about it:
+
+          * nothing chosen, or an address that cannot be read at all;
+          * the port will not open -- not plugged in, held by another
+            program, or permissions;
+          * it opens and the rig never answers, which is what "the adapter is
+            plugged in but the radio is switched off" looks like. That one is
+            checked a moment later -- see _check_rig_answered -- because the
+            link asks the rig for everything as it starts, so silence is the
+            evidence.
+        """
+        setting = gv.config.get_rig_port()
+        kind, value, problem = parse_rig_port(setting)
+        if not kind:
+            self.rig_state, self.rig_note = "unchosen", problem
+            return False
+
+        self._close_rig()               # never two streams on one port
+        try:
+            stream = open_rig_port(value, gv.config.get_rig_baud())
+        except Exception as err:
+            self.rig_state = "failed"
+            self.rig_note = f"{value} would not open -- {err}"
+            print(f"[rig] {self.rig_note}")
+            return False
+
+        self.rig_stream = stream
+        self.connection = uBITX_Link(self, stream, self.model, 250)
+        self.rig_state, self.rig_note = "connected", f"connected on {value}"
+        print(f"[rig] {self.rig_note}")
+        # Give the rig time to answer the startup dump before believing it.
+        self.after(RIG_ANSWER_MS, self._check_rig_answered)
+        return True
+
+    def _close_rig(self):
+        """
+        Stops the reader and CLOSES THE PORT.
+
+        Closing matters more than it looks. The rig sends its 26 values when
+        it boots, and it boots because opening the port pulls DTR -- so a
+        port left open from a previous attempt is not reset when it is opened
+        again, no values arrive, and the link waits five seconds before
+        asking whether the radio is switched on. Connecting twice in one
+        session did exactly that.
+        """
+        if self.connection.reader_process_id is not None:
+            try:
+                self.after_cancel(self.connection.reader_process_id)
+            except Exception:
+                pass
+        self.connection = NullRig()
+        if self.rig_stream is not None:
+            try:
+                self.rig_stream.close()
+            except Exception:
+                pass
+            self.rig_stream = None
+
+    def _check_rig_answered(self):
+        """
+        Did anything come back? The link asks the rig for every value as it
+        starts, so a report by now means the radio is there.
+
+        COUNTED REPORTS, not the values themselves: the model SEEDS a
+        frequency, a firmware string and the callsign, so reading those would
+        call a switched-off radio "answering" -- which is the very case this
+        exists to catch.
+        """
+        if self.rig_state != "connected":
+            return
+        if self.model.reports:
+            return
+        self.rig_state = "silent"
+        self.rig_note = ("the port opened but the radio is not answering -- "
+                         "is it switched on?")
+        print(f"[rig] {self.rig_note}")
+        self._show_rig_status()
+        self.notebook.set("Setup")
+
+    def _show_rig_status(self):
+        """Puts the connection's state on the Setup page and the status line."""
+        box = getattr(self, "radio_box", None)
+        if box is not None:
+            self._group_note(box, self.rig_note)
 
     # -- window position ---------------------------------------------------
     def _remembered_geometry(self):
@@ -645,7 +788,7 @@ class UbitxCecDesktop(sCTk):
 
     def _on_close(self):
         self._save_geometry()
-        self.after_cancel(self.connection.reader_process_id)
+        self._close_rig()
         self.sdr.disconnect()
         self.destroy()
 
@@ -679,7 +822,7 @@ class UbitxCecDesktop(sCTk):
         # the receiver, speaking if the rig is. Done now rather than while
         # building, because it sends a command to the rig.
         self._set_listen_source(self._listen_source)
-        if str(gv.config.get_SDR_Switch()) == "True":
+        if gv.config.sdr_enabled():
             self.sdr.connect()
         else:
             self._show_sdr_status(False)
@@ -695,8 +838,21 @@ class UbitxCecDesktop(sCTk):
         Says whether the SDR is connected -- and, since what it can do is
         only known once it is, sets up everything that depends on that.
         """
-        self.sdr_status.configure(
-            text="sdr ok" if connected else "sdr — reconnect")
+        # ALERT COLOURS when there is no SDR to listen to -- chosen but not
+        # answering, or not chosen at all. It is a small control at the end of
+        # a row, and in the ordinary colours it reads as just another label
+        # while half the panel is greyed out and nothing says why.
+        #
+        # Coloured here rather than by style: the library has no alert button.
+        # One would be better -- see TODO.
+        if connected:
+            self.sdr_status.configure(text="sdr ok")
+            self.sdr_status.set_alarm_state(False)
+        else:
+            chosen = gv.config.sdr_enabled()
+            self.sdr_status.configure(
+                text="sdr — reconnect" if chosen else "no sdr — choose one")
+            self.sdr_status.set_alarm_state(True)
 
         # What the SDR cannot do is GREYED, not left to fail when pressed.
         has_filter = "filter" in self.sdr.capabilities
@@ -829,9 +985,13 @@ class UbitxCecDesktop(sCTk):
         """
         wanted = not bool(self.attributes("-topmost"))
         self.attributes("-topmost", wanted)
-        self.on_top_button.configure(
-            text="on top" if wanted else "not on top",
-            fg_color=("#1A4375", "#2471A3") if wanted else "transparent")
+        self.on_top_button.configure(text="on top" if wanted else "not on top")
+        # THE LIBRARY'S ENGAGED LOOK, not a colour chosen here. This painted
+        # itself with #1A4375 -- which is now exactly the theme's engaged
+        # colour, arrived at separately, which is the argument for letting the
+        # theme own it: a latched control should look like every other latched
+        # control, and follow the theme when that changes.
+        self.on_top_button.set_pressed(wanted)
 
     # -- convenience ------------------------------------------------------
     # NAMED radio, NOT state.
@@ -947,8 +1107,13 @@ class UbitxCecDesktop(sCTk):
         # row. They had a row of their own at the bottom of the window, which
         # cost height better left to the SDR's window; the rest of that row
         # only repeated what is shown elsewhere.
+        # TERTIARY, which is what it looks like: a quiet status at the end of
+        # a row, not an action to reach for. It was a primary only because
+        # primary was once the only tier with an alarm state; all three have
+        # one now, so it is back where it belongs -- and tertiary's alarm
+        # colours its border and text without filling, which suits a status.
         self.sdr_status = sCTkButtonTertiary(
-            actions, text="sdr — reconnect", width=130, height=22,
+            actions, text="sdr — reconnect", width=140, height=22,
             command=self._reconnect_sdr)
         self.sdr_status.pack(side="right")
         # Only that the serial port opened -- if it had not, the application
@@ -1258,7 +1423,7 @@ class UbitxCecDesktop(sCTk):
         self.radio_actions.pack(side="left", padx=(10, 0))
         self.reread_button = sCTkButtonSecondary(
             self.radio_actions, text="Read from radio", width=120,
-            command=self.connection.read_channels)
+            command=lambda: self.connection.read_channels())
         self.reread_button.pack(side="left", padx=2)
         self.write_button = sCTkButtonPrimary(
             self.radio_actions, text="Write to radio", width=130,
@@ -2233,62 +2398,55 @@ class UbitxCecDesktop(sCTk):
         values that can stop the radio working, and both deserve a deliberate
         act rather than a field on a page you are scrolling past.
         """
-        wrap = sCTkFrame(page, fg_color="transparent", border_width=0)
-        wrap.pack(fill="both", expand=True, padx=14, pady=10)
+        # SCROLLS. The window is sized for Operate -- around 360 points tall
+        # -- and these groups are taller than that once they hold real
+        # controls. Scrolling means a group can grow, or the window shrink,
+        # without anything being cut off out of sight.
+        wrap = sCTkScrollableFrame(page, fg_color="transparent", border_width=0)
+        wrap.pack(fill="both", expand=True, padx=10, pady=(2, 2))
 
         groups = (
             ("Station", (
                 ("Callsign", "entry", self.model.callsign),
                 ("Appearance", "choice", ["Dark", "Light", "Follow system"]),
             )),
-            ("Radio", (
-                ("Connection", "button", "Serial or network…"),
-                ("Tuning presets", "choice", ["10 Hz", "50 Hz", "100 Hz",
-                                              "500 Hz", "1 kHz"]),
-            )),
-            ("SDR", (
-                ("Software", "choice", ["SDR++", "SDRangel", "Gqrx", "None"]),
-                ("Address", "entry", "127.0.0.1:4532"),
-                ("Autostart", "switch", True),
-                ("Default bandwidth CW", "entry", "500"),
-                ("Default bandwidth SSB", "entry", "2600"),
-            )),
-            ("Logbook", (
-                ("Enabled", "switch", True),
-                ("Format", "choice", ["ADIF", "CSV"]),
-                ("File", "button", "~/Downloads/ubitx_Logbook.adi"),
-                ("Backup every (minutes)", "entry", "30"),
-            )),
         )
 
+        # THREE ACROSS, not two: the window is wide and short -- sized for
+        # Operate -- so width is what there is spare and height is what there
+        # is not.
         columns = sCTkFrame(wrap, fg_color="transparent", border_width=0)
         columns.pack(fill="both", expand=True)
-        columns.grid_columnconfigure((0, 1), weight=1, uniform="setup")
+        columns.grid_columnconfigure((0, 1, 2), weight=1, uniform="setup")
+
+        # Radio and SDR are real controls -- they are how the operator says
+        # where the equipment is, and nothing else can say it. Station and
+        # Logbook are still the settings they will become.
+        # Station, Radio, SDR across the top; Logbook beneath.
+        self._build_radio_settings(self._settings_box(columns, 0, 1, "Radio", 2))
+        self._build_sdr_settings(self._settings_box(columns, 0, 2, "SDR", 2))
+        self._build_logbook_settings(self._settings_box(columns, 1, 0, "Logbook", 4))
 
         for index, (title, rows) in enumerate(groups):
-            box = sCTkFrame(columns, border_width=1, corner_radius=6)
-            box.grid(row=index // 2, column=index % 2, sticky="nsew",
-                     padx=4, pady=4)
-
-            sCTkLabelSecondary(box, text=title, font=("Arial", 12, "bold")
-                               ).pack(anchor="w", padx=10, pady=(8, 4))
+            row, column = (0, 0) if index == 0 else (1, 0)
+            box = self._settings_box(columns, row, column, title, len(rows))
 
             for label, kind, value in rows:
                 line = sCTkFrame(box, fg_color="transparent", border_width=0)
-                line.pack(fill="x", padx=10, pady=2)
-                sCTkLabelTertiary(line, text=label, width=150,
+                line.pack(fill="x", padx=10, pady=1)
+                sCTkLabelTertiary(line, text=label, width=86,
                                   font=("Arial", 11), anchor="w").pack(side="left")
 
                 if kind == "entry":
-                    field = sCTkEntryPrimary(line, width=150)
+                    field = sCTkEntryPrimary(line, width=150, height=SETTINGS_CONTROL_HEIGHT)
                     field.pack(side="left")
                     field.insert(0, value)
                 elif kind == "choice":
-                    sCTkComboBox(line, values=value, width=150).pack(side="left")
+                    sCTkComboBox(line, values=value, width=150, height=SETTINGS_CONTROL_HEIGHT).pack(side="left")
                 elif kind == "switch":
                     sCTkSwitch(line, text="").pack(side="left")
                 else:
-                    sCTkButtonSecondary(line, text=value, width=200,
+                    sCTkButtonSecondary(line, text=value, width=200, height=SETTINGS_CONTROL_HEIGHT,
                                         anchor="w").pack(side="left")
 
             # Bottom padding comes from the LAST ROW'S pady, not a spacer.
@@ -2299,22 +2457,402 @@ class UbitxCecDesktop(sCTk):
             # "paint in the parent's colour" -- so it painted a 200-pixel
             # strip of background straight across the group's border. Every
             # group had a gap in its bottom edge, the same span each time.
-            line.pack_configure(pady=(2, 10))
+            line.pack_configure(pady=(1, 8))
 
-        danger = sCTkFrame(wrap, fg_color="transparent", border_width=0)
-        danger.pack(anchor="w", pady=(10, 0))
-        sCTkButtonSecondary(danger, text="EEPROM settings…",
-                            width=150).pack(side="left", padx=(0, 6))
-        sCTkButtonSecondary(danger, text="Machine settings…",
-                            width=150).pack(side="left", padx=(0, 10))
-        sCTkButtonSecondary(danger, text="Backup and restore…", width=170,
-                            command=self._eeprom_backup).pack(side="left", padx=(0, 6))
-        sCTkButtonSecondary(danger, text="About…", width=90,
-                            command=self._about).pack(side="left", padx=(0, 10))
+        # THE WINDOWS OF THEIR OWN, as a group like the rest. They were a
+        # loose row under everything, with a note trailing off the side --
+        # which on a short window sat half off the bottom of the page.
+        #
+        # They keep their own windows because each writes values into the
+        # radio that can stop it working, and that deserves a deliberate act
+        # rather than a field on a page being scrolled past.
+        box = self._settings_box(columns, 1, 1, "Settings", 2, span=2)
+        # ACROSS TWO COLUMNS, three buttons to a line. Down one column they
+        # were four lines tall, which set the height of the whole bottom row;
+        # across two they are two lines, and there is room for the ones still
+        # to come.
+        pairs = (("EEPROM settings…", None),
+                 ("Machine settings…", None),
+                 ("Backup and restore…", self._eeprom_backup),
+                 ("SDR settings…", self._sdr_advanced),
+                 ("About…", self._about))
+        line = None
+        for index, (text, action) in enumerate(pairs):
+            if index % 3 == 0:
+                line = self._settings_line(box, "")
+            button = sCTkButtonSecondary(line, text=text, width=190, anchor="w",
+                                         height=SETTINGS_CONTROL_HEIGHT,
+                                         command=action)
+            button.pack(side="left", padx=(0, 8))
+            if action is None:
+                button.state("disabled")
+        line.pack_configure(pady=(1, 8))
+
+    @staticmethod
+    def _settings_box(columns, row, column, title, rows=1, span=1):
+        """
+        One titled group on the Setup page.
+
+        The panel is as tall as what is in it -- the library's labelled frame
+        does that itself now, so nothing here sets a height. `rows` is left in
+        the signature because every call passes it; it is ignored.
+
+        "nsew", so the groups in a row all stand as tall as the tallest --
+        the row is that height anyway, and a short group beside a tall one
+        looked unfinished rather than deliberate. Each still ASKS for its own
+        content's height, so the row is never taller than it needs to be.
+        """
+        box = sCTkFrameLabeledSecondary(columns, label_text=title, label_anchor="w")
+        box.grid(row=row, column=column, columnspan=span, sticky="nsew", padx=4, pady=2)
+        box.group_title = title
+        return box
+
+    @staticmethod
+    def _group_note(box, text=""):
+        """
+        Says how a group is getting on, in its own title: "Radio — connected
+        on /dev/cu.usbserial-A5069RR4".
+
+        In the TITLE because the alternative is a row of its own in every
+        group, for a line that is usually empty -- and the title line has the
+        room.
+        """
+        box.configure(label_text=f"{box.group_title} — {text}" if text
+                      else box.group_title)
+
+    @staticmethod
+    def _settings_line(box, label, label_width=76):
+        """A labelled row inside a group; returns the frame to fill."""
+        # A FIXED HEIGHT, so every row is the same pitch and the groups line
+        # up across the page. Left to size themselves, a combobox row, an
+        # entry row and a switch row each came out different, and the three
+        # columns rippled against one another.
+        line = sCTkFrame(box, fg_color="transparent", border_width=0,
+                         height=SETTINGS_ROW_HEIGHT)
+        line.pack(fill="x", padx=10, pady=1)
+        line.pack_propagate(False)          # keep the height set above
+        if label:
+            # WIDE ENOUGH FOR THIS GROUP'S LONGEST LABEL, no more. One width
+            # for the whole page meant "Port" sat in a 76-point column with
+            # half of it empty, and the control beside it lost that room --
+            # which is the room the port list needed to show which adapter
+            # each port is.
+            sCTkLabelTertiary(line, text=label, width=label_width,
+                              font=("Arial", 11), anchor="w").pack(side="left")
+        return line
+
+    # -- where the radio is -------------------------------------------------
+    def _build_radio_settings(self, box):
+        """
+        Choosing the rig's port. NOTHING IS GUESSED: the ports are listed,
+        the operator picks, and the choice is saved once it works.
+
+        The same field takes a network rig -- "socket://192.168.1.50:8080" --
+        because it is an editable list: pick a port, or type an address.
+        """
+        line = self._settings_line(box, "Port", 44)
+        self.port_picker = sCTkComboBox(line, width=262, height=SETTINGS_CONTROL_HEIGHT, values=[""])
+        self.port_picker.pack(side="left")
+        # 86, not 72: at 72 the word itself was clipped, and the row ran
+        # past the group's edge -- the label, the list and this button have
+        # to fit a third of the window between them.
+        sCTkButtonSecondary(line, text="Refresh", width=86, height=SETTINGS_CONTROL_HEIGHT,
+                            command=self._refresh_ports).pack(side="left", padx=(4, 0))
+
+        line = self._settings_line(box, "Speed", 44)
+        self.baud_picker = sCTkComboBox(
+            line, width=96, height=SETTINGS_CONTROL_HEIGHT,
+            values=["9600", "19200", "38400", "57600", "115200"])
+        self.baud_picker.pack(side="left")
+        self.baud_picker.set(str(gv.config.get_rig_baud()))
+        # Every port a Mac or PC reports, including the ones normally hidden:
+        # the filtering can be wrong about somebody's station, and a filter
+        # that cannot be overridden is worse than none.
+        self.show_all_ports = sCTkCheckBox(line, text="show all",
+                                           command=self._refresh_ports)
+        self.show_all_ports.pack(side="left", padx=8)
+        sCTkButtonPrimary(line, text="Connect", width=90, height=SETTINGS_CONTROL_HEIGHT,
+                          command=self._connect_rig).pack(side="left", padx=4)
+
+        self.radio_box = box
+        line.pack_configure(pady=(1, 8))
+        self._refresh_ports()
+        self._show_rig_status()
+
+    def _refresh_ports(self):
+        """Lists the ports again -- an adapter may have been plugged in since."""
+        show_all = bool(self.show_all_ports.get()) if hasattr(self, "show_all_ports") else False
+        try:
+            ports = list_rig_ports(show_all=show_all)
+        except Exception as err:            # pyserial missing, or an odd system
+            print(f"[rig] could not list the ports: {err}")
+            ports = []
+        # The LABEL is what the operator picks from -- "FTDI" against "CH340"
+        # is the distinction they would use -- so the device it means is kept
+        # beside it rather than parsed back out of the text.
+        self._port_labels = {p.label: p.device for p in ports}
+        values = list(self._port_labels) or ["no ports found"]
+        self.port_picker.configure(values=values)
+
+        # Show what is stored, whether or not it is plugged in now: it is
+        # still what will be tried, and seeing it is how you know why.
+        stored = gv.config.get_rig_port()
+        for label, device in self._port_labels.items():
+            if device == stored:
+                self.port_picker.set(label)
+                return
+        self.port_picker.set(stored or values[0])
+
+    def _connect_rig(self):
+        """Opens the chosen port, and saves it if it works."""
+        chosen = self.port_picker.get().strip()
+        device = self._port_labels.get(chosen, chosen)
+        kind, value, problem = parse_rig_port(device)
+        if not kind:
+            self.rig_note = problem
+            self._show_rig_status()
+            return
+
+        # Whatever was running has to stop AND its port be closed -- see
+        # _close_rig.
+        self._close_rig()
+
+        gv.config.set_rig_port(device)
+        try:
+            gv.config.set_rig_baud(int(self.baud_picker.get()))
+        except ValueError:
+            pass
+        self._group_note(self.radio_box, f"opening {device}…")
+        self.update_idletasks()
+        self._open_rig()
+        self._show_rig_status()
+        self.refresh()
+
+    # -- the logbook --------------------------------------------------------
+    def _build_logbook_settings(self, box):
+        """
+        Where contacts are written, and in what.
+
+        THE FORMAT DECIDES THE EXTENSION. A logbook named .adi holding CSV is
+        a file no other program will read properly, so the two are never set
+        apart: changing the format renames the file, and choosing a file
+        corrects its extension.
+        """
+        line = self._settings_line(box, "Enabled", 58)
+        self.logbook_switch = sCTkSwitch(line, text="", command=self._save_logbook_switch)
+        self.logbook_switch.pack(side="left")
+        if str(gv.config.get_Logbook_Switch()).lower() == "true":
+            self.logbook_switch.select()
+
+        line = self._settings_line(box, "Format", 58)
+        self.logbook_format = sCTkComboBox(
+            line, width=110, height=SETTINGS_CONTROL_HEIGHT,
+            values=[name for _, name in LOGBOOK_FORMATS],
+            command=self._on_logbook_format)
+        self.logbook_format.pack(side="left")
+        current = str(gv.config.get_Logbook_Type()).lower()
+        self.logbook_format.set(dict(LOGBOOK_FORMATS).get(current, "ADIF"))
+
+        line = self._settings_line(box, "File", 58)
+        self.logbook_file = sCTkButtonSecondary(
+            line, text="", width=250, anchor="w", height=SETTINGS_CONTROL_HEIGHT,
+            command=self._choose_logbook_file)
+        self.logbook_file.pack(side="left")
+
+        line = self._settings_line(box, "Backup", 58)
+        self.logbook_backup = sCTkEntryPrimary(line, width=70,
+                                               height=SETTINGS_CONTROL_HEIGHT)
+        self.logbook_backup.pack(side="left")
+        self.logbook_backup.insert(0, str(gv.config.get_Logbook_Backup_Interval()))
+        self.logbook_backup.bind("<Return>", lambda e: self._save_logbook_backup())
+        self.logbook_backup.bind("<FocusOut>", lambda e: self._save_logbook_backup())
+        sCTkLabelTertiary(line, text="minutes between backups",
+                          font=("Arial", 11)).pack(side="left", padx=6)
+        line.pack_configure(pady=(1, 8))
+        self._show_logbook_file()
+
+    def _logbook_path(self):
+        """The logbook as the settings describe it: folder, name, format."""
+        folder = os.path.expanduser(str(gv.config.get_Logbook_Location() or "~"))
+        name = str(gv.config.get_Logbook_Name() or "uBITX_Logbook")
+        return os.path.join(folder, f"{name}.{str(gv.config.get_Logbook_Type()).lower()}")
+
+    def _show_logbook_file(self):
+        """The path on the button, shortened from the left if it is long."""
+        path = self._logbook_path().replace(os.path.expanduser("~"), "~")
+        self.logbook_file.configure(text=path if len(path) <= 36 else "…" + path[-35:])
+
+    def _save_logbook_switch(self):
+        gv.config.set_Logbook_Switch("True" if self.logbook_switch.get() else "False")
+
+    def _save_logbook_backup(self):
+        try:
+            gv.config.set_Logbook_Backup_Interval(int(self.logbook_backup.get()))
+        except ValueError:
+            self.logbook_backup.delete(0, "end")
+            self.logbook_backup.insert(0, str(gv.config.get_Logbook_Backup_Interval()))
+
+    def _on_logbook_format(self, shown):
+        """A different format: the file takes the matching extension."""
+        chosen = next((key for key, name in LOGBOOK_FORMATS if name == shown), "adi")
+        gv.config.set_Logbook_Type(chosen)
+        self._show_logbook_file()
+
+    def _choose_logbook_file(self):
+        """
+        Chooses the logbook file.
+
+        THE EXTENSION IS THE FORMAT'S, whatever is typed into the dialog: a
+        file named .csv holding ADIF, or the other way about, is one no other
+        program will read. The name and folder are the operator's; the
+        extension is not.
+        """
+        from tkinter import filedialog
+
+        kind = str(gv.config.get_Logbook_Type()).lower()
+        shown = dict(LOGBOOK_FORMATS).get(kind, "ADIF")
+        current = self._logbook_path()
+        chosen = filedialog.asksaveasfilename(
+            parent=self, title="Logbook file", defaultextension=f".{kind}",
+            initialdir=os.path.dirname(current),
+            initialfile=os.path.basename(current),
+            filetypes=[(f"{shown} logbook", f"*.{kind}"), ("All files", "*.*")])
+        if not chosen:
+            return
+        folder, filename = os.path.split(chosen)
+        stem = os.path.splitext(filename)[0]
+        gv.config.set_Logbook_Location(folder)
+        gv.config.set_Logbook_Name(stem)
+        self._show_logbook_file()
+
+    # -- where the SDR is ---------------------------------------------------
+    def _build_sdr_settings(self, box):
+        """
+        Which SDR program, and where. "None" means there is no SDR: nothing
+        is tried, and the interface greys everything an SDR would serve.
+        """
+        line = self._settings_line(box, "Software", 62)
+        self.sdr_picker = sCTkComboBox(line, width=150, height=SETTINGS_CONTROL_HEIGHT, command=self._on_sdr_software,
+                                       values=[n for _, n in SDR_CHOICES])
+        self.sdr_picker.pack(side="left")
+        sCTkButtonPrimary(line, text="Connect", width=90, height=SETTINGS_CONTROL_HEIGHT,
+                          command=self._connect_sdr).pack(side="left", padx=8)
+        current = gv.config.get_sdr_software()
+        self.sdr_picker.set(dict(SDR_CHOICES).get(current, "None"))
+
+        line = self._settings_line(box, "Address", 62)
+        self.sdr_host_entry = sCTkEntryPrimary(line, width=150, height=SETTINGS_CONTROL_HEIGHT)
+        self.sdr_host_entry.pack(side="left")
+        self.sdr_host_entry.insert(0, gv.config.get_sdr_host())
+        sCTkLabelTertiary(line, text="port", font=("Arial", 11)).pack(side="left", padx=(8, 4))
+        self.sdr_port_entry = sCTkEntryPrimary(line, width=70, height=SETTINGS_CONTROL_HEIGHT)
+        self.sdr_port_entry.pack(side="left")
+        self.sdr_port_entry.insert(0, str(gv.config.get_sdr_port()))
+
+        # EVERYTHING ELSE IS BEHIND "SDR settings…", in the Settings group
+        # below: the filter widths now, and in time noise blanking, squelch
+        # behaviour, whatever a backend turns out to offer. What stays here is
+        # what a station is set up with once -- which program, and where.
+
+        self.sdr_box = box
+        line.pack_configure(pady=(1, 8))
+
+    def _on_sdr_software(self, shown):
+        """
+        A different program chosen: its usual port is offered, unless the
+        operator has already set one of their own.
+        """
+        key = next((k for k, name in SDR_CHOICES if name == shown), "none")
+        was = gv.config.get_sdr_software()
+        gv.config.set_sdr_software(key)
+        profile = profile_for(key)
+        # Only when the port still holds the PREVIOUS program's usual one:
+        # a port typed by hand is the operator's and is left alone.
+        if profile.default_port and str(gv.config.get_sdr_port()) == str(
+                profile_for(was).default_port):
+            gv.config.set_sdr_port(profile.default_port)
+            self.sdr_port_entry.delete(0, "end")
+            self.sdr_port_entry.insert(0, str(profile.default_port))
+
+    def _sdr_advanced(self):
+        """
+        The SDR's finer settings, in a window of their own.
+
+        The default filter widths to begin with. They are set once for a
+        station and then left, so they do not earn a place on a page whose
+        job is saying where the equipment is.
+        """
+        win = ctk.CTkToplevel(self)
+        win.title("SDR settings")
+        win.geometry("420x220")
+        win.transient(self)
+
+        body = sCTkFrame(win, fg_color="transparent", border_width=0)
+        body.pack(fill="both", expand=True, padx=16, pady=14)
+        sCTkLabelPrimary(body, text="Default filter widths",
+                         font=("Arial", 14, "bold")).pack(anchor="w")
         sCTkLabelTertiary(
-            danger,
-            text="both write to the radio — their own windows, and a confirmation",
-            font=("Arial", 10)).pack(side="left")
+            body,
+            text="What the SDR's filter returns to for each mode -- and what "
+                 "a mode change sets, so an SSB filter is not carried into CW.",
+            font=("Arial", 10), wraplength=380, justify="left").pack(anchor="w", pady=(2, 10))
+
+        fields = {}
+        for label, value in (("CW", gv.config.get_sdr_cw_filter_default_hz()),
+                             ("SSB", gv.config.get_sdr_ssb_filter_default_hz())):
+            line = sCTkFrame(body, fg_color="transparent", border_width=0)
+            line.pack(anchor="w", pady=3)
+            sCTkLabelTertiary(line, text=label, width=50,
+                              font=("Arial", 11), anchor="w").pack(side="left")
+            field = sCTkEntryPrimary(line, width=90, height=SETTINGS_CONTROL_HEIGHT)
+            field.pack(side="left")
+            field.insert(0, str(value))
+            sCTkLabelTertiary(line, text="Hz", font=("Arial", 11)).pack(side="left", padx=6)
+            fields[label] = field
+
+        def keep():
+            for name, setter in (("CW", gv.config.set_sdr_cw_filter_default_hz),
+                                 ("SSB", gv.config.set_sdr_ssb_filter_default_hz)):
+                try:
+                    setter(int(fields[name].get()))
+                except ValueError:
+                    pass
+            win.destroy()
+
+        row = sCTkFrame(body, fg_color="transparent", border_width=0)
+        row.pack(anchor="w", pady=(14, 0))
+        sCTkButtonPrimary(row, text="Keep", width=80, command=keep).pack(side="left", padx=(0, 6))
+        sCTkButtonSecondary(row, text="Cancel", width=80,
+                            command=win.destroy).pack(side="left")
+
+    def _connect_sdr(self):
+        """Saves what is on the page, and tries the SDR."""
+        gv.config.set_sdr_host(self.sdr_host_entry.get())
+        try:
+            gv.config.set_sdr_port(int(self.sdr_port_entry.get()))
+        except ValueError:
+            pass
+        # The link reads the address when it connects, but WHICH PROGRAM is
+        # settled when it is built -- so it is told to read that again. The
+        # link itself is not replaced: controls all over the window are bound
+        # to its methods, and a new object would leave them talking to the old
+        # one.
+        self.sdr.disconnect()
+        self.sdr.reload_profile()
+        if not gv.config.sdr_enabled():
+            self._group_note(self.sdr_box, "none -- nothing is tried")
+            self._show_sdr_status(False)
+            return
+        self._group_note(self.sdr_box, f"connecting to {self.sdr.profile.name}…")
+        self.update_idletasks()
+        if self.sdr.connect():
+            self._group_note(self.sdr_box,
+                             f"{self.sdr.profile.name}: "
+                             f"{', '.join(sorted(self.sdr.capabilities)) or 'nothing'}")
+        else:
+            self._group_note(self.sdr_box,
+                             f"no answer at {gv.config.get_sdr_host()}:"
+                             f"{gv.config.get_sdr_port()}")
 
     # -- behaviour --------------------------------------------------------
     def _toggle(self, key):

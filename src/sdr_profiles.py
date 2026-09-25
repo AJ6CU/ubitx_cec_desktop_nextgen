@@ -126,13 +126,26 @@ RIGCTLD = Profile(
     squelch_range=(0.0, 1.0),
 )
 
+# "No SDR at all" is a profile too, so every caller has a name to show and a
+# set of capabilities to read -- both empty -- rather than special cases for
+# an SDR that is not there. See ConfigurationManager.get_sdr_software().
+NONE = Profile(
+    "none", "no SDR", 0,
+    to_sdr={}, from_sdr={},
+    known_missing=(FREQUENCY, MODE, FILTER, SIGNAL, VOLUME, SQUELCH, MUTE),
+)
+
 PROFILES = {"sdr++": SDRPP, "sdrpp": SDRPP, "gqrx": GQRX,
-            "rigctld": RIGCTLD, "hamlib": RIGCTLD}
+            "rigctld": RIGCTLD, "hamlib": RIGCTLD,
+            "none": NONE, "": NONE}
 
 
 def profile_for(setting):
     """
-    The profile the "SDR Software" setting names -- SDR++ if it names none
-    this application knows, since that is what it has always driven.
+    The profile the "SDR Software" setting names.
+
+    An unknown name gives SDR++, which is what this has always driven --
+    but "none", which the operator chooses to say there is no SDR, gives
+    NONE rather than falling back to one.
     """
     return PROFILES.get(str(setting or "").strip().lower(), SDRPP)

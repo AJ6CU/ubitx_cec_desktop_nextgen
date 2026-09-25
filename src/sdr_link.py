@@ -61,7 +61,7 @@ class SDR_Link:
         # WHICH SDR, from the "SDR Software" setting -- SDR++, Gqrx or a
         # plain rigctld. The profile says how it names modes and what it is
         # known not to do; the controller finds out the rest at connect.
-        self.profile = profile_for(gv.config.get_SDR_Software())
+        self.profile = profile_for(gv.config.get_sdr_software())
         self.controller = RigctlSDR(root, self.profile)
 
         # What was last passed to SDR++. Compared on every follow() so only a
@@ -73,6 +73,9 @@ class SDR_Link:
         # Called with True or False when the connection comes or goes, so
         # the interface can say so. Set by the owner.
         self.on_status = None
+        # Did THIS application launch the SDR? Only then is it ours to stop.
+        # Always False until launching is built; see disconnect().
+        self.started_here = False
         # Called with no arguments when the SDR's own volume or mute changes
         # in the SDR itself, so the interface can move its controls to match.
         self.on_audio = None
@@ -95,6 +98,29 @@ class SDR_Link:
     def connected(self):
         return bool(self.controller.is_connected)
 
+    def reload_profile(self):
+        """
+        Reads which SDR program the settings now name, and prepares for it.
+
+        The link object STAYS THE SAME. Controls are bound to its methods
+        when the window is built -- the squelch's A and R among them -- so
+        replacing it on a change of program would leave those buttons calling
+        an object nobody else uses. Disconnect first; this only changes what
+        connect() will talk to.
+        """
+        self.profile = profile_for(gv.config.get_sdr_software())
+        self.controller = RigctlSDR(self.root, self.profile)
+        self.controller.on_frequency = self._from_sdr_frequency
+        self.controller.on_mode = self._from_sdr_mode
+        self.controller.on_filter = self._from_sdr_filter
+        self.controller.on_volume = lambda level: self._audio_changed()
+        self.controller.on_mute = lambda muted: self._audio_changed()
+        self.controller.on_squelch = lambda level: self._audio_changed()
+        self.controller.on_signal = lambda level: self._signal_changed()
+        self.controller.on_disconnect = self._lost
+        self._sent_frequency = None
+        self._sent_mode = None
+
     @property
     def capabilities(self):
         """
@@ -113,8 +139,15 @@ class SDR_Link:
             True if connected. False if it could not be reached -- it may not
             be running, or its remote control may be switched off.
         """
-        host = gv.config.get_sdr_server_ip()
-        port = int(gv.config.get_sdr_tcp_port())
+        # "No SDR" is a setting, not a failure: nothing is tried, and the
+        # interface greys what an SDR would have served.
+        if not gv.config.sdr_enabled():
+            print("[sdr] no SDR selected in the settings")
+            self._report(False)
+            return False
+
+        host = gv.config.get_sdr_host()
+        port = int(gv.config.get_sdr_port())
 
         if self.connected:
             self.controller.disconnect()
@@ -147,9 +180,23 @@ class SDR_Link:
         return True
 
     def disconnect(self):
-        """Stops the SDR's receiver and closes the connection."""
+        """
+        Closes the connection.
+
+        DOES NOT STOP THE SDR'S RECEIVER unless this application started it.
+        It used to, always -- the SDR++ controller had done so since before
+        there was a reason -- and with Gqrx the effect was plain: quitting
+        the panel, changing SDR, or even pressing Connect (which disconnects
+        first) sent "U DSP 0" and left Gqrx with no waterfall and no audio
+        until its play button was pressed.
+
+        An SDR the operator started is theirs. When this application learns
+        to launch one -- see TODO -- it will stop that one, and only that
+        one; `started_here` is what will say so.
+        """
         if self.connected:
-            self.controller.stop()
+            if self.started_here:
+                self.controller.stop()
             self.controller.disconnect()
         self._report(False)
 

@@ -1,207 +1,71 @@
-# Calibrated CEC Nextion Emulator Unified Configuration Data Profile Module
+# The settings this application starts from, and falls back to.
+#
+# Kept in ~/.ubitx_cec_desktop.ini as JSON. A key missing from that file is
+# taken from here and written back, so the file fills in as it is used.
+#
+# THE NAMES SAY WHAT THEY HOLD. An earlier version stored the rig's port as
+# "Serial Port" while "Radio IP" and "Radio Port" held the SDR's address --
+# names one careless line away from wiring the rig's field to the SDR's
+# setting. Those, and the separate "SDR" switch that could disagree with
+# "SDR Software", are gone.
+#
+# So are the channel sets and the scan settings: they live in
+# ~/.ubitx_cec_desktop_channels.json now -- see channel_sets.py -- because
+# they are the operator's data rather than settings, and because a list of
+# lists is poor fare for a settings file.
 
 default_config_data = {
-    "Audio Gain Volume Level": 50,
-    "CW BFO": "",
-    "CW Copy VFOA to VFOB on Split": "True",
-    "CW Delay Before TX": "250",
-    "CW Delay Returning to RX": "2000",
-    "CW Key Type": "STRAIGHT",
-    "CW Speed": "10",
-    "CW Tone": "600",
-    "Callsign": "",
-    "DSP": "False",
-    "Last Active Frequency": 14032000,
-    "Logbook Backup Interval": "30",
-    "Logbook Location": "~",
-    "Logbook Name": "uBITX_Logbook",
-    "Logbook Switch": "False",
-    "Logbook Type": "adi",
+    # THE RIG. "Rig Port" holds a serial device ("/dev/cu.usbserial-A5069RR4",
+    # "COM3") or a network rig ("socket://192.168.1.50:8080"); the prefix says
+    # which, so no separate setting can disagree with the address. Empty means
+    # not chosen yet -- the Setup tab asks.
+    "Rig Port": "",
+    "Rig Baud": 57600,
+
+    # THE SDR. "none" means there is no SDR, and is how the operator says so;
+    # there is no separate switch. Each program has its own usual port: 4532
+    # SDR++, 7356 Gqrx, 8091 SDRangel.
+    "SDR Software": "none",
+    "SDR Host": "127.0.0.1",
+    "SDR Port": 4532,
+    "SDR Autostart": 1,
+    "SDR CW Width HZ": 500,
+    "SDR SSB Width HZ": 2600,
+
+    # Timing of the conversation with the rig's Nano.
     "MCU Command Headroom": 0.09,
     "MCU Read Wait Period": 0.04,
     "MCU Update Period": 250,
-    "Master Cal": "",
+
+    # The station.
+    "Callsign": "",
     "NUMBER DELIMITER": ".",
-    "PWR Factor": "1.00",
-    "PWR SWR": "False",
-    "Radio IP": "127.0.0.1",
-    "Radio Port": "4532",
-    "SDR": "False",
-    "SDR Autostart": 1,
-    "SDR Current Mode": "USB",
-    "SDR CW Width HZ": 500,
-    "SDR SSB Width HZ": 2600,
-    "SDR Filter Width HZ": 2600,
-    "SDR Software": "sdr++",
-    "SSB BFO": "",
-    "SWR Factor": "1.00",
-    "Scan Channels Registry Queue": {
-        "DEFAULT SET": [
-            {
-                "bandwidth": 2400,
-                "freq_hz": 1840000,
-                "label": "160M-VOX",
-                "mode": "LSB",
-                "name": "160m - Voice / Calling"
-            },
-            {
-                "bandwidth": 2400,
-                "freq_hz": 3885000,
-                "label": "80M-AM",
-                "mode": "LSB",
-                "name": "80m - AM / Ragchew"
-            },
-            {
-                "bandwidth": 2400,
-                "freq_hz": 7200000,
-                "label": "40M-LSB",
-                "mode": "LSB",
-                "name": "40m - LSB Voice Calling"
-            },
-            {
-                "bandwidth": 500,
-                "freq_hz": 7074000,
-                "label": "40M-FT8",
-                "mode": "USB",
-                "name": "40m - FT8 Digital"
-            },
-            {
-                "bandwidth": 2400,
-                "freq_hz": 14300000,
-                "label": "20M-MNET",
-                "mode": "USB",
-                "name": "20m - Intercon Marine / Maritime Mobile"
-            },
-            {
-                "bandwidth": 2400,
-                "freq_hz": 14230000,
-                "label": "20M-SSTV",
-                "mode": "USB",
-                "name": "20m - SSTV (Slo-Scan TV)"
-            },
-            {
-                "bandwidth": 500,
-                "freq_hz": 14074000,
-                "label": "20M-FT8",
-                "mode": "USB",
-                "name": "20m - FT8 Digital"
-            },
-            {
-                "bandwidth": 2400,
-                "freq_hz": 18130000,
-                "label": "17M-USB",
-                "mode": "USB",
-                "name": "17m - USB Voice Calling"
-            },
-            {
-                "bandwidth": 2400,
-                "freq_hz": 21300000,
-                "label": "15M-USB",
-                "mode": "USB",
-                "name": "15m - USB Voice Calling"
-            },
-            {
-                "bandwidth": 2400,
-                "freq_hz": 24950000,
-                "label": "12M-USB",
-                "mode": "USB",
-                "name": "12m - USB Voice Calling"
-            },
-            {
-                "bandwidth": 2400,
-                "freq_hz": 28400000,
-                "label": "10M-USB",
-                "mode": "USB",
-                "name": "10m - Tech / General Voice Calling"
-            }
-        ],
-        "VHF LOCAL": []
-    },
-    "Scan On Station Time": 5000,
-    "Scan Set Settings": [
-        [
-            0,
-            "None"
-        ],
-        [
-            1,
-            "None"
-        ],
-        [
-            2,
-            "None"
-        ],
-        [
-            3,
-            "None"
-        ],
-        [
-            4,
-            "None"
-        ],
-        [
-            5,
-            "None"
-        ],
-        [
-            6,
-            "None"
-        ],
-        [
-            7,
-            "None"
-        ],
-        [
-            8,
-            "None"
-        ],
-        [
-            9,
-            "None"
-        ],
-        [
-            10,
-            "None"
-        ],
-        [
-            11,
-            "None"
-        ],
-        [
-            12,
-            "None"
-        ],
-        [
-            13,
-            "None"
-        ],
-        [
-            14,
-            "None"
-        ],
-        [
-            15,
-            "None"
-        ],
-        [
-            16,
-            "None"
-        ],
-        [
-            17,
-            "None"
-        ],
-        [
-            18,
-            "None"
-        ],
-        [
-            19,
-            "None"
-        ]
-    ],
-    "Serial Port": "",
-    "TXOffset": "EEPROM",
+    "Last Active Frequency": 14032000,
     "VFO Touch Optimized": "True",
-    "Virtual Keyboard Switch": "True"
+    "Virtual Keyboard Switch": "True",
+
+    # CW.
+    "CW Tone": "600",
+    "CW Speed": "10",
+    "CW Key Type": "STRAIGHT",
+    "CW Delay Before TX": "250",
+    "CW Delay Returning to RX": "2000",
+    "CW Copy VFOA to VFOB on Split": "True",
+    "TXOffset": "EEPROM",
+
+    # Calibration held in the radio, shown beside the file's copy.
+    "Master Cal": "",
+    "SSB BFO": "",
+    "CW BFO": "",
+    "PWR Factor": "1.00",
+    "SWR Factor": "1.00",
+    "PWR SWR": "False",
+    "DSP": "False",
+
+    # The logbook.
+    "Logbook Switch": "False",
+    "Logbook Type": "adi",
+    "Logbook Name": "uBITX_Logbook",
+    "Logbook Location": "~",
+    "Logbook Backup Interval": "30",
 }

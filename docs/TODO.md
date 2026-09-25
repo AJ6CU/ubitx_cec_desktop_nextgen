@@ -164,9 +164,47 @@ style names.
 (`ubitx_cec_desktop.py`): Operate, RX and Channels are built and talk to the
 rig and SDR++. Still to do, roughly in order of value:
 
-* **The rig connection dialog.** The serial port is hardcoded. `comportManager`
-  handled serial or network, retries and saving the choice; it needs to come
-  back, with its bugs fixed (see below).
+* **The rig connection, on the Setup tab.** The serial port is hardcoded, and
+  a failed open stops the application before any window exists.
+  `comportManager` handled serial or network, retries and saving the choice;
+  that job comes back, but into Setup rather than a window of its own, and
+  the application OPENS ON SETUP when the rig or the SDR is not found.
+
+  **Three questions, asked in order.** Every failure is a different answer to
+  one of them, and each needs its own words on screen:
+
+  1. *Does the port exist?* Not plugged in, or a different adapter with a
+     different name. Say which ports ARE there.
+  2. *Does it open?* Another program holds it, or permissions refuse it --
+     no dialout group on Linux.
+  3. *Does the rig answer?* THE ONE THAT CATCHES "adapter plugged in, radio
+     switched off": the port opens perfectly and nothing comes back. No new
+     command is needed to test it -- the link already sends
+     `_read_all_values()` as the reader starts, so the probe is whether ANY
+     report arrives within a second or two.
+
+  `Rig Port` holds a serial device or `socket://host:port` -- a WiFi-to-TTL
+  bridge -- and the prefix says which, so no separate "type" setting can
+  disagree with the address. `serial.Serial` opens one and
+  `serial.serial_for_url` the other. Validate the socket form before trying
+  it, as the old code did: a mistyped address otherwise fails as a puzzling
+  timeout.
+
+  **Changing the connection while running** is what the code cannot do today:
+  the port is opened once at startup and the link is built around it.
+
+  * `connect(port, baud)` and `disconnect()` on `uBITX_Link` -- open, start
+    the reader, send the dump; cancel the reader and close. Switching serial
+    to WiFi, or to another adapter, is then the same path for both.
+  * **The model RESETS on connect** -- frequencies to zero, channels to "not
+    read". Otherwise a new radio inherits the last one's display, which is
+    the same lie as seeding plausible values at startup.
+  * **The reader survives an unplug.** Pulling the adapter raises inside a
+    timer callback, which today prints a traceback on every tick. Catch it,
+    mark the rig lost, say so -- as `SDR_Link` already does.
+
+  "rig ok" then becomes a real status with four answers: no port chosen, port
+  not found, opened but silent, connected.
 * **The meters.** `cp_`, `al_` (S-meter) and `vm_` (power and SWR) are
   unwired, so both meters are empty. Wiring them also lets the scanner stop
   on a signal, which it cannot do today.
@@ -185,6 +223,32 @@ rig and SDR++. Still to do, roughly in order of value:
   not yet read or save the configuration -- including the MCU headroom, which
   the link hardcodes as 0.04 while the settings file holds its own value.
 * **Launching SDR++ at startup** when autostart is set.
+
+* **One folder for everything this application keeps.** Three dotfiles are
+  loose in the home directory now, each found by its own rule:
+
+      ~/.ubitx_cec_desktop.ini             settings
+      ~/.ubitx_cec_desktop_channels.json   the channel sets and scan settings
+      ~/.ubitx_cec_desktop_geometry.json   the window's size and position
+
+  They should be one folder -- the settings, the channels, the window
+  position, and in time the logbook and any decoder output -- so the
+  operator can back the station up, copy it to another machine, or delete it,
+  by taking one thing. Each platform has a place for this:
+
+      macOS     ~/Library/Application Support/uBITX CEC Desktop/
+      Linux     $XDG_CONFIG_HOME, else ~/.config/ubitx-cec-desktop/
+      Windows   %APPDATA%\uBITX CEC Desktop\
+
+  A home-directory dotfile is the Linux habit applied everywhere, and on a
+  Mac it is invisible in Finder, which makes a backup harder rather than
+  easier.
+
+  **Move the existing files on first run**, and leave nothing behind: unlike
+  the settings keys, these have no other reader to keep working. One helper
+  that answers "where does X live", used by ConfigurationManager,
+  ChannelSets and the geometry saver, replacing three separate expanduser
+  calls -- so the next thing that needs a file does not invent a fourth rule.
 * **Tidying once the old application is retired:** the settings file's scan
   and channel entries, the SDR++ controller's dormant channel and scan
   methods, `globalvars`' Nextion leftovers, and the "simulate transmit"
@@ -237,17 +301,129 @@ do rather than pretending. Each backend declares what it supports, and the
 | Backend  | Transport      | Signal strength        | Filter width | AGC / NR | Volume |
 | :---     | :---           | :---                   | :---         | :---     | :---   |
 | SDR++    | rigctl socket  | no — meter left empty  | yes          | no       | the computer's master volume |
-| Gqrx     | rigctl socket  | `l STRENGTH`           | via `M`      | no       | not yet known |
+| Gqrx     | rigctl socket  | `l STRENGTH`           | via `M`      | no / n/a | its own `AF` gain, in dB |
 | SDRangel | REST           | expected               | expected     | expected | its own audio gain, expected |
+
+Measured against a running Gqrx: it reports `SQL STRENGTH AF LNA_GAIN` to
+`l ?`. **Gqrx has no noise reduction at all** -- AGC, squelch and noise
+blankers are its list -- so an NR control can never light up there, whatever
+is added to its remote control.
 
 The boundary is ready for this. Only `SDR_Link` talks to the controller, and
 volume already goes through it, so SDR++ answers with the system volume and
-another backend can answer with its own -- without the Operate tab changing.
+Gqrx with its own `AF` gain -- without the Operate tab changing.
+
+**Where the remaining controls come from.** rigctl was designed for rotators
+and radios, not SDRs, and no SDR exposes everything through it. Three routes,
+in the order they are worth trying:
+
+1. **SDRangel's REST API -- the most promising.** A control interface written
+   for the program itself rather than a protocol borrowed from elsewhere, so
+   AGC, noise reduction, squelch and the rest should be reachable without
+   patching anyone's source or asking the operator to run a special build.
+   It needs a SECOND TRANSPORT beside `RigctlSDR` -- HTTP and JSON rather
+   than a socket and lines -- behind the same interface `SDR_Link` already
+   uses, declaring its own capabilities. That boundary is what makes this a
+   day's work rather than a rewrite.
+
+   **What SDRangel brings that the others cannot.** Its REST API is at
+   `http://host:8091/sdrangel/...`: device sets and channels addressed by
+   index, `PATCH` for a partial settings change, `POST` to add a channel.
+   There is also a REVERSE API -- SDRangel forwards every settings change to
+   an endpoint of ours, in the same JSON -- which would replace polling
+   with being told. One of its own example scripts is a scanner that stops
+   when a channel's squelch opens, which is the behaviour ours wants.
+
+   * **A WDSP receiver plugin** (the DSP library behind OpenHPSDR) with
+     real AGC, noise reduction and noise blanking -- the controls Gqrx
+     would need patches for and SDR++ cannot do at all.
+   * **A MORSE DECODER feature** (v7.21.0, on the GGMorse library) -- what
+     the CW tab's greyed-out Decoder button is waiting for. It is a FEATURE
+     rather than part of a demodulator, so it takes audio from any of them
+     (SSB for real CW), and it detects pitch and keying speed itself, with
+     a lock once it has them. NOT IN THE WINDOWS DISTRIBUTION -- GGMorse
+     does not compile there. Whether the decoded text comes back over the
+     API needs checking against a running instance: features have settings
+     and report endpoints, and the text may be in the report. If it is not,
+     the decoder can write to a text file, which the application could
+     follow as it is written.
+
+   Decoding then becomes another capability: offered where the SDR has it,
+   greyed out for SDR++ and Gqrx, which have no decoder at all.
+
+   **Its discovery differs from rigctl's**, and should be designed first:
+   rigctl has exactly one thing to talk to, while SDRangel has device sets
+   and channels, any number of them. Finding the right demodulator channel
+   -- and deciding what to do when there are none, or several -- is the
+   first piece of work, not an afterthought.
+
+2. **Patching Gqrx's remote control.** Its protocol file is small and the
+   pattern is well established -- `PR #1463` (filter shape) is a complete
+   worked example of adding a LEVEL, and `dsward2/gqrx#2` (UDP streaming) of
+   adding a TOGGLE. Six pieces each: the name in `l ?` / `L ?`, a branch in
+   `cmd_get_level` and `cmd_set_level`, a mirror variable kept current so
+   reads are right, a slot on `MainWindow` moving the real control, a
+   `connect`, and a line in `resources/remote-control.txt`.
+
+   AGC would follow the level pattern, the noise blanker the toggle one.
+   Neither has an open PR. Other open PRs worth adopting rather than
+   inventing: filter shape (#1463), bookmarks (#1464), device selection
+   (#1446). Read a PR's diff at
+   `https://patch-diff.githubusercontent.com/raw/gqrx-sdr/gqrx/pull/<n>.diff`
+   -- GitHub's own pages refuse automated reading, that host does not.
+
+   **The risk of an unmerged PR lands on the USER'S BUILD, not on this
+   code.** Capabilities are discovered at connect, so a stock Gqrx simply
+   greys the control and a patched one lights it up. Publish a patch against
+   a release tag, not binaries: `dsward2/gqrx` ships signed macOS builds of
+   exactly this kind, which is a real maintenance burden and not one to take
+   on unless people ask.
+
+3. **Screen scraping -- a last resort, for closed software only.** Gqrx is
+   Qt and exposes a real accessibility tree; SDR++ draws its interface with
+   Dear ImGui straight onto an OpenGL surface, so there is nothing to find
+   there but pixels, and any click is coordinates that a resize, a theme or
+   a scroll invalidates. Three platforms, three mechanisms -- macOS
+   Accessibility via `pyobjc` (and its permission prompts), Windows UI
+   Automation via `pywinauto`, Linux AT-SPI via `pyatspi` (restricted under
+   Wayland) -- so extra packages and per-platform code, carried by the
+   operator. READING STATE BACK is the harder half and the reason it fails:
+   clicking NR is easy, knowing whether NR is on is not. If it is ever
+   built, it goes behind the same capability boundary as a per-application
+   driver -- never mixed into `SDR_Link`.
+
+**Gqrx versions differ in ways that matter.** 2.17.5 fixed responding to
+pipelined remote commands and limited UDP packets for netcat compatibility;
+2.17.4 added `\chk_vfo` and `\get_powerstat`. Some odd behaviour seen while
+testing by hand may be version-dependent rather than protocol-dependent.
 
 ---
 
 <a name="the-application"></a>
 ### The application — bugs worth fixing in the current code
+
+**Choosing Gqrx on Setup does not offer its port.** Each profile carries the
+port its program usually listens on -- 4532 SDR++, 7356 Gqrx, 8091 SDRangel
+-- and `_on_sdr_software` is meant to fill it in when the program changes.
+It only does so when the port still holds the PREVIOUS program's default,
+so that a port typed by hand is never overwritten; that test is apparently
+not matching, and the field keeps 4532 while Gqrx is chosen. Check what the
+setting actually holds when the comparison runs -- it is string against int
+as likely as not.
+
+**A 10 Hz tuning step does not reach the SDR.** Turning the 10 Hz digit moves
+the rig, and the SDR does not follow until the 100 Hz digit changes. Suspect
+one of:
+
+  * the rig ROUNDS to its tuning preset and reports the rounded value, so
+    nothing changed to pass on -- but the preset is set to the finest at
+    connect for exactly this reason, so check it is still in force;
+  * `SDR_Link.follow()` compares against `_sent_frequency` and skips what it
+    thinks it already sent;
+  * Gqrx rounds what it is given, or its own step is coarser.
+
+  A console trace of `vc`/`va` reports while turning the 10 Hz digit, beside
+  what `follow()` sends, would say which in a minute.
 
 These affect what is running today, not just the rebuild.
 

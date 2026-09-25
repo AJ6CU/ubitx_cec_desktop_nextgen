@@ -29,15 +29,12 @@ apart from the sets themselves. That concept is gone: you scan the set on
 show. Only the time spent on each channel remains a setting, and it lives
 here, moved over once from "Scan On Station Time".
 
-MOVING OVER
+NOT IN THE SETTINGS FILE
 
-The sets used to live in the settings file, under "Scan Channels Registry
-Queue". The first time this runs with no channel file of its own, it takes
-them from there and writes the new file; after that the file is the only copy
-this application uses. The entry in the settings file is left where it is, so
-the previous version of the application, which still reads it, goes on
-working -- the two copies drift apart from then on, which is the price of not
-breaking it.
+They were, once, under "Scan Channels Registry Queue", and the scan's dwell
+time under "Scan On Station Time". Both are gone from there. This class reads
+and writes its own file and nothing else, so there is one copy of the sets
+and no question of which is current.
 
 WHY THE APPLICATION OWNS THEM
 
@@ -63,6 +60,9 @@ means nothing is ever lost to a crash or a forgotten save.
 import json
 import os
 import time
+
+# Seconds on each channel when nothing has been set yet.
+DEFAULT_DWELL_SECONDS = 5
 
 # Beside the settings file, by the same rule -- see configuration.py.
 DEFAULT_PATH = os.path.expanduser(os.path.join("~", ".ubitx_cec_desktop_channels.json"))
@@ -105,18 +105,15 @@ def _clean_channel(raw):
 class ChannelSets:
     """The application's channel sets, loaded from and saved to the configuration."""
 
-    def __init__(self, config, path=None):
+    def __init__(self, path=None):
         """
         Args:
-            config: The ConfigurationManager -- gv.config. Used only to move
-                the sets over, the first time, from where they used to live.
             path: The channel file. Defaults to DEFAULT_PATH, in the user's
                 home; given one, a test can use a scratch file.
         """
-        self._config = config
         self.path = path or DEFAULT_PATH
         self._sets = {}
-        self._scan = {"dwell_seconds": self._dwell_from_settings()}
+        self._scan = {"dwell_seconds": DEFAULT_DWELL_SECONDS}
         self.load()
 
     # ------------------------------------------------------------------
@@ -130,9 +127,8 @@ class ChannelSets:
         used to live, and written to a new channel file.
 
         A DAMAGED FILE IS KEPT, NEVER OVERWRITTEN. It is renamed aside with a
-        timestamp, and the sets are taken from the settings file instead.
-        Saving over it would throw away whatever could still be rescued from
-        it by hand.
+        timestamp, and this starts with no sets rather than saving over it --
+        which would throw away whatever could still be rescued by hand.
         """
         if os.path.exists(self.path):
             try:
@@ -155,24 +151,12 @@ class ChannelSets:
                 except OSError:
                     print(f"[channels] {self.path} could not be read ({err}), "
                           f"nor moved aside; its sets are not loaded")
-                    self._sets = {}
-                    return
+                self._sets = {}
+                return
 
-        # Moving over from the settings file.
-        registry = self._config.get_scan_channels_registry() or {}
-        self._sets = self._from_registry(registry)
-        self.save()
-
-    def _dwell_from_settings(self):
-        """
-        The time on each channel from the settings file, in seconds -- where
-        it lived before, as "Scan On Station Time" in milliseconds. Five
-        seconds if it cannot be read.
-        """
-        try:
-            return self._clean_dwell(self._config.get_Scan_On_Station_Time() / 1000, 5)
-        except Exception:
-            return 5
+        # No file yet: no sets yet. One is made the first time the operator
+        # makes one.
+        self._sets = {}
 
     @staticmethod
     def _clean_dwell(value, fallback):

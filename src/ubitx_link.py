@@ -3,6 +3,7 @@ from timeit import default_timer as timer
 import serial
 
 import EEPROM
+from scustomtkinter import sCTkMessagebox
 
 MODES = ("DFT", "ERR", "LSB", "USB", "CWL", "CWU")
 
@@ -229,21 +230,19 @@ class uBITX_Link:
                     #
                     #   If we hit the RADIOTIMEOUT limit, then something has gone wrong...
                     #
-                    response = messagebox.askyesno(message="No Response from the Radio!",
-                                                   detail="Did you forget to turn it on or connect it?\n\n" +
+                    response = sCTkMessagebox.askerroryesno("No Response from the Radio!",
+                                                   "Did you forget to turn it on or connect it?\n\n" +
                                                           "If so, you can turn it on now and click the 'Yes' button.\n\n" +
-                                                          "Otherwise click 'No' for more options.",
-                                                   icon="error")
+                                                          "Otherwise click 'No' for more options.")
                     if response == True:
                         timeStarted = timer()  # Reset timer
                     else:
-                        response = messagebox.askyesno(message="Wrong Serial Port?",
-                                                       detail="The next most likely cause of this error  is that the application is trying to open the wrong serial port.\n\n" +
+                        response = sCTkMessagebox.askerroryesno("Wrong Serial Port?",
+                                                       "The next most likely cause of this error  is that the application is trying to open the wrong serial port.\n\n" +
                                                               "The best option here is to clear the serial port in the configuration file and restart the program.\n\n" +
                                                               "On restart, you can select a different serial port.\n\n" +
                                                               "Click the Yes button to proceed to clear the selected serial port or the 'No' button if you want to try something else.\n\n" +
-                                                              "In both cases the application will terminate.",
-                                                       icon="error")
+                                                              "In both cases the application will terminate.")
                         pass
                         # if response == True:
                         #     gv.config.setRadioPort(
@@ -2792,7 +2791,7 @@ class uBITX_Link:
         try:
             self.port.write(self.tx_to_mcu_preamble + commandList + self.tx_to_mcu_postscript)
         except:
-            messagebox.showerror(title="ERROR Communicating with uBITX",
+            sCTkMessagebox.showerror(title="ERROR Communicating with uBITX",
                                  message="Communication failed with uBITX.", parent=self,
                                  DETAILS="Did you select the right com port?\n" + "You selected: " + self.tty)
             sys.exit(-1)
