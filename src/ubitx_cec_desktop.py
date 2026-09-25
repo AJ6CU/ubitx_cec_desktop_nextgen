@@ -748,6 +748,11 @@ class UbitxCecDesktop(sCTk):
         if self.rig_state != "connected":
             return
         if self.model.reports:
+            # It is answering. Say which of the values the interface needs
+            # have not arrived -- the rig sends them as it boots and the
+            # reader takes what comes, so a gap is something to ask for
+            # rather than an error. Printed for now; asking comes later.
+            self.connection.check_expected_reports()
             return
         self.rig_state = "silent"
         self.rig_note = ("the port opened but the radio is not answering -- "

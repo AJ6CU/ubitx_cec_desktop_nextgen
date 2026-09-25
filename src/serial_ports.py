@@ -216,26 +216,24 @@ def parse_rig_port(text):
     return "serial", text, ""
 
 
-def open_rig_port(text, baud, timeout=5, reset=True):
+def open_rig_port(text, baud, timeout=5, reset=False):
     """
     Opens the rig's port -- a serial device or a network bridge.
 
-    RESETS THE RIG ON THE WAY IN, deliberately. The rig does not answer a
-    request for its settings; it SENDS them, all 26, when it boots -- and
-    uBITX_Link's reader sits and collects that burst as it starts. What
-    normally triggers the boot is the side effect of opening the port at all:
-    pulling DTR is how an Arduino bootloader is entered, so the Nano reboots
-    and the burst follows.
+    DOES NOT RESET THE RIG. uBITX_Link asks the firmware to restart instead,
+    with a command, as soon as it has a port -- see its __init__. That matters
+    because the rig does not answer a request for its settings; it SENDS them,
+    all 26, as it boots, and the link's reader sits collecting that burst.
 
-    That is too much to leave to a side effect. A port already open does not
-    reset when opened again, so a second connection in one session -- the
-    operator choosing a port on the Setup page -- got no burst, and the link
-    waited five seconds and then asked whether the radio was switched on.
-    Pulsing DTR here makes the reset deliberate and repeatable.
+    Pulsing DTR was tried first, since that is how an Arduino bootloader is
+    entered, and it did nothing on this station: it depends on the adapter
+    driving the line and on the auto-reset capacitor being fitted. The
+    argument is kept for an adapter where it helps, but a pulse that resets
+    nothing can still disturb a device, so it is off unless asked for.
 
     Args:
-        reset: False to open without resetting -- for a rig that should not
-            be interrupted, or a bridge that passes DTR through to one.
+        reset: True to pulse DTR as well. Off by default -- the firmware
+            command is what actually restarts the rig.
 
     Raises ValueError if the setting cannot be read at all, and lets
     pyserial's own exception through when opening fails, since its message

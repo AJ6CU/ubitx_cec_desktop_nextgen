@@ -208,8 +208,28 @@ rig and SDR++. Still to do, roughly in order of value:
 * **The meters.** `cp_`, `al_` (S-meter) and `vm_` (power and SWR) are
   unwired, so both meters are empty. Wiring them also lets the scanner stop
   on a signal, which it cannot do today.
-* **The CW tab** -- key type (`ck_`), speed (`vs_`), the two delays (`vy_`,
-  `ve_`): each needs its report stored and a command to change it.
+* **The CW tab** -- key type (`ck_`), speed (`vs_`), sidetone, the two delays
+  (`vy_`, `ve_`) and the offset switch (`ch_`). Mostly WIRING: every setter
+  already exists in the link -- `Set_CW_Tone`, `Set_CW_Keytype`,
+  `Set_CW_Speed`, `Set_CW_Delay_Starting_TX`, `Set_CW_Delay_Returning_To_RX`
+  -- and so does every handler; the handlers print and their model writes are
+  commented out.
+
+  What the old `cwSettings.py` knows that the link does not say:
+
+  * **THREE OF THEM NEED A REBOOT to take effect** -- the sidetone and both
+    delays. Key type and speed apply at once. The old dialog applied the
+    changes, slept 1.5 seconds so they reached EEPROM, then offered to
+    reboot. Now that `reboot_ubitx()` exists, the tab can offer the same --
+    and must not do it silently: a reboot drops the operator off the air.
+  * **Key type is a WORD, not a number**: "STRAIGHT", "IAMBICA", "IAMBICB".
+  * **The choices live in `globalvars`** -- `CW_Sidetone_Values`,
+    `CW_WPM_Values`, `Start_TX_Values`, `Delay_Return_RX_Values` -- and the
+    old dialog adds whatever EEPROM actually holds to the list when it is not
+    one of them, rather than silently showing the nearest. Worth keeping:
+    a rig set to 437 Hz should not read as 425.
+  * **"Copy VFO A to B on split" is a SETTING, not the rig's** -- it belongs
+    with the configuration, not on this tab's rig controls.
 * **The RX tab** -- ATT (`vf_`) and IFS (`ci_`, `vi_`), the same way.
 * **Lock, mute and TX-stop are handled as toggles.** RIT and split turned out
   to report their state (`1`/`0`); these probably do too. Press each and read
@@ -401,6 +421,36 @@ testing by hand may be version-dependent rather than protocol-dependent.
 
 <a name="the-application"></a>
 ### The application — bugs worth fixing in the current code
+
+**Ask the rig for values that have not arrived.** *Half done.*
+
+`_read_all_values()` is GONE -- 101 lines that blocked, counted to 26, timed
+out after five seconds and raised modal dialogs from inside the loop. The
+reader starts instead and the rig's boot burst arrives through the ordinary
+handlers, so the window appears at once and the readouts fill in behind it.
+
+What is there now: every report's code is recorded as it passes through
+`_process_radio_command`, and `check_expected_reports()` PRINTS which of the
+twelve values the interface needs have not arrived, two seconds after
+connecting. Six others -- active VFO, split, RIT, lock, speaker, transmit
+inhibit -- are reported ONLY when not in their default state, and the rig
+comes up in all of them, so their silence is an answer; `RadioModel` starts in
+exactly those states.
+
+What is left: ASK for what has not arrived, rather than print it.
+
+**This matters more than it looks, because the reboot is not portable.** The
+whole arrangement rests on rebooting the rig: the burst is what the boot
+produces, and "silence means the default" is only true of a rig that has just
+started. The reboot key (`5945486C`) is KD8CEC's on a Nano -- a Pico or a
+Teensy build reboots differently, or cannot be made to from here at all. On
+any of those, connecting means asking, and the same is true of any
+connect-without-rebooting option offered to an operator who is mid-QSO.
+
+The pattern to follow is the channel reads: one request at a time, each
+confirmed before the next, retried when a reply does not come, progress
+reported upward. That is what made reading twenty channels reliable after the
+first attempt filed labels as frequencies.
 
 **Choosing Gqrx on Setup does not offer its port.** Each profile carries the
 port its program usually listens on -- 4532 SDR++, 7356 Gqrx, 8091 SDRangel

@@ -73,6 +73,12 @@ STEP_SETTLE_MS = 150
 # easily, and this is what stops it. 0.04 means a transmit write in split --
 # toggle, frequency, toggle -- spends 120 ms behind the throttle, which is
 # why TX_WRITE_TIMEOUT_MS below is generous.
+# How long to let the reboot command reach the rig before the reader starts
+# collecting what it sends on the way back up. Not the time the rig takes to
+# boot -- the reader waits for that itself, up to five seconds -- only enough
+# for the bytes to leave.
+REBOOT_SETTLE = 0.25
+
 MCU_COMMAND_HEADROOM = .04
 
 
@@ -150,17 +156,38 @@ class uBITX_Link:
         self.tx_to_mcu_preamble = b'\x59\x58\x68'  # all commands to MCU must start with these three bytes
         self.tx_to_mcu_postscript = b'\xff\xff\x73'  # all commands to MCU must end with these three numbers
 
+        # Report codes seen since connecting -- see check_expected_reports().
+        self.seen_reports = set()
+
         self.mcu_command_buffer = []  # buffer used to send bytes to MCU
         self.time_of_last_sent = timer()  # used to avoid overloading MCU
+
+        # REBOOT THE RIG, THEN READ WHAT IT SAYS ON THE WAY UP.
+        #
+        # The order here is the whole trick. toRadioCommandDict exists by now
+        # (it is built at the top of this method), so a command can be sent --
+        # but the reader does not exist yet, and its constructor is what sits
+        # and collects the 26 values the rig sends as it boots. So: ask the
+        # rig to restart, let the command reach it, and only then start the
+        # reader, which is waiting for exactly what the restart produces.
+        #
+        # Sending it any later would be too late; any earlier would fail on a
+        # command dictionary that does not exist.
+        try:
+            self.port.reset_input_buffer()      # anything from before is stale
+        except Exception:
+            pass
+        self.reboot_ubitx()
+        sleep(REBOOT_SETTLE)
 
         self._ubitx_reader = self._input(self)
 
         # THE FINEST PRESET, ONCE, AND LEFT THERE.
         #
-        # AFTER the reader, not inside it. _read_all_values runs from
-        # _input's constructor, which is called before toRadioCommandDict
-        # exists -- so sending a command from there fails on an attribute
-        # that has not been assigned yet. Commands belong out here anyway;
+        # AFTER the reader, not inside it. The reader's constructor once ran
+        # a blocking read of its own, before toRadioCommandDict existed, so a
+        # command sent from there failed on an attribute not yet assigned.
+        # That read is gone, but the rule stands: commands belong out here,
         # the reader reads.
         #
         # The rig rounds every frequency it is given to the active tuning
@@ -205,111 +232,23 @@ class uBITX_Link:
             self._schedule = radio_link.schedule
             print("inner class init", self._port, self._model, self._schedule)
 
-            self._read_all_values()
-
+            # NO BLOCKING READ ANY MORE.
+            #
+            # This used to call _read_all_values(), which sat counting until
+            # 26 values had arrived -- the burst the rig sends as it boots --
+            # with a five-second timeout and modal dialogs inside the loop
+            # ("Did you forget to turn it on?"). A hundred lines to receive
+            # what the reader below receives anyway, and the most likely
+            # thing in the link to fail.
+            #
+            # The reader starts instead, and the burst arrives through the
+            # ordinary handlers like every later report: the window comes up
+            # at once and the readouts fill in over the next second, the way
+            # the channel list does. A value that never comes costs nothing
+            # now -- see check_expected_reports(), which says which are
+            # missing rather than waiting for them.
             self.id = self._radio_link.root.after(self._schedule, self._reader)
 
-        def _read_all_values(self):
-            print ("read_all_values")
-
-            #
-            #   Read and process all the values sent at startup of radio
-            #
-
-            ffCount = 0
-            buffer = []
-            commandCount = 0
-            timeStarted = timer()  # need time on entry to check for timeout
-
-            while commandCount < 26:
-                #
-                #   Check for timeout situation
-                #
-                RADIOTIMEOUT=5          # give the operator 5 seconds to remember to turn on the radio.
-                if timer() - timeStarted > RADIOTIMEOUT:
-                    #
-                    #   If we hit the RADIOTIMEOUT limit, then something has gone wrong...
-                    #
-                    response = sCTkMessagebox.askerroryesno("No Response from the Radio!",
-                                                   "Did you forget to turn it on or connect it?\n\n" +
-                                                          "If so, you can turn it on now and click the 'Yes' button.\n\n" +
-                                                          "Otherwise click 'No' for more options.")
-                    if response == True:
-                        timeStarted = timer()  # Reset timer
-                    else:
-                        response = sCTkMessagebox.askerroryesno("Wrong Serial Port?",
-                                                       "The next most likely cause of this error  is that the application is trying to open the wrong serial port.\n\n" +
-                                                              "The best option here is to clear the serial port in the configuration file and restart the program.\n\n" +
-                                                              "On restart, you can select a different serial port.\n\n" +
-                                                              "Click the Yes button to proceed to clear the selected serial port or the 'No' button if you want to try something else.\n\n" +
-                                                              "In both cases the application will terminate.")
-                        pass
-                        # if response == True:
-                        #     gv.config.setRadioPort(
-                        #         "")  # This clears out out the entry for the serial port name in the configuration file
-                        #     # On restart, the user will have opportinity tp select a new port.
-                        exit(99)
-                else:
-
-                    # Read a line from the serial port (until a newline character is received)
-                    # Decode the bytes to a string (e.g., 'utf-8') and remove leading/trailing whitespace
-
-                    in_byte = self._port.read(1)
-
-                    if in_byte:
-                        #
-                        #   Looking for the first line with a "p" in the first character
-                        #   CEC sends a zero to start, just ignore it
-                        #
-                        if ((len(buffer) == 0) and (in_byte.decode(errors='ignore') != 'p')):
-                            pass
-                        else:
-
-                            buffer.append(in_byte)
-
-                            if in_byte.hex() == 'ff':
-                                ffCount += 1
-                                if ffCount == 3:
-                                    #
-                                    #   decode the characters into ascii
-                                    #
-                                    decoded_buffer_char = [item.decode(errors='ignore') for item in buffer]
-
-                                    # if self.debugCommandDecoding:
-                                    #     for item in decoded_buffer_char:
-                                    #         print(f"{item:<{4}}", end="")
-                                    #     print("")
-
-                                    # decoded_buffer_hex = [item.hex() for item in buffer]
-                                    # for item in decoded_buffer_hex:
-                                    #     print(f"{item:<{4}}", end="")
-                                    # print("")
-
-                                    # decoded_buffer_ord = [ord(item) for item in buffer]
-                                    # for item in decoded_buffer_ord:
-                                    #     print(f"{item:<{4}}", end="")
-                                    # print("")
-                                    #
-                                    #   since we saw 3 0xff's in a row, we can call the getter to
-                                    #   set the value in the UX
-                                    #
-                                    self._process_radio_command(decoded_buffer_char)
-                                    #
-                                    #   reset counters (and add one to total processed)
-                                    #
-                                    ffCount = 0
-                                    buffer = buffer[:0]
-                                    commandCount += 1
-                                    print("commandCount:", commandCount)
-
-                            #
-                            #   Sometimes the Emulator can outrun the MCU's ability to deliver data. If we were reading valid data
-                            #   and we get a zero waiting situation, wait for a little to see if more data appears
-                            #
-                            if self._port.in_waiting == 0:
-                                MCU_Read_Wait_Period = .04
-                                sleep(float(MCU_Read_Wait_Period))
-            print("read all values done")
         def _reader(self):
             # print ("read")
             ffCount = 0
@@ -372,6 +311,9 @@ class uBITX_Link:
 
         def _process_radio_command(self, buffer):
             command = buffer[3] + buffer[4]
+            # Every report passes here, so this is where "we have seen one"
+            # belongs -- see uBITX_Link.check_expected_reports().
+            self._radio_link.seen_reports.add(command)
             self._delegate_command_processing(command, buffer)
 
             # THE VIEW IS TOLD HERE, and nowhere else.
@@ -2774,9 +2716,85 @@ class uBITX_Link:
         #
         # self.sendCommandToMCU(bytes(command))
 
+    # WHAT THE INTERFACE NEEDS FROM THE RIG, by report code. Not everything
+    # the rig sends: the tuning presets, the spectrum settings and the green
+    # box lines are of no use here and are not waited for.
+    EXPECTED_REPORTS = {
+        "va": "VFO A frequency", "vb": "VFO B frequency",
+        "ca": "VFO A mode", "cb": "VFO B mode",
+        "sv": "firmware version", "sc": "callsign",
+        "vt": "CW tone", "ck": "CW key type", "vs": "CW speed",
+        "ve": "CW delay to transmit", "vy": "CW delay to receive",
+        "ch": "CW offset switch",
+    }
+
+    # REPORTED ONLY WHEN NOT IN THEIR DEFAULT STATE, so silence about these is
+    # an answer rather than a gap: the rig comes up with VFO A active and
+    # split, RIT, lock and transmit inhibit all off, and its speaker on.
+    # RadioModel starts in exactly those states, so nothing needs to be asked
+    # for or assumed.
     #
-    #   Send command to MCU
-    #
+    # THIS ONLY HOLDS BECAUSE WE REBOOT. Connecting to a rig that has been
+    # running -- which is what a future connect-without-reboot would be --
+    # makes the same silence mean "unknown", and these would have to be asked
+    # for. Worth remembering before that option is offered.
+    DEFAULTED_AFTER_REBOOT = {
+        "cv": "which VFO is active (A)", "cs": "split (off)",
+        "cr": "RIT (off)", "cl": "lock (off)",
+        "cj": "speaker (on)", "cx": "transmit inhibit (off)",
+    }
+
+    def check_expected_reports(self):
+        """
+        Says which of the values the interface needs have not arrived.
+
+        PRINTS, for now. The rig sends its settings as it boots and the
+        reader takes them as they come, so a missing one is not an error --
+        it is something to ask for. Asking is not built yet; knowing which
+        are missing is the first half of it, and worth having while the rest
+        of the interface is wired to these values one at a time.
+        """
+        missing = {code: name for code, name in self.EXPECTED_REPORTS.items()
+                   if code not in self.seen_reports}
+        defaulted = [name for code, name in sorted(self.DEFAULTED_AFTER_REBOOT.items())
+                     if code not in self.seen_reports]
+        if defaulted:
+            print(f"[rig] at their defaults after the reboot: {', '.join(defaulted)}")
+        if not missing:
+            print(f"[rig] all {len(self.EXPECTED_REPORTS)} expected values arrived")
+            return missing
+        print(f"[rig] {len(missing)} of {len(self.EXPECTED_REPORTS)} expected values "
+              f"have not arrived:")
+        for code, name in sorted(missing.items()):
+            print(f"        {code}  {name}")
+        return missing
+
+    def reboot_ubitx(self):
+        """
+        Asks the rig's firmware to restart.
+
+        WHY ANYTHING WANTS THIS: the rig does not answer a request for its
+        settings -- it SENDS them, all 26, as it boots, and _read_all_values
+        sits collecting that burst. So something has to make it boot. Opening
+        the serial port used to, as a side effect of DTR, but that depends on
+        the adapter driving the line and the auto-reset capacitor being
+        fitted; on this station it does not happen. A command does not care
+        about either.
+        """
+        print("reboot_ubitx")
+
+        # To reboot need to send key 1497712748  (5945486C)
+
+        lsb1 = 0x6C
+        lsb2 = 0x48
+        lsb3 = 0x45
+        lsb4 = 0x59
+
+        checksum = (lsb1 + lsb2 + lsb3 + lsb4) % 256
+
+        command = [self.toRadioCommandDict["TS_CMD_UBITX_REBOOT"], lsb1, lsb2, lsb3, lsb4, checksum]
+        self.sendCommandToMCU(bytes(command))
+
     def sendCommandToMCU(self, commandList):
         currentTime = timer()
         timeDiff = currentTime - self.time_of_last_sent
@@ -2804,5 +2822,3 @@ class uBITX_Link:
 
     def lenMemoryQueue(self):
         return len(self.memoryQueue)
-
-
