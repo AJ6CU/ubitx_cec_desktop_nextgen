@@ -242,7 +242,24 @@ rig and SDR++. Still to do, roughly in order of value:
 * **Log QSO, the Setup tab, EEPROM backup and restore.** Setup's fields do
   not yet read or save the configuration -- including the MCU headroom, which
   the link hardcodes as 0.04 while the settings file holds its own value.
-* **Launching SDR++ at startup** when autostart is set.
+* ~~Launching the SDR at startup when autostart is set.~~ **Done.** An SDR
+  already running is attached to and left running; one this application
+  starts is stopped, disconnected and asked to quit, in that order, and is
+  never forced where forcing corrupts it. Where each program lives, what it
+  is called and how it must be closed are in `sdr_programs.json` -- see
+  below.
+
+* **`sdr_programs.json` is where a new SDR goes.** Each entry describes one
+  WAY OF DRIVING a program -- its protocol, port, mode names, install paths,
+  process name, launch arguments, what it can and cannot do, and how it must
+  be shut down. Adding a program is an entry, not code, and an operator's own
+  entries in `~/.ubitx_cec_desktop_sdr_programs.json` are merged over the
+  shipped ones entry by entry. SDRangel will be TWO entries, REST and rigctl,
+  sharing install paths.
+
+  Still to do there: the REST transport itself, and a way to ask for a
+  command line a program cannot guess at (rigctld carries the flag; nothing
+  asks yet).
 
 * **One folder for everything this application keeps.** Three dotfiles are
   loose in the home directory now, each found by its own rule:
@@ -447,10 +464,26 @@ Teensy build reboots differently, or cannot be made to from here at all. On
 any of those, connecting means asking, and the same is true of any
 connect-without-rebooting option offered to an operator who is mid-QSO.
 
+**The reboot is doing a SECOND job, easily missed.** It does not only produce
+the burst -- it guarantees the conversation starts at a frame boundary. Plug a
+rig in mid-transmission, or connect to one already talking, and the reader
+joins a byte stream in progress: a partial frame, a checksum that fails, and
+everything after it read against the wrong boundary. That is the fault the
+channel reads had, where one dropped reply filed every later value against
+the wrong slot -- and it looks like a working connection until a frequency
+arrives as a label.
+
+So whatever replaces the burst must RESYNCHRONISE rather than assume: find the
+frame preamble, discard whatever precedes it, and only then start reading.
+Without that, asking works on a quiet rig and fails on a busy one.
+
 The pattern to follow is the channel reads: one request at a time, each
 confirmed before the next, retried when a reply does not come, progress
 reported upward. That is what made reading twenty channels reliable after the
 first attempt filed labels as frequencies.
+
+**The reboot is doing two jobs**, and whatever replaces it inherits both --
+see `ARCHITECTURE.md`, "Starting from a known point".
 
 **Choosing Gqrx on Setup does not offer its port.** Each profile carries the
 port its program usually listens on -- 4532 SDR++, 7356 Gqrx, 8091 SDRangel
@@ -686,3 +719,50 @@ window that mattered; only a test that reproduced the stop showed the fix
 working. Twice in the same session a test "failure" was the test's own mistake -- a
 four-character byte string, a stand-in missing a method -- which is the
 other half of the same rule: check the check.
+
+**Tk owns the macOS application menu, and answers Quit with Tcl's `exit`.**
+Not Python's: the interpreter is torn down where it stands, so `atexit`,
+every `finally` and every signal handler are skipped. Quitting from that menu
+left the rig's port open and an SDR still running, while closing the window
+behaved perfectly -- a maddening pair of symptoms to hold at once.
+`self.createcommand("::tk::mac::Quit", handler)` is the hook, and it is
+harmless elsewhere.
+
+**A shutdown must not hang off the window's close button alone.** For the
+reason above, and because an application can end in half a dozen ways: the
+close button, the menu, the main loop returning, an unhandled error, SIGINT,
+SIGTERM, an IDE's stop. One `close_down()`, safe to call twice, reached from
+every one of them. SIGKILL cannot be caught by anything, and is the one case
+where the port and the SDR are left behind.
+
+**Asking an application to quit has to go through the system, and that means
+launching it as one.** A binary started directly is not a registered
+application, so `tell application "Gqrx" to quit` has nothing to talk to. The
+polite request fails silently, SIGTERM follows, and Qt does not handle
+SIGTERM: Gqrx dies without writing its settings, reports an unexpected quit,
+and forgets which SDR device it was using. `open -a` instead, and find the
+process afterwards to know it is ours.
+
+**An error from `osascript` does not mean the quit failed.** Gqrx answers a
+quit with "User canceled (-128)" and then quits. Judging by the return code
+declared failure about a program that had gone -- and, since Gqrx must never
+be forced, left it alone. Only whether the process is still there settles it.
+
+**A program still starting answers badly about itself.** Its remote control
+accepts a connection before everything behind it is ready, so `l ?` comes
+back empty and discovery -- taking that as final -- greys out volume, squelch
+and the signal for the whole session. Ask again a few seconds later.
+Autostart makes this the normal case rather than a rare one.
+
+**A silent "nothing to do" is the hardest failure to read.** Closing printed
+not a word about the SDR, which looked identical to leaving it alone
+deliberately. Saying what it decided, and why, turned three rounds of
+guesswork into one run.
+
+**An exclusive device bends every ownership rule around it.** "Leave alone
+what you did not start" is right until the thing you did not start is holding
+the one dongle: then the program the operator has just chosen cannot open it,
+and doing the polite thing means the switch fails silently. The rule did not
+survive contact with the hardware -- what survived was asking. Ours and
+stubborn: may we force it? Theirs at all: may we close it? Neither is decided
+here, and with nobody to ask, nothing is taken upon ourselves.

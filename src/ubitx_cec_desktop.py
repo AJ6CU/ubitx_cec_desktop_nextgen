@@ -46,8 +46,10 @@ WHAT IS WORTH KNOWING WHILE READING IT
 
 See ARCHITECTURE.md for the reasoning, and TODO.md for what is not done.
 """
+import atexit
 import json
 import os
+import signal
 import random
 import serial
 import tkinter as tk
@@ -62,7 +64,8 @@ from serial_ports import list_rig_ports, parse_rig_port, open_rig_port
 from radio_model import RadioModel, LABEL_SLOTS, CHANNEL_SLOTS
 from sdr_link import SDR_Link
 from scanner import Scanner
-from sdr_profiles import profile_for
+import sdr_programs
+from sdr_programs import profile_for, choices as sdr_choices
 from ubitx_link import uBITX_Link
 
 from scustomtkinter import (
@@ -87,10 +90,9 @@ from scustomtkinter import (
 # ]
 MODES = ["LSB", "USB", "CWL", "CWU"]
 
-# The SDR programs offered on Setup: the setting's name, and what is shown.
-# "None" first, because it is where a new station starts.
-SDR_CHOICES = (("none", "None"), ("sdr++", "SDR++"), ("gqrx", "Gqrx"),
-               ("rigctld", "rigctld (Hamlib)"))
+# The SDR programs offered on Setup come from sdr_programs.json -- see
+# sdr_choices(), imported above. A program added to that file appears here
+# with no change to this code, which is the point of the file.
 
 # Logbook formats: what the setting holds, and what it is called. The setting
 # IS the file's extension -- see _choose_logbook_file.
@@ -544,6 +546,21 @@ class UbitxCecDesktop(sCTk):
         self.geometry(self._remembered_geometry())
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
+        # THE APPLICATION MENU'S QUIT, on macOS. Tk handles that menu itself
+        # and answers it with Tcl's own `exit`, which tears the interpreter
+        # down where it stands -- so Python's atexit and every `finally`
+        # never run. Quitting from the menu therefore left the rig's port
+        # open and an SDR this application had started still running, while
+        # closing the window behaved perfectly.
+        #
+        # ::tk::mac::Quit is Tk's hook for that menu item. Elsewhere it does
+        # not exist, and createcommand simply defines something nothing
+        # calls.
+        try:
+            self.createcommand("::tk::mac::Quit", self._on_close)
+        except Exception:
+            pass
+
         # Also saved as it changes -- see _on_configure. Closing cleanly is
         # not something an IDE's stop button does.
         self._geometry_timer = None
@@ -588,6 +605,8 @@ class UbitxCecDesktop(sCTk):
         self.sdr.on_status = self._show_sdr_status
         self.sdr.on_audio = self._sdr_audio_changed
         self.sdr.on_signal = self._update_s_meter
+        self.sdr.on_needs_force = self._ask_to_force_sdr
+        self.sdr.on_needs_closing = self._ask_to_close_their_sdr
 
         # The scanner, run by the application rather than the SDR -- see
         # scanner.py. It tunes the rig; the SDR follows the rig as ever.
@@ -630,6 +649,10 @@ class UbitxCecDesktop(sCTk):
         # whether volume does anything. Starts on SDR if SDR++ is switched
         # on in the settings, since that is how the station is set up.
         self._listen_source = "SDR" if gv.config.sdr_enabled() else "Rig"
+        # Whether the OPERATOR chose that, as against it being where the
+        # application started. An SDR connecting later takes over the
+        # listening -- but never over a choice somebody made.
+        self._listen_chosen = False
         # The SDR's mute is NOT kept here: SDR_Link.muted reports it -- the
         # SDR's own mute where it has one, which can also be changed in the
         # SDR itself, and only otherwise the computer's.
@@ -792,10 +815,34 @@ class UbitxCecDesktop(sCTk):
             return "1455x360" if sys.platform == "darwin" else "1440x520"
 
     def _on_close(self):
+        """The window's close button."""
+        print("[app] closing")
+        self.close_down()
+        self.destroy()
+
+    def close_down(self):
+        """
+        Everything that must happen before this application ends.
+
+        SEPARATE FROM _on_close, AND SAFE TO CALL TWICE, because the window
+        can go without the close button being pressed -- and did: none of
+        this ran, so the geometry went unsaved, the rig's port was left open
+        and the SDR this application had started was left running with no
+        word about it. Whatever closes the window, the main loop returns, so
+        the end of the program calls this as well.
+        """
+        if getattr(self, "_closed_down", False):
+            return
+        self._closed_down = True
+
         self._save_geometry()
         self._close_rig()
-        self.sdr.disconnect()
-        self.destroy()
+        # An SDR that was already running is the operator's and is left
+        # alone; one this application started is closed with it. One call,
+        # because stopping the receiver, closing the socket and asking the
+        # program to quit have to happen in that order -- see
+        # SDR_Link.shutdown().
+        self.sdr.shutdown()
 
     # -- SDR++ ---------------------------------------------------------------
     def _model_changed(self):
@@ -827,10 +874,15 @@ class UbitxCecDesktop(sCTk):
         # the receiver, speaking if the rig is. Done now rather than while
         # building, because it sends a command to the rig.
         self._set_listen_source(self._listen_source)
-        if gv.config.sdr_enabled():
-            self.sdr.connect()
-        else:
+        if not gv.config.sdr_enabled():
             self._show_sdr_status(False)
+            return
+        # Start the program first if that is wanted -- attaching to one
+        # already running, or launching one, which is then ours to close --
+        # and keep trying while it comes up, since a freshly started SDR
+        # takes seconds to open its remote control.
+        self.sdr.start_program()
+        self.sdr.connect_when_ready()
 
     def _reconnect_sdr(self):
         """The status-strip button: try SDR++ again."""
@@ -863,6 +915,20 @@ class UbitxCecDesktop(sCTk):
         has_filter = "filter" in self.sdr.capabilities
         for btn in self.filter_buttons:
             btn.state("normal" if has_filter else "disabled")
+
+        # AN SDR THAT CONNECTS BECOMES THE RECEIVER. With no SDR at startup
+        # -- which is how a new settings file begins -- the application comes
+        # up listening to the rig, and choosing an SDR on Setup afterwards
+        # left it there: the volume slider stayed greyed, because it belongs
+        # to whichever receiver you are listening through, and everything
+        # else about the SDR worked. Connecting one is as clear a statement
+        # as pressing the button.
+        #
+        # NOT over a choice the operator made, though. Once they have picked
+        # a receiver themselves, reconnecting never moves it.
+        if connected and self._listen_source == "Rig" and not self._listen_chosen:
+            self.receiver_picker.set("SDR")
+            self._set_listen_source("SDR")
 
         self.audio_note.configure(
             text="Listening through the SDR quiets the rig's speaker. "
@@ -1313,7 +1379,8 @@ class UbitxCecDesktop(sCTk):
         # so each segment is 140 wide around a three-letter word and reads
         # as a button rather than a label with a border.
         self.receiver_picker = sCTkSegmentedButton(
-            row, values=["SDR", "Rig"], command=self._set_listen_source,
+            row, values=["SDR", "Rig"],
+            command=lambda source: self._set_listen_source(source, by_operator=True),
             width=280, height=40, font=("Arial", 15, "bold"),
             dynamic_resizing=False)
         self.receiver_picker.pack(side="left")
@@ -2429,7 +2496,7 @@ class UbitxCecDesktop(sCTk):
         # Logbook are still the settings they will become.
         # Station, Radio, SDR across the top; Logbook beneath.
         self._build_radio_settings(self._settings_box(columns, 0, 1, "Radio", 2))
-        self._build_sdr_settings(self._settings_box(columns, 0, 2, "SDR", 2))
+        self._build_sdr_settings(self._settings_box(columns, 0, 2, "SDR", 4))
         self._build_logbook_settings(self._settings_box(columns, 1, 0, "Logbook", 4))
 
         for index, (title, rows) in enumerate(groups):
@@ -2737,13 +2804,25 @@ class UbitxCecDesktop(sCTk):
         is tried, and the interface greys everything an SDR would serve.
         """
         line = self._settings_line(box, "Software", 62)
-        self.sdr_picker = sCTkComboBox(line, width=150, height=SETTINGS_CONTROL_HEIGHT, command=self._on_sdr_software,
-                                       values=[n for _, n in SDR_CHOICES])
+        self.sdr_picker = sCTkComboBox(line, width=150, height=SETTINGS_CONTROL_HEIGHT,
+                                       command=self._on_sdr_software,
+                                       values=[name for _, name in sdr_choices()])
         self.sdr_picker.pack(side="left")
         sCTkButtonPrimary(line, text="Connect", width=90, height=SETTINGS_CONTROL_HEIGHT,
                           command=self._connect_sdr).pack(side="left", padx=8)
         current = gv.config.get_sdr_software()
-        self.sdr_picker.set(dict(SDR_CHOICES).get(current, "None"))
+        self.sdr_picker.set(dict(sdr_choices()).get(current, "None"))
+
+        # START IT IF IT IS NOT RUNNING. An SDR already running is the
+        # operator's: attached to, and left running when this closes. One
+        # started here is closed with this application -- see
+        # SDR_Link.close_program().
+        line = self._settings_line(box, "Start it", 62)
+        self.sdr_autostart = sCTkCheckBox(line, text="if it is not running",
+                                          command=self._save_autostart)
+        self.sdr_autostart.pack(side="left")
+        if str(gv.config.get_SDR_Autostart()) in ("1", "True", "true"):
+            self.sdr_autostart.select()
 
         line = self._settings_line(box, "Address", 62)
         self.sdr_host_entry = sCTkEntryPrimary(line, width=150, height=SETTINGS_CONTROL_HEIGHT)
@@ -2767,17 +2846,26 @@ class UbitxCecDesktop(sCTk):
         A different program chosen: its usual port is offered, unless the
         operator has already set one of their own.
         """
-        key = next((k for k, name in SDR_CHOICES if name == shown), "none")
-        was = gv.config.get_sdr_software()
+        key = next((k for k, name in sdr_choices() if name == shown), "none")
         gv.config.set_sdr_software(key)
         profile = profile_for(key)
-        # Only when the port still holds the PREVIOUS program's usual one:
-        # a port typed by hand is the operator's and is left alone.
-        if profile.default_port and str(gv.config.get_sdr_port()) == str(
-                profile_for(was).default_port):
-            gv.config.set_sdr_port(profile.default_port)
-            self.sdr_port_entry.delete(0, "end")
-            self.sdr_port_entry.insert(0, str(profile.default_port))
+        if not profile.default_port:
+            return
+
+        # OFFER THE NEW PROGRAM'S PORT unless the operator typed one of their
+        # own. "Their own" means a port that is not any program's usual one:
+        # comparing against the PREVIOUS program's default missed the case
+        # that matters, choosing Gqrx while the setting still said None --
+        # None has no port, so nothing matched and the field kept 4532.
+        usual = {str(known.default_port) for known in sdr_programs.PROFILES.values()
+                 if known.default_port}
+        current = str(gv.config.get_sdr_port() or "")
+        if current and current not in usual:
+            return                      # theirs; leave it
+
+        gv.config.set_sdr_port(profile.default_port)
+        self.sdr_port_entry.delete(0, "end")
+        self.sdr_port_entry.insert(0, str(profile.default_port))
 
     def _sdr_advanced(self):
         """
@@ -2789,7 +2877,7 @@ class UbitxCecDesktop(sCTk):
         """
         win = ctk.CTkToplevel(self)
         win.title("SDR settings")
-        win.geometry("420x220")
+        win.geometry("470x440")
         win.transient(self)
 
         body = sCTkFrame(win, fg_color="transparent", border_width=0)
@@ -2815,6 +2903,45 @@ class UbitxCecDesktop(sCTk):
             sCTkLabelTertiary(line, text="Hz", font=("Arial", 11)).pack(side="left", padx=6)
             fields[label] = field
 
+        # WHERE THE PROGRAM IS, for an install this does not know about. Empty
+        # means the usual places for that program on this platform, which are
+        # in sdr_programs.json along with everything else true of a program
+        # rather than of this station.
+        sCTkLabelPrimary(body, text="Where the program is",
+                         font=("Arial", 14, "bold")).pack(anchor="w", pady=(16, 0))
+        sCTkLabelTertiary(
+            body,
+            text="Only needed if starting it fails, or for rigctld, which "
+                 "must be told which radio to use — give the whole command.",
+            font=("Arial", 10), wraplength=400, justify="left").pack(anchor="w", pady=(2, 6))
+        path_row = sCTkFrame(body, fg_color="transparent", border_width=0)
+        path_row.pack(anchor="w", fill="x")
+        path_field = sCTkEntryPrimary(path_row, width=280, height=SETTINGS_CONTROL_HEIGHT)
+        path_field.pack(side="left")
+        path_field.insert(0, gv.config.get_sdr_path())
+
+        def browse():
+            from tkinter import filedialog
+            chosen = filedialog.askopenfilename(parent=win, title="The SDR program")
+            if chosen:
+                path_field.delete(0, "end")
+                path_field.insert(0, chosen)
+
+        sCTkButtonSecondary(path_row, text="Find…", width=70,
+                            height=SETTINGS_CONTROL_HEIGHT,
+                            command=browse).pack(side="left", padx=6)
+
+        # WHERE TO ADD A PROGRAM. Nobody would find this file by looking, and
+        # it is the whole point of having one: a program we have never heard
+        # of can be driven by describing it.
+        sCTkLabelTertiary(
+            body,
+            text=f"To add an SDR program, or change what is known about one, "
+                 f"edit:\n{sdr_programs.USER_FILE.replace(os.path.expanduser('~'), '~')}"
+                 f"\nIt is merged over the programs this application ships with.",
+            font=("Arial", 10), wraplength=400,
+            justify="left").pack(anchor="w", pady=(12, 0))
+
         def keep():
             for name, setter in (("CW", gv.config.set_sdr_cw_filter_default_hz),
                                  ("SSB", gv.config.set_sdr_ssb_filter_default_hz)):
@@ -2822,6 +2949,7 @@ class UbitxCecDesktop(sCTk):
                     setter(int(fields[name].get()))
                 except ValueError:
                     pass
+            gv.config.set_sdr_path(path_field.get())
             win.destroy()
 
         row = sCTkFrame(body, fg_color="transparent", border_width=0)
@@ -2829,6 +2957,45 @@ class UbitxCecDesktop(sCTk):
         sCTkButtonPrimary(row, text="Keep", width=80, command=keep).pack(side="left", padx=(0, 6))
         sCTkButtonSecondary(row, text="Cancel", width=80,
                             command=win.destroy).pack(side="left")
+
+    def _ask_to_close_their_sdr(self, name):
+        """
+        Asks whether to close a program the OPERATOR started.
+
+        Their program, not ours -- so the answer is theirs. It is asked
+        because an SDR dongle belongs to one program at a time: the one they
+        opened holds it, and the one they have just chosen cannot start
+        until it lets go.
+        """
+        return bool(sCTkMessagebox.askyesno(
+            f"Close {name}?",
+            f"{name} was already running when this started, and it is holding "
+            f"the SDR device — so the program you have just chosen cannot "
+            f"open it.\n\nClose {name}?",
+            yes_text=f"Close {name}", no_text="Leave it", master=self))
+
+    def _ask_to_force_sdr(self, name):
+        """
+        Asks whether to force a program that will not close.
+
+        ONLY ASKED WHEN SWITCHING, and only after it has been asked to quit
+        and refused: an SDR dongle belongs to one program at a time, so the
+        old one holding on stops the new one from starting. Forcing can cost
+        that program its settings -- Gqrx forgets which device it was using
+        -- so the operator decides, and closing it themselves is the better
+        answer if they can.
+        """
+        return bool(sCTkMessagebox.askyesno(
+            f"{name} will not close",
+            f"{name} has not closed and is still holding the SDR device, so "
+            f"the program you have chosen cannot start.\n\n"
+            f"Force it to close? Its own settings may not be saved — closing "
+            f"it yourself is safer if you can.",
+            yes_text="Force it", no_text="Leave it", master=self))
+
+    def _save_autostart(self):
+        """Whether to start the SDR program when this one starts."""
+        gv.config.set_SDR_Autostart("1" if self.sdr_autostart.get() else "0")
 
     def _connect_sdr(self):
         """Saves what is on the page, and tries the SDR."""
@@ -2842,22 +3009,29 @@ class UbitxCecDesktop(sCTk):
         # link itself is not replaced: controls all over the window are bound
         # to its methods, and a new object would leave them talking to the old
         # one.
-        self.sdr.disconnect()
+        # reload_profile deals with whatever is connected now -- closing a
+        # program this application started, or merely disconnecting one that
+        # was already running.
         self.sdr.reload_profile()
         if not gv.config.sdr_enabled():
             self._group_note(self.sdr_box, "none -- nothing is tried")
             self._show_sdr_status(False)
             return
-        self._group_note(self.sdr_box, f"connecting to {self.sdr.profile.name}…")
+        note = self.sdr.start_program()
+        self._group_note(self.sdr_box, f"connecting to {self.sdr.profile.name}…"
+                         + (f" ({note})" if note else ""))
         self.update_idletasks()
         if self.sdr.connect():
             self._group_note(self.sdr_box,
                              f"{self.sdr.profile.name}: "
                              f"{', '.join(sorted(self.sdr.capabilities)) or 'nothing'}")
         else:
+            # It may only be slow to open its remote control -- keep trying
+            # quietly rather than giving up at the first attempt.
             self._group_note(self.sdr_box,
-                             f"no answer at {gv.config.get_sdr_host()}:"
-                             f"{gv.config.get_sdr_port()}")
+                             f"waiting for {self.sdr.profile.name} at "
+                             f"{gv.config.get_sdr_host()}:{gv.config.get_sdr_port()}…")
+            self.sdr.connect_when_ready()
 
     # -- behaviour --------------------------------------------------------
     def _toggle(self, key):
@@ -2887,7 +3061,7 @@ class UbitxCecDesktop(sCTk):
         else:
             self.connection.Toggle_Speaker()
 
-    def _set_listen_source(self, source):
+    def _set_listen_source(self, source, by_operator=False):
         """
         Chooses which receiver you are listening through.
 
@@ -2900,6 +3074,8 @@ class UbitxCecDesktop(sCTk):
         already where it needs to be, judged by model.muted.
         """
         self._listen_source = source
+        if by_operator:
+            self._listen_chosen = True
         rig_should_be_muted = (source == "SDR")
         # Only once built. Setting the picker's starting value must not
         # reach the rig: its state is not known yet, and a second toggle at
@@ -3301,4 +3477,36 @@ class UbitxCecDesktop(sCTk):
 
 if __name__ == "__main__":
     # ctk.set_appearance_mode("dark")
-    UbitxCecDesktop().mainloop()
+    radio = UbitxCecDesktop()
+
+    # EVERY WAY OUT THAT CAN BE CAUGHT leads to close_down(), which is safe
+    # to call twice. Leaving by one of them without closing down means the
+    # rig's port stays open and an SDR this application started is left
+    # running -- which is what happened when only the window's close button
+    # did the work, and the operator quit from the menu instead.
+    #
+    #   the close button      -> _on_close
+    #   quitting another way  -> the finally below, when the main loop ends
+    #   an unhandled error    -> the same finally
+    #   Ctrl-C, or an IDE's stop button (SIGINT, SIGTERM) -> _leave
+    #   anything else that lets Python exit normally      -> atexit
+    #
+    # SIGKILL cannot be caught by anything, so a process killed outright
+    # still leaves both behind. Nothing can be done about that from here.
+    atexit.register(radio.close_down)
+
+    def _leave(number, frame):
+        print(f"[app] signal {number} -- closing down")
+        radio.close_down()
+        raise SystemExit(0)
+
+    for _signal in (signal.SIGINT, signal.SIGTERM):
+        try:
+            signal.signal(_signal, _leave)
+        except (ValueError, OSError):
+            pass                        # not the main thread, or not supported
+
+    try:
+        radio.mainloop()
+    finally:
+        radio.close_down()

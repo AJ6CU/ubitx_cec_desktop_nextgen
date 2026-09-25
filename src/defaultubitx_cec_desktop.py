@@ -28,7 +28,13 @@ default_config_data = {
     "SDR Software": "none",
     "SDR Host": "127.0.0.1",
     "SDR Port": 4532,
+    # 1 to start the SDR program if it is not already running. An SDR that
+    # was already running is left running when this application closes; one
+    # this application started is closed with it.
     "SDR Autostart": 1,
+    # Empty means "look where this program usually lives" -- see
+    # sdr_launcher.py. Set it when yours is somewhere else.
+    "SDR Path": "",
     "SDR CW Width HZ": 500,
     "SDR SSB Width HZ": 2600,
 

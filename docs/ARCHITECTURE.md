@@ -153,6 +153,29 @@ directly.
 
 **Transport concerns stay in the transport.** Two in particular:
 
+* *Starting from a known point.* The rig is REBOOTED when the link opens,
+  with a firmware command. That does two jobs, and the second is easy to
+  miss. It produces the burst of 26 values the rig sends as it boots, which
+  is the only way this protocol offers to learn where the radio is -- and it
+  guarantees the reader starts at a FRAME BOUNDARY. Connect to a rig already
+  running and the reader joins a byte stream in progress: a partial frame,
+  a checksum against the wrong bytes, and every later value read one
+  boundary out. That is the memory-read failure below, arriving by a
+  different route.
+
+  It also means the silence of a toggle is an answer. The rig reports
+  split, RIT, lock, transmit inhibit, the speaker and the active VFO only
+  when they are NOT at their defaults, and a rig that has just started is at
+  all of them -- which `RadioModel` matches exactly. On a rig that has been
+  running, the same silence means "unknown".
+
+  **Anything that replaces the reboot inherits both jobs.** Asking for values
+  -- needed for a Pico or Teensy build, whose reboot differs or cannot be
+  commanded, and for any connect that must not interrupt an operator -- has
+  to resynchronise on the frame preamble and discard whatever precedes it,
+  rather than assuming the first bytes to arrive are the start of a frame.
+  And it has to ask about those six toggles rather than assume them.
+
 * *The memory request queue.* Reads are answered in order, with nothing to
   say which slot an answer is for, so replies are matched by position. That
   is fragile: when the Nano dropped two of 38 reads sent on a timer, every
@@ -341,7 +364,8 @@ frequency the operator saw must convert.
 | `piRadio` and the `mainScreen` handlers | `uBITX_Link` -- commands and reports, writing `RadioModel` |
 | `comportManager` | Not yet brought across -- the serial port is still hardcoded |
 | `ConfigurationManager`, `globalvars` | Unchanged, as planned. `gv.config` is created first at startup |
-| `SDRPlusPlusController` | Kept, behind `SDR_Link`, which is the only thing that talks to it |
+| `SDRPlusPlusController` | Gone. `RigctlSDR` drives every rigctl program; `SDR_Link` is still the only thing that talks to it |
+| Its SDR++ launching in `mainScreen` | `sdr_launcher.py`, for whichever program is chosen |
 | `sdrDashboard` popup | Gone. Volume and mute on Operate; receiver choice on RX; filter on Operate |
 | `channels.py` and its window | The Channels tab, `ChannelSets`, and the channel file -- see below |
 | The controller's scanning | `Scanner`, run by the application -- see below |
@@ -379,15 +403,83 @@ truncated and nothing has to save and restore the preset around it. What
 the rig would store is still known -- `as_the_rig_would_store()` -- for
 matching a confirmation.
 
-**A common backend interface.** *Deferred, deliberately.* Designed from one
-example it would bake in SDR++'s limits, and SDRangel differs in almost every
-respect. The boundary already exists: only `SDR_Link` touches the controller,
-through fourteen members, and that list IS the interface a second SDR must
-provide. Two rules keep it that way -- nothing else calls the controller, and
-anything backend-specific goes behind `SDR_Link` (volume does: SDR++ answers
-with the computer's master volume, a later SDRangel with its own gain). When
-the second backend arrives, each will declare what it can do, and the
-interface will grey the rest. See the capability table in `TODO.md`.
+**A common backend interface.** *Settled, and it turned out to be two things.*
+
+What a program IS -- its port, where it installs, what it calls its modes,
+what it cannot do, how it must be shut down -- is DATA, and lives in
+`sdr_programs.json`. None of it is logic, all of it goes stale when somebody
+else ships a release, and adding a program should not mean editing Python.
+An operator's own entries, in `~/.ubitx_cec_desktop_sdr_programs.json`, are
+merged over the shipped ones ENTRY BY ENTRY -- not file over file, which is
+how the theme works and what `Theming.md` warns about: a copy made last year
+hides every block added since.
+
+How a program is DRIVEN is code, chosen by the `protocol` its entry names.
+`RigctlSDR` handles rigctl today; SDRangel's REST will be a second class, not
+a variation on the first -- it addresses device sets and channels by index,
+needs a discovery step to find the right demodulator, and can push changes
+rather than be polled. The entry says WHICH transport; it never describes one.
+
+One entry per WAY OF DRIVING a program, so SDRangel will have two, sharing
+install paths and differing in protocol. A program that gains a second
+interface gets a second entry, never a flag.
+
+---
+
+<a name="starting-programs"></a>
+### Starting an SDR, and whose it is
+
+Autostart makes the application responsible for somebody else's program, and
+one rule decides everything about it:
+
+> An SDR that was ALREADY RUNNING is the operator's: attached to, and left
+> running. One this application STARTED is its own, and closes with it.
+
+Quitting a control panel should not take down a receiver somebody was
+listening to, and leaving a window nobody opened deliberately is as rude the
+other way. Only a program held in `SDR_Link._program` is ever closed, so an
+instance that was already running cannot be closed by mistake -- there is
+nothing to close it with.
+
+**The order on the way out is the part that bites.** Stop its receiver, close
+our socket, THEN ask it to quit. Asking while the connection is still open
+leaves its remote-control server holding a live client through its own
+shutdown, which is how "Gqrx quit unexpectedly" and a configuration that
+forgot which SDR device it used were produced, repeatedly.
+
+**Ask, do not kill.** SIGTERM is not handled by a Qt application unless it was
+written to, so it dies without writing its settings. Asking means the
+system's own quit -- which means the program must have been LAUNCHED as an
+application (`open -a`) rather than as a binary, or there is nothing to ask.
+Whether it worked is judged by whether the process is gone, never by what the
+request returned: Gqrx answers a quit with "User canceled" and quits anyway.
+Some programs are marked never to be forced at all; a window left open is a
+nuisance, a corrupted configuration is an evening.
+
+**THE DEVICE IS WHERE THE RULE BENDS.** An SDR dongle belongs to one program
+at a time, so switching from one program to another is not a matter of
+preference: whatever holds the device has to go, or the program just chosen
+cannot open it and the switch fails -- quietly, which is how this was missed
+at first. Switching away from a program the OPERATOR had started only
+disconnected from it, and the new one then found the device busy.
+
+So closing is not always ours to decide, and the question asked depends on
+whose the program is:
+
+| | asked |
+| :--- | :--- |
+| ours, closes when asked | nothing -- it simply closes |
+| ours, refuses to close | *force it?* — forcing may cost it its settings |
+| theirs | *close it at all?* — they opened it; it is not ours to close |
+
+Quitting is different from switching: nothing is waiting for the device then,
+so a stubborn program is left running with its settings intact. Forcing
+happens only where the alternative is a switch that cannot work.
+
+**The questions go UPWARD.** `SDR_Link` holds two callbacks and opens no
+windows -- the same rule that took the modal dialogs out of the rig's
+transport. With nobody to ask, nothing is closed and the switch fails
+honestly rather than taking a liberty.
 
 ---
 

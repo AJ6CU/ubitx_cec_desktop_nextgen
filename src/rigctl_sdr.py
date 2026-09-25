@@ -3,7 +3,7 @@
 RigctlSDR -- drives any rigctl-speaking SDR: SDR++, Gqrx, a rigctld.
 
 Replaces SDRPlusPlusController. One class for every program, told which one
-it is talking to by a Profile (sdr_profiles.py), and finding out at connect
+it is talking to by a Profile (sdr_programs.py), and finding out at connect
 what the version actually running can do -- see discover().
 
 It POLLS, because rigctl cannot push: every POLL_MS it reads the frequency
@@ -17,7 +17,7 @@ own reply -- see rigctl_client.py for why that needs doing.
 """
 import globalvars as gv
 from rigctl_client import RigctlClient, ConnectionLost
-from sdr_profiles import FREQUENCY, MODE, FILTER, SIGNAL, VOLUME, SQUELCH, MUTE
+from sdr_programs import FREQUENCY, MODE, FILTER, SIGNAL, VOLUME, SQUELCH, MUTE
 
 POLL_MS = 200
 

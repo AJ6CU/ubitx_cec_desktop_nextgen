@@ -274,6 +274,20 @@ class ConfigurationManager:
         """Whether an SDR is to be used at all."""
         return self.get_sdr_software() not in ("none", "")
 
+    def get_sdr_path(self) -> str:
+        """
+        Where the SDR program is, when it is not where this expects.
+
+        Empty means "look in the usual places" -- see sdr_launcher.py, which
+        knows each program's normal home on each platform. This is for a
+        program installed somewhere else, which on Windows is most of them.
+        """
+        return str(self.getValueOrDefault("SDR Path"))
+
+    def set_sdr_path(self, path: str):
+        self.config_data["SDR Path"] = str(path).strip()
+        self.saveConfig()
+
     def get_SDR_Autostart(self) -> bool:
         """Fetches target system communication network socket connector port."""
         return self.getValueOrDefault("SDR Autostart")
