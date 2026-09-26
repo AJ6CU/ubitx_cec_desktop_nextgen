@@ -39,12 +39,21 @@ changes, follow() does not send it straight back. The controller has its own
 share of this -- see its set_frequency_hz and set_mode.
 """
 import globalvars as gv
-from time import sleep
+from time import sleep, monotonic
 
 import sdr_launcher
 import system_audio
 from rigctl_sdr import RigctlSDR
-from sdr_programs import profile_for, CW_EITHER, FILTER, VOLUME, MUTE, SQUELCH, SIGNAL
+from rest_sdr import RestSDR
+from sdr_programs import profile_for, CW_EITHER, FILTER, VOLUME, MUTE, SQUELCH, SIGNAL, AGC, NR, RF_GAIN
+
+# A mode asked of the rig because the SDR changed is PENDING until the rig
+# reports it. Meanwhile the rig's older mode is not pushed back to the SDR:
+# drag SDRangel's high cut to USB and back to LSB inside a second, and the
+# rig's late confirmation of USB used to be sent to SDRangel as the rig's
+# choice, leaving both in USB. Given up after this long, in case the rig
+# never takes it.
+RIG_MODE_PENDING_SECONDS = 2.0
 
 
 # How long to let the operating system take the SDR device back after the
@@ -78,6 +87,8 @@ class SDR_Link:
         # not sent straight back once the rig confirms it.
         self._sent_hz = None
         self._sent_mode = None
+        self._rig_mode_asked = None     # see RIG_MODE_PENDING_SECONDS
+        self._rig_mode_asked_at = 0.0
 
         # Called with True or False when the connection comes or goes, so
         # the interface can say so. Set by the owner.
@@ -121,14 +132,16 @@ class SDR_Link:
         The code that drives this program, chosen by the protocol its entry
         names.
 
-        "rigctl" is all there is today. SDRangel's REST will be a second
-        class here, not a variation on the first: it addresses device sets
-        and channels by index, needs a discovery step to find the right
-        demodulator, and can push changes rather than be polled. The entry
-        says WHICH transport; how each works is code.
+        "rigctl" for SDR++, Gqrx and rigctld; "rest" for SDRangel's own API
+        -- a second class, not a variation on the first: it addresses device
+        sets and channels by index and needs a discovery step to find the
+        right demodulator. The entry says WHICH transport; how each works is
+        code.
         """
         if profile.protocol in ("rigctl", "none"):
             return RigctlSDR(self.root, profile)
+        if profile.protocol == "rest":
+            return RestSDR(self.root, profile)
         print(f"[sdr] {profile.name} speaks {profile.protocol}, which this "
               f"version cannot drive yet")
         return RigctlSDR(self.root, profile_for("none"))
@@ -167,11 +180,15 @@ class SDR_Link:
         self.controller.on_filter = self._from_sdr_filter
         self.controller.on_volume = lambda level: self._audio_changed()
         self.controller.on_mute = lambda muted: self._audio_changed()
+        self.controller.on_dsp = lambda function: self._audio_changed()
+        self.controller.on_rf_gain = lambda: self._audio_changed()
         self.controller.on_squelch = lambda level: self._audio_changed()
         self.controller.on_signal = lambda level: self._signal_changed()
         self.controller.on_disconnect = self._lost
-        self._sent_frequency = None
+        self._sent_hz = None            # FIX: was _sent_frequency, which nothing reads
         self._sent_mode = None
+        self._rig_mode_asked = None     # see RIG_MODE_PENDING_SECONDS
+        self._rig_mode_asked_at = 0.0
         print(f"[sdr] now set up for {self.profile.name}")
 
     @property
@@ -215,12 +232,17 @@ class SDR_Link:
         self.controller.on_filter = self._from_sdr_filter
         self.controller.on_volume = lambda level: self._audio_changed()
         self.controller.on_mute = lambda muted: self._audio_changed()
+        self.controller.on_dsp = lambda function: self._audio_changed()
+        self.controller.on_rf_gain = lambda: self._audio_changed()
         self.controller.on_squelch = lambda level: self._audio_changed()
         self.controller.on_signal = lambda level: self._signal_changed()
         self.controller.on_disconnect = self._lost
 
         if not self.controller.connect(host, port):
-            print(f"[sdr] could not reach {self.profile.name} at {host}:{port}")
+            # RestSDR says why; rigctl can only fail to answer. "Nothing to
+            # tune" is said by the transport itself, once.
+            if getattr(self.controller, "last_failure", "unreachable") == "unreachable":
+                print(f"[sdr] could not reach {self.profile.name} at {host}:{port}")
             self._report(False)
             return False
 
@@ -230,6 +252,8 @@ class SDR_Link:
         # in full rather than compared against a previous connection.
         self._sent_hz = None
         self._sent_mode = None
+        self._rig_mode_asked = None     # see RIG_MODE_PENDING_SECONDS
+        self._rig_mode_asked_at = 0.0
         self.follow()
 
         print(f"[sdr] connected to {self.profile.name} at {host}:{port}; "
@@ -467,7 +491,12 @@ class SDR_Link:
         if self.connect():
             return                      # connect() looks again by itself
         if attempts <= 1:
-            print(f"[sdr] {self.profile.name} did not answer; giving up for now")
+            if getattr(self.controller, "last_failure", None) == "nothing to tune":
+                print(f"[sdr] {self.profile.name} is running but never offered "
+                      f"anything to tune; giving up for now. Check its window: "
+                      f"is the SDR device there, with an SSB demodulator?")
+            else:
+                print(f"[sdr] {self.profile.name} did not answer; giving up for now")
             return
         self._waiting_for_program = self.root.after(
             wait_ms, lambda: self.connect_when_ready(attempts - 1, wait_ms))
@@ -505,14 +534,35 @@ class SDR_Link:
             self.controller.set_frequency(hz)
 
         rig_mode = self._model.mode_of(self._model.rx_vfo)
+        if self._rig_mode_asked is not None:
+            waited = monotonic() - self._rig_mode_asked_at
+            if rig_mode == self._rig_mode_asked or waited > RIG_MODE_PENDING_SECONDS:
+                self._rig_mode_asked = None
+            else:
+                # The rig has not caught up with what the SDR asked for; its
+                # current mode is older than the SDR's, so it is not sent.
+                return
         # The SDR's own name for the mode -- SDR++ has one CW, Gqrx two.
         sdr_mode = self.profile.to_sdr.get(rig_mode)
         if sdr_mode and sdr_mode != self._sent_mode:
+            previous = self._sent_mode
             self._sent_mode = sdr_mode
-            # The mode's own default width, not whatever the last mode used:
-            # a 2600 Hz SSB filter carried into CW lets in everything around
-            # the signal. The defaults come from the configuration.
-            width = self.controller.default_filter_width(sdr_mode)
+            # Between SSB and CW, the new mode's own default width: a 2600 Hz
+            # SSB filter carried into CW lets in everything around the
+            # signal. The defaults come from the configuration.
+            #
+            # Within one kind -- LSB to USB, CWL to CWU -- the width the
+            # operator had is KEPT: only the sideband changed, and resetting
+            # it undid an adjustment for no reason.
+            same_kind = (previous is not None
+                         and ("CW" in str(previous).upper()) == ("CW" in str(sdr_mode).upper()))
+            width = self.controller.filter_width if same_kind else None
+            if not width:
+                width = self.controller.default_filter_width(sdr_mode)
+            # The rig's CW tone, for a transport that places a CW passband
+            # round it (RestSDR). Others have no such attribute and ignore it.
+            if hasattr(self.controller, "cw_pitch"):
+                self.controller.cw_pitch = getattr(self._model, "cw_tone", None)
             self.controller.set_mode(sdr_mode, width)
             if FILTER in self.capabilities:
                 self._set_model_filter(self.controller.filter_width)
@@ -574,7 +624,13 @@ class SDR_Link:
             return
 
         self._sent_mode = sdr_mode
-        if rig_mode != current:
+        # Compared with what was last ASKED of the rig as well as what it
+        # reports: a request still on its way leaves `current` behind, and
+        # comparing with that alone skipped changing back.
+        if rig_mode != current or (self._rig_mode_asked is not None
+                                   and rig_mode != self._rig_mode_asked):
+            self._rig_mode_asked = rig_mode
+            self._rig_mode_asked_at = monotonic()
             self._rig.set_mode_everywhere(rig_mode)
 
     def _from_sdr_filter(self, width_hz):
@@ -681,6 +737,134 @@ class SDR_Link:
         else:
             system_audio.unmute()
         self._system_muted = bool(muted)
+
+    # -- DSP: AGC and noise reduction ---------------------------------------
+    #
+    # The demodulator's own functions, where the SDR offers them (SDRangel),
+    # by name: "agc", "nr". Each is on or off, with adjustments in the units
+    # the SDR's dials show. No stand-in for SDRs without them -- the buttons
+    # and knobs are greyed, as the filter's are.
+
+    DSP_CAPABILITY = {"agc": AGC, "nr": NR}
+
+    # NR's scheme picks which adjustment applies: 0 Average, 1 Avg Std Dev,
+    # 2 Peaks -- see rest_sdr.DSP_FUNCTIONS.
+    NR_SCHEMES = ("Average", "Std dev", "Peaks")
+    NR_SCHEME_SETTING = ("avg", "sigma", "peaks")
+
+    def has_dsp(self, function):
+        return self.DSP_CAPABILITY.get(function) in self.capabilities
+
+    def dsp_on(self, function):
+        """Whether a function is on -- None where the SDR has none."""
+        if not self.has_dsp(function):
+            return None
+        return getattr(self.controller, "dsp_on", {}).get(function)
+
+    def set_dsp(self, function, on):
+        """Turns a function on or off, where the SDR has it."""
+        if self.has_dsp(function):
+            self.controller.set_dsp(function, bool(on))
+
+    def has_dsp_setting(self, function, name):
+        return (self.has_dsp(function)
+                and name in getattr(self.controller, "dsp_settings", {}).get(function, {}))
+
+    def dsp_setting(self, function, name):
+        """An adjustment's value in dial units, or None."""
+        if not self.has_dsp_setting(function, name):
+            return None
+        return self.controller.dsp_settings[function][name]
+
+    def dsp_range(self, function, name):
+        return self.controller.dsp_range(function, name)
+
+    def dsp_adjustable(self, function, name):
+        """Whether an adjustment can be set from here, or only shown -- NR's scheme."""
+        return (self.has_dsp_setting(function, name)
+                and self.controller.dsp_adjustable(function, name))
+
+    def dsp_setting_text(self, function, name, value):
+        """As the SDR's dial shows it: "128 ms", "-100 dB", "Average", "20"."""
+        value = int(round(float(value)))
+        if (function, name) == ("agc", "time"):
+            return f"{2 ** value} ms"
+        if (function, name) == ("agc", "threshold"):
+            return f"{value} dB"
+        if (function, name) == ("nr", "scheme"):
+            return self.NR_SCHEMES[value] if 0 <= value < len(self.NR_SCHEMES) else str(value)
+        return str(value)
+
+    def set_dsp_setting(self, function, name, value):
+        """Sets an adjustment -- once its knob stops moving."""
+        key = (function, name)
+        pending = self.__dict__.setdefault("_pending_dsp", {})
+        timers = self.__dict__.setdefault("_dsp_timers", {})
+        pending[key] = float(value)
+        if timers.get(key) is not None:
+            try:
+                self.root.after_cancel(timers[key])
+            except Exception:
+                pass
+        timers[key] = self.root.after(self.VOLUME_SETTLE_MS,
+                                      lambda: self._apply_dsp_setting(key))
+
+    def _apply_dsp_setting(self, key):
+        self._dsp_timers[key] = None
+        value = self._pending_dsp.pop(key, None)
+        if value is not None and self.has_dsp_setting(*key):
+            self.controller.set_dsp_setting(*key, value)
+
+    # -- RF gain -------------------------------------------------------------
+    #
+    # The SDR hardware's front-end gain, where the transport knows how to set
+    # it (SDRangel with an RTL dongle). Ridden while listening -- CW operators
+    # turn it down to drop the noise under a weak signal -- so it is sent once
+    # the slider settles, as volume and squelch are.
+
+    @property
+    def has_rf_gain(self):
+        return RF_GAIN in self.capabilities
+
+    @property
+    def rf_gain(self):
+        """The RF gain in dB, or None."""
+        return self.controller.rf_gain if self.has_rf_gain else None
+
+    @property
+    def rf_gain_auto(self):
+        """True while the hardware's own AGC sets the gain -- the slider does nothing then."""
+        return bool(self.has_rf_gain and getattr(self.controller, "rf_gain_auto", False))
+
+    def rf_gain_range(self):
+        """(lowest, highest) in dB."""
+        return (self.controller.rf_gain_range() if self.has_rf_gain else None) or (0.0, 50.0)
+
+    def rf_gain_steps(self):
+        """The hardware's gain steps, in dB -- what one knob click moves between."""
+        return self.controller.rf_gain_steps() if self.has_rf_gain else []
+
+    def rf_gain_text(self, db):
+        """A gain as it will be set -- at the hardware's nearest step: "32.8 dB"."""
+        if not self.has_rf_gain:
+            return ""
+        return f"{self.controller.snap_rf_gain(db):.1f} dB"
+
+    def set_rf_gain(self, db):
+        """Sets the RF gain -- once the slider stops moving."""
+        self._pending_rf_gain = float(db)
+        timer = getattr(self, "_rf_gain_timer", None)
+        if timer is not None:
+            try:
+                self.root.after_cancel(timer)
+            except Exception:
+                pass
+        self._rf_gain_timer = self.root.after(self.VOLUME_SETTLE_MS, self._apply_rf_gain)
+
+    def _apply_rf_gain(self):
+        self._rf_gain_timer = None
+        if self.has_rf_gain and getattr(self, "_pending_rf_gain", None) is not None:
+            self.controller.set_rf_gain(self._pending_rf_gain)
 
     # -- squelch -------------------------------------------------------------
     @property

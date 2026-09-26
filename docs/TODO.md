@@ -164,47 +164,20 @@ style names.
 (`ubitx_cec_desktop.py`): Operate, RX and Channels are built and talk to the
 rig and SDR++. Still to do, roughly in order of value:
 
-* **The rig connection, on the Setup tab.** The serial port is hardcoded, and
-  a failed open stops the application before any window exists.
-  `comportManager` handled serial or network, retries and saving the choice;
-  that job comes back, but into Setup rather than a window of its own, and
-  the application OPENS ON SETUP when the rig or the SDR is not found.
+* ~~The rig connection, on the Setup tab.~~ **Done.** The port comes from the
+  settings, the Setup page lists what is plugged in (labelled by chip, with
+  "show all" for anything the filter hides), a network rig is typed into the
+  same field as `socket://host:port`, and the application opens on Setup when
+  there is nothing to talk to rather than failing before a window exists. The
+  four outcomes -- nothing chosen, will not open, opened but silent,
+  connected -- each say their own thing.
 
-  **Three questions, asked in order.** Every failure is a different answer to
-  one of them, and each needs its own words on screen:
+  Left over from it: **`socket://` does not understand an IPv6 address.**
+  `parse_rig_port` splits the host from the port on the last colon, which is
+  wrong for `socket://[::1]:8080`. The old `comportManager` had the same
+  fault from the other side -- it validated IPv6 and then rejected it. Worth
+  fixing when somebody asks for it; nobody has.
 
-  1. *Does the port exist?* Not plugged in, or a different adapter with a
-     different name. Say which ports ARE there.
-  2. *Does it open?* Another program holds it, or permissions refuse it --
-     no dialout group on Linux.
-  3. *Does the rig answer?* THE ONE THAT CATCHES "adapter plugged in, radio
-     switched off": the port opens perfectly and nothing comes back. No new
-     command is needed to test it -- the link already sends
-     `_read_all_values()` as the reader starts, so the probe is whether ANY
-     report arrives within a second or two.
-
-  `Rig Port` holds a serial device or `socket://host:port` -- a WiFi-to-TTL
-  bridge -- and the prefix says which, so no separate "type" setting can
-  disagree with the address. `serial.Serial` opens one and
-  `serial.serial_for_url` the other. Validate the socket form before trying
-  it, as the old code did: a mistyped address otherwise fails as a puzzling
-  timeout.
-
-  **Changing the connection while running** is what the code cannot do today:
-  the port is opened once at startup and the link is built around it.
-
-  * `connect(port, baud)` and `disconnect()` on `uBITX_Link` -- open, start
-    the reader, send the dump; cancel the reader and close. Switching serial
-    to WiFi, or to another adapter, is then the same path for both.
-  * **The model RESETS on connect** -- frequencies to zero, channels to "not
-    read". Otherwise a new radio inherits the last one's display, which is
-    the same lie as seeding plausible values at startup.
-  * **The reader survives an unplug.** Pulling the adapter raises inside a
-    timer callback, which today prints a traceback on every tick. Catch it,
-    mark the rig lost, say so -- as `SDR_Link` already does.
-
-  "rig ok" then becomes a real status with four answers: no port chosen, port
-  not found, opened but silent, connected.
 * **The meters.** `cp_`, `al_` (S-meter) and `vm_` (power and SWR) are
   unwired, so both meters are empty. Wiring them also lets the scanner stop
   on a signal, which it cannot do today.
@@ -254,12 +227,12 @@ rig and SDR++. Still to do, roughly in order of value:
   process name, launch arguments, what it can and cannot do, and how it must
   be shut down. Adding a program is an entry, not code, and an operator's own
   entries in `~/.ubitx_cec_desktop_sdr_programs.json` are merged over the
-  shipped ones entry by entry. SDRangel will be TWO entries, REST and rigctl,
-  sharing install paths.
+  shipped ones entry by entry. SDRangel is ONE entry, driven over REST; its
+  rigctl entry was removed (see `ARCHITECTURE.md`), and a saved setting
+  naming it resolves to the REST one.
 
-  Still to do there: the REST transport itself, and a way to ask for a
-  command line a program cannot guess at (rigctld carries the flag; nothing
-  asks yet).
+  Still to do there: a way to ask for a command line a program cannot guess
+  at (rigctld carries the flag; nothing asks yet).
 
 * **One folder for everything this application keeps.** Three dotfiles are
   loose in the home directory now, each found by its own rule:
@@ -290,6 +263,73 @@ rig and SDR++. Still to do, roughly in order of value:
   and channel entries, the SDR++ controller's dormant channel and scan
   methods, `globalvars`' Nextion leftovers, and the "simulate transmit"
   button, now that the rig reports transmit itself.
+
+**SDRangel over REST -- in progress.** `rest_sdr.py`, one step at a time,
+each tested against a running SDRangel before the next. Findings are in
+`SDRANGEL_REST_NOTES.md`.
+
+1. Frequency -- DONE both ways, confirmed on the station: rig to SDRangel
+   to the Hz; a click in SDRangel's waterfall moves the rig (to its 10 Hz
+   step).
+2. Starting and stopping the device, under the same whose-is-it rules as
+   the program -- DONE.
+3. Signal strength, from the channel report's `channelPowerDB` -- DONE.
+4. Volume and mute -- DONE, confirmed on the station. Volume is exchanged in
+   dB as SDRangel's knob shows it (10 log10 of its `volume` factor, -10 to
+   +40); mute is the demodulator's own `audioMute`. Both are SDRangel's
+   settings, saved by SDRangel and read back on connecting -- not in this
+   application's .ini.
+   *Small, open:* at the slider's bottom SDRangel's knob reads -9, not -10.
+   Probably SDRangel's display of the float it stores (0.1 comes back as
+   0.100000001), but not confirmed. Harmless; look at it only if the bottom
+   of the range ever matters.
+5. Mode and filter -- DONE, confirmed on the station except CW by ear (below).
+   Not the channel type after all: all four rig modes live in the one SSB
+   demodulator, as its passband (`rfBandwidth` high cut, signed by sideband;
+   `lowCutoff` low cut, same sign), on SDRangel's 100 Hz grid and kept
+   inside the operator's span. Confirmed: USB/LSB/CWU/CWL from the app and
+   the rig; the high cut dragged across zero in SDRangel moves the rig; the
+   width kept across LSB/USB and CWL/CWU, reset between SSB and CW; CW wide/
+   narrow in 100 Hz steps up to 500, 300 above.
+   *Open, blocked -- no antenna on the station yet:* **CW heard at the right
+   pitch.** Tune the rig to a CW signal it hears properly and listen in
+   SDRangel. About the rig's 500 Hz tone: done. Missing, or far off: the
+   rig's displayed CW frequency is offset by the tone, and SDRangel's tuning
+   needs a matching shift in CW -- the last piece of this step to build.
+   Without an antenna, any steady CW carrier the dongle can hear will do (a
+   signal generator, for one).
+6. AGC -- BUILT, tested against a stand-in; NOT yet confirmed on the
+   station. The Operate tab's AGC button drives the DEMODULATOR's AGC
+   (`SSBDemodSettings.agc`, 0/1) -- a receiver's AGC switch -- latched, and
+   following a change made in SDRangel. Greyed for SDRs without one.
+   RF GAIN -- BUILT, tested against a stand-in: a slider on Operate beneath
+   squelch, for riding while listening. The device's (`rtlSdrSettings.gain`,
+   tenths of a dB, 0-49.6 on the R820T's fixed steps -- confirmed on the
+   station), described per deviceHwType in `RF_GAIN_DEVICES`; greyed for
+   devices not listed. Greyed, saying so, while the dongle's own AGC
+   (`rtlSdrSettings.agc`) sets the gain; that switch stays in SDRangel.
+   The Receive page's placeholder AGC switch is gone -- one AGC, on Operate.
+   SHARED KNOBS, AGC AND NR -- BUILT, tested against a stand-in. Three small
+   knobs (left click down, right click up, turn) beneath AGC/NR/Notch,
+   shared: left click on AGC or NR switches it and takes the knobs; right
+   click takes them without switching. The holder is outlined; captions
+   follow it. AGC: time (`agcTimeLog2` 4-11, 16-2048 ms), threshold
+   (`agcPowerThreshold` -119..0 dB), gate (`agcThresholdGate` 0-500). NR
+   (`dnr`): scheme (`dnrScheme`), the scheme's own setting -- Average
+   `dnrAboveAvgFactor` 20-99, Avg Std Dev `dnrSigmaFactor` 2-16, Peaks
+   `dnrNbPeaks` 1-40 -- and alpha, dial 0-40 stored as 1 - 10^(-n/10) (0 = no smoothing).
+   RF gain is a knob too. Notch: nothing to drive in SDRangel's SSB
+   demodulator; stays greyed.
+   NR's scheme is READ-ONLY: SDRangel accepts `dnrScheme` over REST without
+   error and does not apply it (PATCHed to 2, read back 0, its dialog stayed
+   on Average -- on the station). The scheme knob shows SDRangel's scheme,
+   greyed; it is chosen in SDRangel's NR dialog, and the middle knob follows.
+   Worth reporting to SDRangel.
+   Scheme numbers confirmed on the station: 0 Average, 1 Avg Std Dev,
+   2 Peaks -- chosen in SDRangel's dialog, the app's caption followed.
+   *Seen, no antenna:* the demodulator AGC "breathes" on noise; much less
+   with it off, but not gone. Look again with an antenna.
+   NR and Notch still await a backend.
 
 **Test SDRangel's REST API.** The highest-value open question: does it report
 signal strength, and does it accept filter, AGC and noise-reduction changes?
@@ -339,7 +379,7 @@ do rather than pretending. Each backend declares what it supports, and the
 | :---     | :---           | :---                   | :---         | :---     | :---   |
 | SDR++    | rigctl socket  | no — meter left empty  | yes          | no       | the computer's master volume |
 | Gqrx     | rigctl socket  | `l STRENGTH`           | via `M`      | no / n/a | its own `AF` gain, in dB |
-| SDRangel | REST           | expected               | expected     | expected | its own audio gain, expected |
+| SDRangel | REST           | `channelPowerDB`, to wire | expected  | expected | its own audio gain, expected |
 
 Measured against a running Gqrx: it reports `SQL STRENGTH AF LNA_GAIN` to
 `l ?`. **Gqrx has no noise reduction at all** -- AGC, squelch and noise
@@ -439,6 +479,25 @@ testing by hand may be version-dependent rather than protocol-dependent.
 <a name="the-application"></a>
 ### The application — bugs worth fixing in the current code
 
+**Rewire the USB-to-TTL monitoring adapter: GND and its RX only.** *Hardware, open.*
+
+With the adapter plugged into the Nano's serial lines, the rig re-sent the
+same reports (`vs`, `vy`, `ve`, `cn`) endlessly, unasked, until the adapter was
+unplugged or the rig power-cycled. The suspect is the adapter's TX, which
+drives the Nano's RX: idle levels, echo, or back-feeding the Nano through the
+pin. The test is to disconnect only that wire -- if the repeating stops, that
+was it; if not, look at GND and VCC next. VCC should not be connected at all.
+
+The current wiring cannot drop TX alone, so it needs a different lead or
+separate jumpers. Until then, unplug the adapter when not monitoring. The
+reader now says once when a report repeats 20 times in 5 s
+(`READER_REPEAT_WARNING`), so a return of the problem shows up in the console.
+
+Found on the way, and fixed: the reader lost a report whenever one was split
+across two passes (the "skipping prior byte" floods), and a continuous stream
+froze the interface. Partial reports now carry over; each pass is capped at
+512 bytes.
+
 **Ask the rig for values that have not arrived.** *Half done.*
 
 `_read_all_values()` is GONE -- 101 lines that blocked, counted to 26, timed
@@ -485,18 +544,23 @@ first attempt filed labels as frequencies.
 **The reboot is doing two jobs**, and whatever replaces it inherits both --
 see `ARCHITECTURE.md`, "Starting from a known point".
 
-**Choosing Gqrx on Setup does not offer its port.** Each profile carries the
-port its program usually listens on -- 4532 SDR++, 7356 Gqrx, 8091 SDRangel
--- and `_on_sdr_software` is meant to fill it in when the program changes.
-It only does so when the port still holds the PREVIOUS program's default,
-so that a port typed by hand is never overwritten; that test is apparently
-not matching, and the field keeps 4532 while Gqrx is chosen. Check what the
-setting actually holds when the comparison runs -- it is string against int
-as likely as not.
+~~Choosing Gqrx on Setup does not offer its port.~~ **Fixed**, and not for the
+reason guessed here: the test compared against the PREVIOUS program's
+default, so choosing Gqrx while the setting still said None matched nothing
+and the field kept 4532. It now offers the new program's port unless the one
+there is not any program's default -- which means somebody typed it.
 
-**A 10 Hz tuning step does not reach the SDR.** Turning the 10 Hz digit moves
-the rig, and the SDR does not follow until the 100 Hz digit changes. Suspect
-one of:
+**A 10 Hz tuning step does not reach the SDR.** *Not seen since, and nobody
+set out to fix it -- so it is kept, not closed.*
+
+Turning the 10 Hz digit moved the rig, and the SDR did not follow until the
+100 Hz digit changed. What changed in the meantime, and could account for it:
+the rig is now REBOOTED on connecting, and the finest tuning preset is set
+afterwards. If that preset had not been taking effect before, the rig would
+have rounded a 10 Hz step away and reported the rounded value -- which is the
+first candidate below. That is a guess, not a diagnosis.
+
+If it returns, suspect one of:
 
   * the rig ROUNDS to its tuning preset and reports the rounded value, so
     nothing changed to pass on -- but the preset is set to the finest at
@@ -510,11 +574,13 @@ one of:
 
 These affect what is running today, not just the rebuild.
 
-**The SDR connection blocks the interface.** `SDRPlusPlusController` drives
-rigctl from the Tk `after()` loop with blocking sockets. *Partly fixed:* the
-socket now times out after one second instead of never, so an unresponsive
-SDR drops the connection rather than freezing the application for good. A
-one-second freeze on a stalled read is still possible.
+**The SDR connection blocks the interface.** *Mostly dealt with.*
+`SDRPlusPlusController` is gone; `RigctlClient` waits half a second for a
+reply and treats silence as "not supported", so a wedged SDR costs that
+rather than the session. What remains: those waits are still on the interface
+thread, so a program that stops answering can hold the window for half a
+second at a time, and connecting to a silent server costs a few seconds at
+startup. A thread would end it properly.
 
 The rig does not have this problem: it is paced by the MCU headroom settings
 and the Nano always answers. The SDR has no such protection, and it is the
@@ -531,34 +597,11 @@ under [The uBITX interface](#the-ubitx-interface). Some are deliberately
 ignored: `vr_` (its value is a firmware figure, not the RIT base), `c0_`, the
 greenbox lines, `cm_`, `vv_` and the spectrum reports.
 
-**`comportManager.py` line 225 is missing its parentheses.**
-
-```python
-if port != gv.config.getRadioPort:      # a bound method, not a string
-```
-
-Every other call site writes `getRadioPort()`. This one compares a string to
-a method object, so the condition is always true and `setRadioPort` runs on
-every open. Harmless in effect, which is why it has survived, but the comment
-beside it describes a check that is not happening.
-
-**The bare `except:` in `openSelectedComPort`.** It has `# FileNotFoundError:`
-left beside it, showing the intent was narrower. As written it swallows
-everything -- a typo in the serial parameters, a permissions problem, a
-keyboard interrupt -- and reports them all as "the port did not open". That
-is why a connection failure gives the operator nothing to act on.
-
-**`openSelectedComPort` does view work.** It disables option menus, calls
-`pack_forget` on two frames and writes configuration, all inside a method
-about opening a port. That coupling is why the file feels delicate: the
-opening logic cannot be changed without thinking about the interface, and the
-interface cannot be changed without reading the transport.
-
-**IPv6 is accepted and then rejected.** `validateWiFiSocket` validates with
-`ipaddress.ip_address`, which accepts IPv6 -- but the `split(":")` above it
-requires exactly two parts, and an IPv6 address is full of colons. So the
-check that would accept it can never be reached. Either reject IPv6
-deliberately and say so, or parse the address properly.
+*The four `comportManager` bugs that were here are superseded.* That module
+is not used any more -- `serial_ports.py` replaced it -- so its missing
+parentheses, its bare `except:`, its view work and its IPv6 handling are
+history. The IPv6 fault outlived it, though, and is noted against the rig
+connection above.
 
 ---
 

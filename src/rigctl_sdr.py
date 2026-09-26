@@ -22,6 +22,37 @@ from sdr_programs import FREQUENCY, MODE, FILTER, SIGNAL, VOLUME, SQUELCH, MUTE
 POLL_MS = 200
 
 
+def _mode_and_width(reply):
+    """
+    The mode and filter width from an "m" reply -- WHICHEVER SHAPE IT COMES IN.
+
+    Gqrx and rigctld answer on two lines:
+
+        USB
+        2400
+
+    SDRangel answers on one:
+
+        USB 3000
+
+    Read as two lines, SDRangel's becomes a mode called "USB 3000" and no
+    width at all -- so the mode never matches anything and the filter is
+    never known. The protocol does not say which shape to expect, so both
+    are accepted.
+
+    Returns:
+        (mode, width) -- either may be None.
+    """
+    if not reply or not reply.ok or not reply.values:
+        return None, None
+    values = list(reply.values)
+    if len(values) == 1 and " " in values[0].strip():
+        values = values[0].split()
+    mode = values[0].strip().upper() if values else None
+    width = _number(values[1]) if len(values) > 1 else None
+    return mode, (int(width) if width else None)
+
+
 def _number(text):
     """A float from a server's reply, or None."""
     try:
@@ -111,12 +142,11 @@ class RigctlSDR:
         self.frequency = int(_number(reply.values[0]))
         caps.add(FREQUENCY)
 
-        reply = client.query("m", lines=2)
-        if reply.ok and reply.values:
-            self.mode = reply.values[0].strip().upper()
+        mode, width = _mode_and_width(client.query("m", lines=2))
+        if mode:
+            self.mode = mode
             caps.add(MODE)
-            width = _number(reply.values[1]) if len(reply.values) > 1 else None
-            self.filter_width = int(width) if width else None
+            self.filter_width = width
             # FILTER: send back the mode and width it just reported. Nothing
             # changes, and it shows whether a width is accepted -- which in
             # some SDR++ versions it is not, through a parsing bug. Only where
@@ -281,16 +311,13 @@ class RigctlSDR:
                 self.frequency = int(hz)
                 self._call(self.on_frequency, self.frequency)
 
-            reply = self._client.query("m", lines=2)
-            if reply.ok and reply.values:
-                mode = reply.values[0].strip().upper()
-                if mode != self.mode:
-                    self.mode = mode
-                    self._call(self.on_mode, mode)
-                width = _number(reply.values[1]) if len(reply.values) > 1 else None
-                if width and int(width) != self.filter_width:
-                    self.filter_width = int(width)
-                    self._call(self.on_filter, self.filter_width)
+            mode, width = _mode_and_width(self._client.query("m", lines=2))
+            if mode and mode != self.mode:
+                self.mode = mode
+                self._call(self.on_mode, mode)
+            if width and width != self.filter_width:
+                self.filter_width = width
+                self._call(self.on_filter, self.filter_width)
 
             # Its own audio level and mute, so the application's controls
             # follow a change made in the SDR -- as frequency and filter do.

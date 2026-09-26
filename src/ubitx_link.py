@@ -51,6 +51,29 @@ CHANNEL_READ_RETRIES = 2
 # 536,870,911 Hz; anything outside this range is treated as empty.
 CHANNEL_FREQ_MAX_HZ = 60_000_000
 
+# What a VFO may sensibly report -- the same bound. Anything outside it is a
+# corrupted write the rig carried out, not a place anyone tuned to: see
+# _frequency_report.
+VFO_FREQ_MAX_HZ = CHANNEL_FREQ_MAX_HZ
+
+# RECEIVE WRITES, ONE AT A TIME -- see _request_frequency.
+#
+# Every detent of the dial used to send a write at once, 40 ms apart behind
+# MCU_COMMAND_HEADROOM. A fast spin overran the Nano: a byte of one write was
+# lost, the Nano took the first 0xff of the postscript as the frequency's top
+# byte, and the rig tuned to 4.29 GHz and said so. Raising the headroom hides
+# that on this Nano and wastes time on a faster one; waiting for the rig's
+# own report paces the writes at whatever speed the rig actually has.
+#
+# How long a write waits for its report before it is sent again.
+FREQ_CONFIRM_TIMEOUT_MS = 500
+# The pause between a report and the next write, so the write does not land
+# while the rig is still sending what follows the report.
+FREQ_FOLLOW_MS = 40
+# How many times one frequency is sent again -- after a timeout, or to put
+# the rig back after an impossible report -- before giving up and saying so.
+FREQ_RETRIES = 2
+
 # The mode numbers the rig actually uses. 1 is reserved and 6 and 7 do not
 # exist, so they are garbage, not modes.
 CHANNEL_MODES = {0: "DFT", 2: "LSB", 3: "USB", 4: "CWL", 5: "CWU"}
@@ -78,6 +101,28 @@ STEP_SETTLE_MS = 150
 # boot -- the reader waits for that itself, up to five seconds -- only enough
 # for the bytes to leave.
 REBOOT_SETTLE = 0.25
+
+# The reader takes at most this many bytes per pass, then gives the window
+# its turn. A rig that never stops sending (see READER_REPEAT_WARNING) used to
+# hold the reader in its loop and freeze the interface.
+READER_MAX_BYTES_PER_PASS = 512
+
+# No report is longer than this. A frame that grows past it lost its three
+# 0xff somewhere; it is dropped and the reader waits for the next 'p'.
+READER_MAX_FRAME = 64
+
+# The same report arriving this many times within READER_REPEAT_WINDOW
+# seconds means the rig is re-sending on its own -- seen when a USB-to-TTL
+# adapter was wired to its serial lines. Said once; nothing else is done.
+READER_REPEAT_WARNING = 20
+READER_REPEAT_WINDOW = 5.0
+
+# A run of zero bytes this long is not data: it is the line from the rig held
+# at 0 V, which a serial port reads as zero after zero. Rig switched off with
+# its USB still in, the Nano held in reset, or something on its TX line
+# pulling it down -- an unpowered USB-to-TTL adapter will. The CEC's single
+# zero at boot stays well under this.
+READER_ZERO_RUN = 64
 
 MCU_COMMAND_HEADROOM = .04
 
@@ -140,6 +185,16 @@ class uBITX_Link:
         self._tx_write_next = None
         self._tx_write_mode = None
         self._tx_write_next_mode = None
+
+        # Receive writes -- see _request_frequency. Before the reader for the
+        # same reason as the above: the boot burst runs the handlers that
+        # read these.
+        self._freq_intent = None        # what the operator last asked for
+        self._freq_sent = None          # the write awaiting its report
+        self._freq_timer = None         # its deadline
+        self._freq_follow_timer = None  # the next write, waiting its pause
+        self._freq_recovery_timers = {}  # per VFO: "p", "a", "b"
+        self._freq_retries = 0
 
         # ALL OF THIS BEFORE THE READER.
         #
@@ -232,6 +287,17 @@ class uBITX_Link:
             self._schedule = radio_link.schedule
             print("inner class init", self._port, self._model, self._schedule)
 
+            # A FRAME CAN SPAN TWO PASSES. These used to be locals of
+            # _reader(), so a report half-received when a pass ended was
+            # thrown away, and the next pass began partway through it --
+            # "skipping prior byte" for the rest of it, and that value lost.
+            # Kept here, the next pass finishes the frame.
+            self._buffer = []
+            self._ff_count = 0
+            self._repeats = {}          # code -> (window start, count)
+            self._repeat_said = False
+            self._zero_run = 0              # see READER_ZERO_RUN
+
             # NO BLOCKING READ ANY MORE.
             #
             # This used to call _read_all_values(), which sat counting until
@@ -250,64 +316,82 @@ class uBITX_Link:
             self.id = self._radio_link.root.after(self._schedule, self._reader)
 
         def _reader(self):
-            # print ("read")
-            ffCount = 0
-            buffer = []
-            while self._port.in_waiting > 0:
-                #
-                #   Get command
-                #
+            """
+            Takes what the rig has sent, a bounded amount per pass, and hands
+            each complete report on. A report is "p" ... three 0xff; anything
+            before its "p" is noise and is dropped (the CEC sends a zero to
+            start, for one). A partial report waits for the next pass.
+            """
+            skipped = []
+            taken = 0
+            while taken < READER_MAX_BYTES_PER_PASS and self._port.in_waiting > 0:
                 in_byte = self._port.read(1)
+                if not in_byte:
+                    break
+                taken += 1
 
-                if in_byte:
-                    #
-                    #   Looking for the first line with a "p" in the first character
-                    #   CEC sends a zero to start, just ignore it
-                    #
-                    if ((len(buffer) == 0) and (in_byte.decode(errors='ignore') != 'p')):
-                        if in_byte != b'\xff':
-                            print("skipping prior byte:", in_byte)
-                        pass
-                    else:
+                if in_byte == b'\x00' and not self._buffer:
+                    self._zero_run += 1
+                    if self._zero_run == READER_ZERO_RUN:
+                        print("[rig] the line from the rig is being held low -- "
+                              "a steady stream of zero bytes. Is the rig switched "
+                              "on? Is a USB-to-TTL adapter on its TX line?")
+                    continue
+                if self._zero_run:
+                    if self._zero_run >= READER_ZERO_RUN:
+                        print(f"[rig] the line came back after {self._zero_run} zero bytes")
+                    self._zero_run = 0
 
-                        buffer.append(in_byte)
+                if not self._buffer and in_byte != b'p':
+                    if in_byte != b'\xff':
+                        skipped.append(in_byte)
+                    continue
 
-                        if in_byte.hex() == 'ff':
-                            ffCount += 1
-                            if ffCount == 3:
-                                if buffer[3] == 's' and buffer[4] == 'h':
-                                    print("found a sh", buffer)
-                                #
-                                #   decode the characters into ascii
-                                #
-                                # decoded_buffer_char = [item.decode(errors='ignore') for item in buffer]
-                                # print("decoded:", decoded_buffer_char)
-                                #
-                                #   since we saw 3 0xff's in a row, we can call the getter to
-                                #   set the value in the UX
-                                #
-                                self._process_radio_command([item.decode(errors='ignore') for item in buffer])
-                                #
-                                #   reset counters (and add one to total processed)
-                                #
-                                ffCount = 0
-                                # buffer = buffer[:0]
-                                buffer.clear()
-                        #
-                        #   Sometimes the Emulator can outrun the MCU's ability to deliver data. If we were reading valid data
-                        #   and we get a zero waiting situation, wait for a little to see if more data appears
-                        #
-                        if self._port.in_waiting == 0:
-                            # sleep(float(gv.config.get_MCU_Read_Wait_Period()))
-                            MCU_Read_Wait_Period = .04
-                            sleep(float(MCU_Read_Wait_Period))
+                self._buffer.append(in_byte)
+                if in_byte == b'\xff':
+                    self._ff_count += 1
+                    if self._ff_count == 3:
+                        frame = [item.decode(errors='ignore') for item in self._buffer]
+                        self._buffer.clear()
+                        self._ff_count = 0
+                        if len(frame) > 5:
+                            self._note_repeat(frame[3] + frame[4])
+                            self._process_radio_command(frame)
+                        continue
 
+                if len(self._buffer) > READER_MAX_FRAME:
+                    text = b''.join(self._buffer).decode(errors='replace')
+                    print(f"[rig] dropped a report that never ended: {text[:40]!r}...")
+                    self._buffer.clear()
+                    self._ff_count = 0
+
+            if skipped:
+                text = b''.join(skipped).decode(errors='replace')
+                print(f"[rig] skipped {len(skipped)} bytes before a report: {text!r}")
 
             try:
                 self.id=self._radio_link.root.after(self._schedule, self._reader)
             except tk.TclError:
                 # Catch-all safety net for mid-execution destruction
                 return
+
+        def _note_repeat(self, code):
+            """Says once if the rig keeps sending the same report on its own."""
+            if self._repeat_said:
+                return
+            now = timer()
+            start, count = self._repeats.get(code, (now, 0))
+            if now - start > READER_REPEAT_WINDOW:
+                start, count = now, 0
+            count += 1
+            self._repeats[code] = (start, count)
+            if count >= READER_REPEAT_WARNING:
+                self._repeat_said = True
+                print(f"[rig] the rig has sent \"{code}\" {count} times in "
+                      f"{now - start:.1f} s without being asked. Something is "
+                      f"feeding its serial input -- a USB-to-TTL adapter on its "
+                      f"TX/RX lines will do this. Unplug it, or connect only its "
+                      f"GND and RX.")
 
         def _process_radio_command(self, buffer):
             command = buffer[3] + buffer[4]
@@ -1302,7 +1386,11 @@ class uBITX_Link:
         #
         def vc_UX_Set_Primary_VFO_Frequency(self, buffer):
             value = self._extract_value(buffer, 10, len(buffer) - 3)
-            self._model.set_frequency("p", int(value))
+            # FIX: an impossible frequency is refused, not recorded -- see
+            # _frequency_report. int() on a mangled value used to raise here.
+            hz = self._radio_link._frequency_report("p", value)
+            if hz is not None:
+                self._model.set_frequency("p", hz)
             print("vc_UX_Set_Primary_VFO_Frequency: ", value)
 
             # NOT fed to the transmit sequence any more. Nothing waits for
@@ -1349,7 +1437,11 @@ class uBITX_Link:
         #
         def va_UX_Set_VFO_A_Frequency(self, buffer):
             value = self._extract_value(buffer, 10, len(buffer) - 3)
-            self._model.set_frequency("a", int(value))
+            # FIX: an impossible frequency is refused, not recorded -- see
+            # _frequency_report. int() on a mangled value used to raise here.
+            hz = self._radio_link._frequency_report("a", value)
+            if hz is not None:
+                self._model.set_frequency("a", hz)
             print("va_UX_Set_VFO_A_Frequency: ", value)
             # if (self.channelsWindow != None) and (self.channelsWindow.scanRunning):
             #     # print("***Ignoring va command as we're scanning***")
@@ -1391,7 +1483,11 @@ class uBITX_Link:
         #
         def vb_UX_Set_VFO_B_Frequency(self, buffer):
             value = self._extract_value(buffer, 10, len(buffer) - 3)
-            self._model.set_frequency("b", int(value))
+            # FIX: an impossible frequency is refused, not recorded -- see
+            # _frequency_report. int() on a mangled value used to raise here.
+            hz = self._radio_link._frequency_report("b", value)
+            if hz is not None:
+                self._model.set_frequency("b", hz)
             print("vb_UX_Set_VFO_B_Frequency: ", value)
             #
             # if (self.channelsWindow != None) and (self.channelsWindow.scanRunning):
@@ -1804,7 +1900,7 @@ class uBITX_Link:
 
         if role == "rx" or not self._model.split:
             print("link 1780", role, self._model.split)
-            self.set_frequency(hz)
+            self._request_frequency(hz)     # FIX: paced -- see _request_frequency
             return
 
         self._begin_tx_write(hz)
@@ -1826,7 +1922,7 @@ class uBITX_Link:
         self._model.rit_base_hz = 0
         if base and base != self._model.frequency(self._model.rx_vfo):
             # Receive is the primary VFO, so an ordinary write lands on it.
-            self.set_frequency(base)
+            self._request_frequency(base)   # FIX: paced -- see _request_frequency
 
     def set_mode_everywhere(self, mode):
         """
@@ -2282,6 +2378,180 @@ class uBITX_Link:
         # would start a new one from a state we have just admitted we do not
         # trust. The next dial turn will ask again.
         self._tx_write_next = None
+
+    # ------------------------------------------------------------------
+    # Receive writes: one at a time, and an impossible report refused
+    # ------------------------------------------------------------------
+    def _request_frequency(self, hz):
+        """
+        Asks for the primary VFO to be tuned to hz -- when the rig is ready.
+
+        ONE WRITE IN FLIGHT. A request made while a write awaits its report
+        only replaces the intent; the latest intent goes out when the report
+        arrives. A dial spin skips the frequencies it passed through, which
+        nobody was listening to, and the Nano is never sent a write while it
+        is still carrying out the last one. See FREQ_CONFIRM_TIMEOUT_MS.
+        """
+        self._freq_intent = int(hz)
+        if self._freq_sent is None and self._freq_follow_timer is None:
+            self._send_frequency_intent()
+
+    def _send_frequency_intent(self):
+        """Sends the current intent, unless a split borrow has the slot."""
+        self._freq_follow_timer = None
+        if self._freq_intent is None:
+            return
+        if self._tx_write_state:
+            # A borrow has made the transmit VFO primary; a receive write now
+            # would land on it. Wait for the slot to come back.
+            self._freq_follow_timer = self.root.after(
+                STEP_SETTLE_MS, self._send_frequency_intent)
+            return
+        self._freq_sent = self._freq_intent
+        self.set_frequency(self._freq_sent)
+        self._freq_timer = self.root.after(FREQ_CONFIRM_TIMEOUT_MS,
+                                           self._frequency_write_timed_out)
+
+    def _clear_frequency_write(self):
+        """The write in flight is answered or abandoned. Returns what it sent."""
+        sent, self._freq_sent = self._freq_sent, None
+        if self._freq_timer is not None:
+            try:
+                self.root.after_cancel(self._freq_timer)
+            except Exception:
+                pass
+            self._freq_timer = None
+        return sent
+
+    def _frequency_confirmed(self):
+        """
+        The rig reported the primary VFO while a write was in flight.
+
+        ANY REPORT COUNTS, whatever value it carries. The rig rounds to the
+        tuning preset, and does not answer every write one-for-one, so the
+        report need not match. What decides whether another write is needed
+        is the intent against what was SENT.
+        """
+        sent = self._clear_frequency_write()
+        self._freq_retries = 0
+        if self._freq_intent is not None and self._freq_intent != sent:
+            self._freq_follow_timer = self.root.after(
+                FREQ_FOLLOW_MS, self._send_frequency_intent)
+        else:
+            self._freq_intent = None
+
+    def _frequency_write_timed_out(self):
+        """
+        No report for the write in flight -- lost, or torn and discarded by
+        the reader. The protocol has no way to ask where the rig is, so the
+        intent is sent again: setting a frequency the rig already has changes
+        nothing.
+        """
+        self._freq_timer = None
+        sent = self._clear_frequency_write()
+        if self._freq_intent is None:
+            return
+        self._freq_retries += 1
+        if self._freq_retries > FREQ_RETRIES:
+            print(f"[rig] no report for {self._freq_intent} after "
+                  f"{FREQ_RETRIES} retries; giving up on it")
+            self._freq_intent = None
+            self._freq_retries = 0
+            return
+        print(f"[rig] no report after sending {sent}; "
+              f"sending {self._freq_intent} again")
+        self._send_frequency_intent()
+
+    def _frequency_report(self, vfo, text):
+        """
+        A VFO frequency the rig reported: the value to record, or None.
+
+        AN IMPOSSIBLE VALUE IS REFUSED, and the model keeps the last good
+        one. The report is truthful -- the rig really is there, after a write
+        that arrived corrupted -- so asking again would get the same answer.
+        The rig is put back instead, once things are quiet.
+
+        "p" is the primary VFO, "a" and "b" the named ones. The rig reports a
+        change to the primary under both its names, so only the primary
+        report recovers it; an "a" or "b" report recovers only the VFO that
+        is not primary, which a corrupted split write can leave wrong.
+        """
+        try:
+            hz = int(str(text).strip())
+        except ValueError:
+            hz = None
+        good = hz is not None and 0 < hz <= VFO_FREQ_MAX_HZ
+
+        if vfo == "p":
+            if good:
+                if self._freq_sent is not None:
+                    self._frequency_confirmed()
+                return hz
+            print(f"[rig] refused an impossible frequency report: {text!r}")
+            self._clear_frequency_write()
+            # During a split borrow the primary slot holds the OTHER VFO, so
+            # that is the one the corrupted write landed on -- recovered by
+            # name, with a borrow of its own once this one has finished.
+            self._schedule_frequency_recovery(
+                self._model.active if self._tx_write_state else "p")
+            return None
+
+        if good:
+            return hz
+        print(f"[rig] refused an impossible VFO {vfo.upper()} report: {text!r}")
+        if vfo != self._model.active:
+            self._schedule_frequency_recovery(vfo)
+        return None
+
+    def _schedule_frequency_recovery(self, vfo):
+        """Puts the rig back after an impossible report -- after a settle."""
+        if vfo in self._freq_recovery_timers:
+            return                      # one is already coming for this VFO
+        self._freq_recovery_timers[vfo] = self.root.after(
+            STEP_SETTLE_MS, lambda: self._recover_frequency(vfo))
+
+    def _recover_frequency(self, vfo):
+        """
+        Sends the rig back to the last good frequency for a VFO.
+
+        NOT WHILE ANYTHING ELSE IS WRITING. A receive write in flight or
+        queued heals the primary by itself -- it overwrites the bad value --
+        so recovery simply stands down. A split borrow in progress is waited
+        for. Each resend counts against FREQ_RETRIES; a rig that will not
+        hold a frequency is reported, not argued with.
+        """
+        self._freq_recovery_timers.pop(vfo, None)
+        if vfo == "p" and (self._freq_sent is not None
+                           or self._freq_follow_timer is not None):
+            return
+        if self._tx_write_state:
+            self._schedule_frequency_recovery(vfo)
+            return
+
+        self._freq_retries += 1
+        if self._freq_retries > FREQ_RETRIES:
+            print(f"[rig] VFO {vfo} will not hold a good frequency after "
+                  f"{FREQ_RETRIES} attempts; left as it is")
+            self._freq_retries = 0
+            # Forgotten too, or a later recovery would tune to this stale
+            # target rather than the last good frequency.
+            self._freq_intent = None
+            return
+
+        if vfo == self._model.active:
+            vfo = "p"                   # it is primary again; an ordinary write
+        if vfo == "p":
+            hz = self._freq_intent or self._model.frequency(self._model.active)
+        else:
+            hz = self._model.frequency(vfo)
+        if not hz or not 0 < hz <= VFO_FREQ_MAX_HZ:
+            print(f"[rig] no good frequency known for VFO {vfo}; nothing to restore")
+            return
+        print(f"[rig] putting VFO {vfo} back on {hz}")
+        if vfo == "p":
+            self._request_frequency(hz)
+        else:
+            self._begin_borrowed_write(hz)
 
     def set_frequency(self, value):
         print("Set_New_Frequency",value)

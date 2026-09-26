@@ -37,7 +37,7 @@ Where the build departed from the plan, the section says so.
                     │ writes                           │  below               │
     ┌───────────────┴──────────────────────────────┐   └──────────────────────┘
     │  Transports                                  │
-    │  uBITX_Link · SDR_Link · (SDRangel later)    │
+    │  uBITX_Link · SDR_Link (rigctl, REST)        │
     └──────────────────────────────────────────────┘
 ```
 
@@ -136,6 +136,33 @@ frequency write, a toggle. Commands 40 ms apart pass the first and are still
 lost to the second. A channel's mode sent straight after its frequency was
 dropped exactly so, which is why `tune_to()` waits between them.
 
+**Receive writes are paced by the rig's own report, not by a clock.** Every
+detent of the dial used to send a frequency write at once, 40 ms apart. A
+fast spin overran the Nano: one byte of a write was lost, the Nano took the
+first `0xff` of the postscript as the frequency's top byte, and the rig tuned
+itself to 4.29 GHz and reported it truthfully. The fingerprint is exact -- the
+low three bytes of the last write, with `0xff` on top.
+
+`_request_frequency` keeps ONE receive write in flight. Detents that arrive
+meanwhile only replace the intent; when the rig reports, the latest intent is
+sent `FREQ_FOLLOW_MS` later. A spin skips the frequencies it passed through,
+and the rig is never sent a write while still carrying out the last one --
+at whatever speed that rig has, so a faster controller than a Nano tunes
+faster with nothing retuned. The illusion of tuning is untouched: the view
+draws each detent's target itself, before the link is even called.
+
+So an overrun is NOT fixed by raising `MCU_COMMAND_HEADROOM`. That works on
+one Nano, wastes time on anything faster, and fails for any command that
+makes the Nano do real work. Pace by confirmation instead.
+
+Behind it, a frequency report outside `FREQ_BOUNDS` is refused
+(`_frequency_report`): it never reaches the model, and the rig is sent back
+to the last good frequency once nothing else is writing, at most
+`FREQ_RETRIES` times. Asking again would not help -- the report is true, the
+rig really is there -- and the protocol has no way to ask anyway; sending a
+frequency the rig already has is harmless, which is what makes resending the
+recovery.
+
 *The SDR is asynchronous at its end but blocking in ours.*
 `SDRPlusPlusController` drives rigctl from the same `after()` loop with
 blocking sockets, so a slow or wedged SDR stalls the interface: `settimeout(2.0)`
@@ -146,7 +173,10 @@ pacing; the SDR is not protected at all.
 The socket now times out after one second rather than never, so a wedged
 SDR drops the connection instead of freezing the application for good. A
 second's freeze is still possible, and a thread or a non-blocking socket
-remains the proper fix -- the one place either earns its keep. Both transports are single-threaded
+remains the proper fix -- the one place either earns its keep. `RestSDR`
+works the same way over HTTP: blocking, on the interface thread, half a
+second at most per request, so a hung SDRangel costs what a hung rigctl
+server does. Both transports are single-threaded
 today -- neither imports `threading` -- so anything introduced there is new,
 and its results must reach `RadioModel` through the Tk loop rather than
 directly.
@@ -415,14 +445,18 @@ how the theme works and what `Theming.md` warns about: a copy made last year
 hides every block added since.
 
 How a program is DRIVEN is code, chosen by the `protocol` its entry names.
-`RigctlSDR` handles rigctl today; SDRangel's REST will be a second class, not
-a variation on the first -- it addresses device sets and channels by index,
-needs a discovery step to find the right demodulator, and can push changes
-rather than be polled. The entry says WHICH transport; it never describes one.
+`RigctlSDR` handles rigctl; `RestSDR` handles SDRangel's REST, as a second
+class rather than a variation on the first -- it addresses device sets and
+channels by index, needs a discovery step to find the right demodulator, and
+tunes a PAIR, the device's centre plus the channel's offset. The entry says
+WHICH transport; it never describes one.
 
-One entry per WAY OF DRIVING a program, so SDRangel will have two, sharing
-install paths and differing in protocol. A program that gains a second
-interface gets a second entry, never a flag.
+One entry per WAY OF DRIVING a program: a program that gains a second
+interface gets a second entry, never a flag. SDRangel had two, REST and
+rigctl, and the rigctl one was removed -- its server answers frequency and
+mode and nothing else, and neither the server nor its running state survives
+a restart of SDRangel. A saved setting naming it resolves to the REST entry
+(`sdr_programs.RETIRED`) rather than falling back to SDR++.
 
 ---
 

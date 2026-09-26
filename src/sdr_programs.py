@@ -16,10 +16,10 @@ costs: a copy made last year hides every block added since. Here, a user
 entry overrides or adds to the shipped ones, and programs added later still
 arrive.
 
-ONE ENTRY PER WAY OF DRIVING A PROGRAM. SDRangel can be driven over its own
-REST API or through its rigctl server plugin: two entries, same install
-paths, different protocols. `protocol` NAMES the transport that drives it --
-it does not describe it. How a protocol works is code, because SDRangel's
+ONE ENTRY PER WAY OF DRIVING A PROGRAM. A program with two interfaces gets
+two entries, same install paths, different protocols. (SDRangel had two, REST
+and rigctl; the rigctl one was removed -- see RETIRED below.) `protocol`
+NAMES the transport that drives it -- it does not describe it. How a protocol works is code, because SDRangel's
 REST is not a variation on rigctl: it addresses device sets and channels by
 index, needs a discovery step to find the right demodulator, and can push
 changes rather than be polled. A file that tried to express that would be a
@@ -43,7 +43,10 @@ VOLUME = "volume"        # its own audio level
 SQUELCH = "squelch"
 MUTE = "mute"
 
-CAPABILITIES = {FREQUENCY, MODE, FILTER, SIGNAL, VOLUME, SQUELCH, MUTE}
+AGC = "agc"              # the demodulator's AGC, on or off -- a receiver's AGC switch
+NR = "nr"                # the demodulator's noise reduction, on or off
+RF_GAIN = "rf_gain"      # the SDR hardware's front-end gain, in dB
+CAPABILITIES = {FREQUENCY, MODE, FILTER, SIGNAL, VOLUME, SQUELCH, MUTE, AGC, NR, RF_GAIN}
 
 # A "CW" from an SDR with no sideband of its own: the application has to
 # choose one -- see SDR_Link._from_sdr_mode. Written "cw" in the file.
@@ -200,6 +203,12 @@ NONE = Profile("none", {"name": "no SDR", "protocol": "none", "port": 1,
 PROFILES["none"] = NONE
 
 
+# Entries that no longer exist, and what a setting naming one now means.
+# Without this a saved "sdrangel-rigctl" would fall through to SDR++ below --
+# the wrong program, silently.
+RETIRED = {"sdrangel-rigctl": "sdrangel"}
+
+
 def profile_for(setting):
     """
     The profile the "SDR Software" setting names.
@@ -211,6 +220,9 @@ def profile_for(setting):
     key = str(setting or "").strip().lower()
     if key in ("", "none"):
         return NONE
+    if key in RETIRED and key not in PROFILES:   # FIX: retired entry -- see RETIRED
+        print(f"[sdr] '{key}' is no longer offered; using '{RETIRED[key]}'")
+        key = RETIRED[key]
     return PROFILES.get(key) or PROFILES.get("sdr++") or NONE
 
 

@@ -1,0 +1,53 @@
+SSB Demodulator: window stops responding to clicks after right-clicking NR
+
+SDRangel version: 7.27.2-1315-gc43757c88 (Qt 6.11.1, arm64, macOS 26.6.2), GUI build
+
+
+SUMMARY
+
+After opening the FFT noise reduction dialog by right-clicking the NR button
+of the SSB Demodulator and then closing it, the demodulator's window ignores
+most mouse input: buttons such as NR and AGC do not change state, and
+checkboxes and scrolling do not respond. The knobs still turn. One more right
+click, released outside the demodulator, puts everything back to normal.
+
+Only the mouse is involved -- no REST API, no other program. Audio and
+everything else keep working throughout.
+
+
+TO REPRODUCE
+
+1. Open a device set with an SSB Demodulator.
+2. Right-click NR in the SSB Demodulator window. The FFT Noise reduction
+   dialog opens.
+3. Close the dialog.
+4. Click AGC or NR: neither changes state. Try a checkbox, or scrolling:
+   no response. Turning a knob still works.
+5. Right-click and release anywhere outside the demodulator.
+6. Click AGC or NR again: they work.
+
+
+EXPECTED
+
+After the dialog closes, the demodulator's window responds to clicks as
+normal.
+
+
+ACTUAL
+
+It ignores ordinary clicks, checkboxes and scrolling until another right
+click is released outside it.
+
+
+WHAT IT LOOKS LIKE
+
+As if the window is still waiting for the release of the right click that
+opened the dialog: the press went to the NR button, but the release went to
+the dialog, so the button never saw it. The next right-click release, from
+anywhere, seems to be what clears it. That is a guess from the behaviour, not
+from reading the code.
+
+
+QUESTION
+
+Is this already known, or fixed in a later build?
