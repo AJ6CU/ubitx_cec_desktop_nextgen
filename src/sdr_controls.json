@@ -1,0 +1,241 @@
+{
+    "_comment": [
+        "What each SDR program's controls are: the knobs behind the Operate tab's lamps, their ranges, labels and units, and the hardware's RF gain.",
+        "Read by the transport that drives the program (rest_sdr.py for SDRangel); the window builds its pop-ups from whatever is here and knows no SDR's controls itself.",
+        "An operator's own ~/.ubitx_cec_desktop/sdr_controls.json is merged over this, function by function.",
+        "A setting: field (the SDR's name), caption, low, high (in dial units, what the operator reads), kind (range | choice | step), unit, labels and short (a choice's names, full and round the dial), convert (how dial units are stored: int, float, tenths, alpha_db), text (a named way of showing it: power_of_two_ms), read_only.",
+        "default: the setting's value when SDRangel is reset (its resetToDefaults()), in dial units -- what a pop-up's Defaults button puts back. Leave it out where the default is not known.",
+        "knobs, where present: which settings are shown, in order; an entry {\"by\": setting, \"choose\": [...]} is the one of those the setting's value picks."
+    ],
+    "sdrangel": {
+        "channels": {
+            "SSBDemod": {
+                "agc": {
+                    "switch": "agc",
+                    "capability": "agc",
+                    "settings": {
+                        "time": {
+                            "field": "agcTimeLog2",
+                            "caption": "Time",
+                            "low": 4,
+                            "high": 11,
+                            "kind": "step",
+                            "text": "power_of_two_ms",
+                            "default": 7
+                        },
+                        "threshold": {
+                            "field": "agcPowerThreshold",
+                            "caption": "Thr",
+                            "low": -119,
+                            "high": 0,
+                            "kind": "range",
+                            "unit": "dB",
+                            "default": -100
+                        },
+                        "gate": {
+                            "field": "agcThresholdGate",
+                            "caption": "Gate",
+                            "low": 0,
+                            "high": 500,
+                            "kind": "range",
+                            "default": 4
+                        }
+                    }
+                },
+                "nr": {
+                    "switch": "dnr",
+                    "capability": "nr",
+                    "settings": {
+                        "scheme": {
+                            "field": "dnrScheme",
+                            "caption": "Scheme",
+                            "low": 0,
+                            "high": 2,
+                            "kind": "choice",
+                            "labels": ["Average", "Std dev", "Peaks"],
+                            "short": ["Avg", "SD", "Pk"],
+                            "read_only": true
+                        },
+                        "avg": {
+                            "field": "dnrAboveAvgFactor",
+                            "caption": "Avg×",
+                            "low": 20,
+                            "high": 99,
+                            "kind": "range",
+                            "default": 40
+                        },
+                        "sigma": {
+                            "field": "dnrSigmaFactor",
+                            "caption": "Sigma",
+                            "low": 2,
+                            "high": 16,
+                            "kind": "range",
+                            "default": 4
+                        },
+                        "peaks": {
+                            "field": "dnrNbPeaks",
+                            "caption": "Peaks",
+                            "low": 1,
+                            "high": 40,
+                            "kind": "range",
+                            "default": 20
+                        },
+                        "alpha": {
+                            "field": "dnrAlpha",
+                            "caption": "Alpha",
+                            "low": 0,
+                            "high": 40,
+                            "kind": "range",
+                            "convert": "alpha_db"
+                        }
+                    },
+                    "knobs": [
+                        "scheme",
+                        {
+                            "by": "scheme",
+                            "choose": ["avg", "sigma", "peaks"]
+                        },
+                        "alpha"
+                    ]
+                }
+            },
+            "WDSPRx": {
+                "agc": {
+                    "switch": "agc",
+                    "capability": "agc",
+                    "settings": {
+                        "mode": {
+                            "field": "agcMode",
+                            "caption": "Mode",
+                            "low": 0,
+                            "high": 3,
+                            "kind": "choice",
+                            "labels": ["Long", "Slow", "Medium", "Fast"],
+                            "short": ["L", "S", "M", "F"],
+                            "default": 2
+                        },
+                        "top": {
+                            "field": "agcGain",
+                            "caption": "Top",
+                            "low": -20,
+                            "high": 120,
+                            "kind": "range",
+                            "unit": "dB",
+                            "default": 80
+                        },
+                        "slope": {
+                            "field": "agcSlope",
+                            "caption": "Slope",
+                            "low": 0,
+                            "high": 20,
+                            "kind": "range",
+                            "unit": "dB",
+                            "convert": "tenths",
+                            "default": 3.5
+                        },
+                        "hang": {
+                            "field": "agcHangThreshold",
+                            "caption": "Hang",
+                            "low": 0,
+                            "high": 100,
+                            "kind": "range",
+                            "default": 0
+                        }
+                    }
+                },
+                "nr": {
+                    "switch": "dnr",
+                    "capability": "nr",
+                    "settings": {
+                        "scheme": {
+                            "field": "nrScheme",
+                            "caption": "Scheme",
+                            "low": 0,
+                            "high": 1,
+                            "kind": "choice",
+                            "labels": ["NR", "NR2"],
+                            "default": 0
+                        }
+                    }
+                },
+                "notch": {
+                    "switch": "anf",
+                    "capability": "notch",
+                    "settings": {}
+                },
+                "squelch": {
+                    "switch": "squelch",
+                    "capability": "squelch_switch",
+                    "settings": {
+                        "threshold": {
+                            "field": "squelchThreshold",
+                            "caption": "Thr",
+                            "low": 0,
+                            "high": 100,
+                            "kind": "range",
+                            "unit": "%",
+                            "default": 3
+                        }
+                    }
+                },
+                "nb": {
+                    "switch": "dnb",
+                    "capability": "nb",
+                    "settings": {
+                        "scheme": {
+                            "field": "nbScheme",
+                            "caption": "Scheme",
+                            "low": 0,
+                            "high": 1,
+                            "kind": "choice",
+                            "labels": ["NB", "NB2"],
+                            "default": 0
+                        },
+                        "threshold": {
+                            "field": "nbThreshold",
+                            "caption": "Thr",
+                            "low": 2,
+                            "high": 50,
+                            "kind": "range",
+                            "default": 30
+                        }
+                    }
+                },
+                "cw": {
+                    "switch": "cwPeaking",
+                    "capability": "cw_peak",
+                    "settings": {
+                        "bandwidth": {
+                            "field": "cwBandwidth",
+                            "caption": "Width",
+                            "low": 20,
+                            "high": 200,
+                            "kind": "range",
+                            "unit": "Hz",
+                            "default": 100
+                        },
+                        "gain": {
+                            "field": "cwGain",
+                            "caption": "Gain",
+                            "low": 1,
+                            "high": 10,
+                            "kind": "range",
+                            "convert": "float",
+                            "default": 2
+                        }
+                    }
+                }
+            }
+        },
+        "devices": {
+            "RTLSDR": {
+                "rf_gain": {
+                    "field": "gain",
+                    "per_db": 10,
+                    "auto": "agc",
+                    "steps": [0, 9, 14, 27, 37, 77, 87, 125, 144, 157, 166, 197, 207, 229, 254, 280, 297, 328, 338, 364, 372, 386, 402, 421, 434, 439, 445, 480, 496]
+                }
+            }
+        }
+    }
+}

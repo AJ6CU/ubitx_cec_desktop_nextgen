@@ -9,12 +9,11 @@ and a filter width. They are the operator's data, not the rig's: unlike the
 rig's twenty EEPROM slots they can be any length, and a change is saved
 straight away, since there is no EEPROM wearing out to protect.
 
-THEIR OWN FILE, IN THE USER'S HOME
+THEIR OWN FILE, IN THE APPLICATION'S FOLDER
 
-    ~/.ubitx_cec_desktop_channels.json
+    ~/.ubitx_cec_desktop/channels.json
 
-beside the settings file, ~/.ubitx_cec_desktop.ini, and found by the same
-rule, so it lands in the same place on macOS, Linux and Windows. Data rather
+beside the settings file, settings.json -- see app_paths. Data rather
 than settings, so it can be backed up, copied between machines or shared on
 its own. JSON rather than INI, because the sets are nested lists, which INI
 holds badly.
@@ -61,11 +60,13 @@ import json
 import os
 import time
 
+from app_paths import config_path
+
 # Seconds on each channel when nothing has been set yet.
 DEFAULT_DWELL_SECONDS = 5
 
-# Beside the settings file, by the same rule -- see configuration.py.
-DEFAULT_PATH = os.path.expanduser(os.path.join("~", ".ubitx_cec_desktop_channels.json"))
+# Beside the settings file, in the application's folder -- see app_paths.
+DEFAULT_PATH = config_path("channels.json")
 FILE_VERSION = 1
 
 # The label is short because the table shows it in a narrow column; the name

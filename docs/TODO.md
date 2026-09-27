@@ -209,9 +209,8 @@ rig and SDR++. Still to do, roughly in order of value:
   the console. Mute matters most: choosing SDR++ as the receiver silences the
   rig by toggling it, judged by `model.muted`, which starts out assuming the
   speaker is on.
-* **The CW offset switch (`ch_`).** The old code offset the transmit readout
-  only when it was on; the new code always does. Right for this rig, wrong
-  for one with it off.
+* ~~The CW offset switch (`ch_`)~~ -- DROPPED 2026-09-27: not needed with
+  receive and transmit shown side by side; each panel says what it is.
 * **Log QSO, the Setup tab, EEPROM backup and restore.** Setup's fields do
   not yet read or save the configuration -- including the MCU headroom, which
   the link hardcodes as 0.04 while the settings file holds its own value.
@@ -226,7 +225,7 @@ rig and SDR++. Still to do, roughly in order of value:
   WAY OF DRIVING a program -- its protocol, port, mode names, install paths,
   process name, launch arguments, what it can and cannot do, and how it must
   be shut down. Adding a program is an entry, not code, and an operator's own
-  entries in `~/.ubitx_cec_desktop_sdr_programs.json` are merged over the
+  entries in `~/.ubitx_cec_desktop/sdr_programs.json` are merged over the
   shipped ones entry by entry. SDRangel is ONE entry, driven over REST; its
   rigctl entry was removed (see `ARCHITECTURE.md`), and a saved setting
   naming it resolves to the REST one.
@@ -234,31 +233,22 @@ rig and SDR++. Still to do, roughly in order of value:
   Still to do there: a way to ask for a command line a program cannot guess
   at (rigctld carries the flag; nothing asks yet).
 
-* **One folder for everything this application keeps.** Three dotfiles are
-  loose in the home directory now, each found by its own rule:
+* **One folder for everything this application keeps -- DONE
+  (2026-09-27):** `~/.ubitx_cec_desktop/`, the same on every platform (the
+  operator's choice over each platform's usual place, which this item had
+  proposed). One helper, `app_paths.config_path`, answers "where does X
+  live" for every module:
 
-      ~/.ubitx_cec_desktop.ini             settings
-      ~/.ubitx_cec_desktop_channels.json   the channel sets and scan settings
-      ~/.ubitx_cec_desktop_geometry.json   the window's size and position
+      settings.json      the settings
+      channels.json      the channel sets and scan settings
+      geometry.json      the window's size and position
+      pinned_aids.json   the pinned pop-ups
+      sdr_programs.json  the operator's own SDR programs, merged over the shipped file
+      sdr_controls.json  the operator's own SDR controls, merged over the shipped file
 
-  They should be one folder -- the settings, the channels, the window
-  position, and in time the logbook and any decoder output -- so the
-  operator can back the station up, copy it to another machine, or delete it,
-  by taking one thing. Each platform has a place for this:
-
-      macOS     ~/Library/Application Support/uBITX CEC Desktop/
-      Linux     $XDG_CONFIG_HOME, else ~/.config/ubitx-cec-desktop/
-      Windows   %APPDATA%\uBITX CEC Desktop\
-
-  A home-directory dotfile is the Linux habit applied everywhere, and on a
-  Mac it is invisible in Finder, which makes a backup harder rather than
-  easier.
-
-  **Move the existing files on first run**, and leave nothing behind: unlike
-  the settings keys, these have no other reader to keep working. One helper
-  that answers "where does X live", used by ConfigurationManager,
-  ChannelSets and the geometry saver, replacing three separate expanduser
-  calls -- so the next thing that needs a file does not invent a fourth rule.
+  No moving of older loose files: the software was never released, so
+  nobody has them (the move was written, worked on the station, and was
+  taken out). Later: the logbook and any decoder output could live here too.
 * **Tidying once the old application is retired:** the settings file's scan
   and channel entries, the SDR++ controller's dormant channel and scan
   methods, `globalvars`' Nextion leftovers, and the "simulate transmit"
@@ -448,11 +438,18 @@ each tested against a running SDRangel before the next. Findings are in
    log2Decim over the sample rate's divisions, 48 kHz and up (1024000 gives
    64k, 128k, 256k, 512k, 1024k); sent when it settles, then the band is
    framed again. BAND FRAMING: after a band change, and after a bandwidth
-   change, the device centre goes to band start + bandwidth/2 -- never so far
-   that the signal leaves the inner 80 % of the sampled band. The model's
-   BANDS are (name, start, end) -- confirmed. *To check:* each step shows in
-   SDRangel's spectrum; 20 m opens at 14.000 not below; the WDSP channel
-   keeps working at every width; CPU at 1024k. The note below is the
+   change, the device centre goes toward band start + bandwidth/2 -- never so
+   far that the signal leaves the inner 80 % of the sampled band. A band
+   change puts the rig AT the band start, so in practice the centre is
+   start + 0.4 x bandwidth, and the spectrum opens a tenth of the bandwidth
+   below the band edge. CONFIRMED at the station, 2026-09-27: 40 m opens
+   centred on 7025 kHz at 64k and about 7100 kHz at 256k. The model's BANDS
+   are (name, start, end) -- confirmed. CPU, measured at the station
+   2026-09-27: about 50 % at both 64k and 1024k without decoding; with DEC,
+   about 60 % at 1024k and still 50 % at 64k. So the width costs little --
+   the dongle samples at 1024k whatever the decimation -- and SDRangel's own
+   spectrum and waterfall drawing is the likelier base cost. *Still to
+   check:* the WDSP channel keeps working at every width. The note below is the
    original survey.
    WATERFALL WIDTH, original note. A control on Operate that
    sets how much spectrum SDRangel's waterfall shows: wide to look round the
@@ -615,6 +612,16 @@ in the order they are worth trying:
    built, it goes behind the same capability boundary as a per-application
    driver -- never mixed into `SDR_Link`.
 
+**Gqrx remote-control patches -- DEFERRED (2026-09-27).** Searched again:
+no release or open PR adds AGC, noise blanker or noise reduction (latest
+release 2.17.7, May 2024; nothing merged since). Gqrx HAS AGC (off/fast/
+medium/slow/user, gain, threshold, slope, decay, hang) and NB1/NB2 with
+thresholds, but no noise reduction (issue #1362) and no notch -- so a patch
+of ours, on the #1463 pattern, would add AGC and NB, and the rigctl
+transport would need switched functions. Worth watching: #1458 (on-demand
+FFT data -- an app-drawn waterfall) and #1456 / #1426 (separate hardware and
+receive frequencies -- band framing for Gqrx).
+
 **Gqrx versions differ in ways that matter.** 2.17.5 fixed responding to
 pipelined remote commands and limited UDP packets for netcat compatibility;
 2.17.4 added `\chk_vfo` and `\get_powerstat`. Some odd behaviour seen while
@@ -654,6 +661,11 @@ the adapter. Unplugging and replugging the adapter cleared it: the next
 start-up was clean, every value arriving -- so the adapter itself gets stuck,
 and a replug resets it. (27,926,000 came back again on the clean start, so
 it is what the rig had stored, not damage.)
+SEEN A THIRD TIME, 2026-09-27 evening: line held low for 11837 zero bytes,
+then the unasked-report flood (vy/ve/tuning preset and "val=120" junk,
+flagged by the app's "without being asked" warning), settling once the
+rig's start-up report came through. Power-cycling the adapter cleared it
+again. Same fault, same cure: it is the adapter.
 *Possible recovery in software:* when the line comes back after being held
 low during the boot burst, reboot the rig once more to get the burst again
 -- ties in with the item below.
@@ -752,9 +764,10 @@ through the Tk loop rather than directly.
 **Some `xx_UX_` handlers still store nothing.** Wired since this was first
 written: the tuning presets, the CW tone and tweak, and the memory reads and
 write acknowledgements. Still unwired: the meters, the CW settings, ATT and
-IFS, and the CW offset switch -- listed with the rest of the remaining work
+IFS -- listed with the rest of the remaining work
 under [The uBITX interface](#the-ubitx-interface). Some are deliberately
-ignored: `vr_` (its value is a firmware figure, not the RIT base), `c0_`, the
+ignored: `vr_` (its value is a firmware figure, not the RIT base), `ch_`
+(the CW offset switch -- dropped, see above), `c0_`, the
 greenbox lines, `cm_`, `vv_` and the spectrum reports.
 
 *The four `comportManager` bugs that were here are superseded.* That module
@@ -766,6 +779,72 @@ connection above.
 ---
 
 <a name="much-later"></a>
+### SDR isolation and the config folder (2026-09-27)
+
+- DONE: the controls' ranges, labels, units and conversions moved out of
+  rest_sdr.py into sdr_controls.json (+ sdr_controls.py, named conversions);
+  RF gain steps too. The window names no SDR and holds no SDR's numbers:
+  every listening aid goes through SDR_Link's one description (has_dsp,
+  dsp_blocked, dsp_switchable, dsp_on, toggle_dsp, knobs, dsp_actions);
+  Gqrx's squelch is described there, not special-cased in the window.
+- DONE: ~/.ubitx_cec_desktop/ (app_paths.py) holds settings.json,
+  channels.json, geometry.json, pinned_aids.json, sdr_programs.json and
+  sdr_controls.json -- see "One folder" above. The About box shows where
+  the settings are.
+- *Checked at the station, 2026-09-27:* the refactor works with SDRangel
+  (WDSP: squelch switch and threshold), Gqrx and SDR++. The WDSP passband
+  workaround works: USB <-> LSB moves the far cut, wide/narrow keep the
+  sideband, AGC and RIT no longer make the filter jump; the Notch lamp greys
+  in CW with its note. RF gain steps, volume and double-click mute work.
+  The folder works: settings, channel sets and window position all there.
+- DONE: the bandwidth slider and band framing, confirmed at the station
+  (40 m centred on 7025 kHz at 64k, about 7100 at 256k -- start + 0.4 x
+  bandwidth, since the rig lands on the band start).
+- DONE: out of every ham band the band spinbox shows "—" rather than the
+  last band chosen, and its arrows go to the nearest band that way (from
+  below 160 m or above 10 m, to that end band). The spinbox steps from the
+  position of the last value it showed from its list, so the application
+  sets that position (_aim_band_arrows) and corrects DOWN in _on_band --
+  the library is unchanged. *To check at the station.*
+  (Library idea, not needed: a way to tell sCTkSpinbox where stepping
+  starts, instead of the application setting its _current_index.)
+- DONE: a **Defaults** button in each listening-aid pop-up that has known
+  defaults -- SDRangel's resetToDefaults() values, as "default" per setting
+  in sdr_controls.json. One PATCH; the switch is left as it is. WDSP AGC,
+  NR, squelch, NB, CW peak; SSB demodulator AGC and NR (not its alpha: the
+  source stores 1.0 and how that maps to the dial is not known -- read it
+  off a fresh demodulator to add it). Confirmed on the station.
+
+### CW decoding through SDRangel's Morse decoder -- BUILT (2026-09-27)
+
+DEC, the seventh lamp. Found at connect (`GET /featureset`, id
+"MorseDecoder" -- capability `decoder`); greyed with its reason where there
+is none, and outside CW. On: a UDP socket of the application's own on
+127.0.0.1 (a port the system picks), the decoder's UDP output PATCHed to it
+and the feature asked to run; its text read on the poll and shown in a strip
+along the bottom of the Operate tab, newest at the right -- the strip only
+there while DEC is on. And the receiver set for decoding, the operator's
+choice: filter narrowed to 250 Hz (200 on SDRangel's grid) unless already
+narrower, AGC off, CW peak on. Off: all three put back, and the decoder's own
+UDP settings restored. Leaving CW stops it (the filter is then the new
+mode's). Not reachable, so not shown: its pitch, speed and confidence.
+FIX (2026-09-27, after the first station try did not choose the WDSP
+receiver, start the decoder or tick UDP): the source is now chosen by the
+feature's actions POST, the decoder started by POST run (and stopped at DEC
+off only if it was stopped before), and every step read back and reported
+in one `[sdr] CW decoder:` console line.
+CONFIRMED at the station, 2026-09-27, once the SSB demodulator was removed
+(the decoder's window defaults to the first channel and overrides a REST
+choice when its list changes -- notes, "The Morse decoder"). The decoder's
+window still shows stopped, UDP off and its own source: it is not told of
+REST changes. FIX: the strip now fills from the left and scrolls left once
+full, holding as much as its width allows.
+*Still to check:* the strip scrolling; resizing the window.
+*Was to check:* DEC in CW -- the console line says UDP on,
+source chosen, decoder running; the decoder's window shows the WDSP
+receiver as source, UDP ticked, Start pressed; text in the strip. DEC off
+restoring filter, AGC and CW peak, and the decoder's UDP box as it was.
+
 ### Waiting on SDRangel -- workarounds to remove when fixed
 
 Checked against 7.27.2-1315-gc43757c88, the latest build as of 2026-09-27.
@@ -784,8 +863,9 @@ workaround.
   again afterwards.
 - SSB DEMODULATOR'S dnrScheme IGNORED over REST
   (sdrangel_dnrScheme_report.txt). *Check:* PATCH `{"dnrScheme":2}`, GET
-  -- fixed when it reads 2. *Then remove:* the scheme's `read_only` in
-  `rest_sdr.CHANNEL_DSP["SSBDemod"]`, so the NR pop-up's scheme knob turns.
+  -- fixed when it reads 2. *Then remove:* the scheme's `"read_only": true` in
+  `sdr_controls.json` (sdrangel / SSBDemod / nr), so the NR pop-up's scheme
+  knob turns.
 - WDSP RECEIVER'S REPORT CRASHES SDRangel (notes; not yet reported --
   report text still to write). *Check:* ONLY with nothing unsaved in
   SDRangel -- GET .../channel/1/report on the WDSP channel. Fixed when it

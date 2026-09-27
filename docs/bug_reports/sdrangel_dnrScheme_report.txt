@@ -1,0 +1,63 @@
+SSB Demodulator: dnrScheme cannot be changed through the REST API
+
+SDRangel version: 7.27.2-1315-gc43757c88 (Qt 6.11.1, arm64, macOS 26.6.2), GUI build
+
+
+SUMMARY
+
+Changing the FFT noise reduction scheme of the SSB Demodulator through the
+REST API has no effect. The PATCH is accepted without error, but the scheme
+stays where it was, both in the settings read back and in the NR dialog.
+The other noise reduction fields (dnr, dnrAboveAvgFactor, dnrSigmaFactor,
+dnrNbPeaks, dnrAlpha), and other SSB Demodulator settings such as agc,
+volume, audioMute, rfBandwidth and lowCutoff, all change as expected through
+the same kind of request.
+
+
+TO REPRODUCE
+
+1. Open an RTL-SDR device set with an SSB Demodulator as channel 0, with the
+   noise reduction scheme set to Average.
+
+2. Ask for the Peaks scheme (2):
+
+   curl -s -X PATCH -H "Content-Type: application/json" -d '{"channelType":"SSBDemod","direction":0,"SSBDemodSettings":{"dnrScheme":2}}' http://127.0.0.1:8091/sdrangel/deviceset/0/channel/0/settings
+
+3. Read the setting back:
+
+   curl -s http://127.0.0.1:8091/sdrangel/deviceset/0/channel/0/settings | python3 -m json.tool | grep dnrScheme
+
+
+EXPECTED
+
+"dnrScheme": 2, and the NR dialog showing Peaks.
+
+
+ACTUAL
+
+"dnrScheme": 0, and the NR dialog still showing Average.
+
+
+LOG (debug level, during step 2)
+
+WebAPIRequestMapper::getChannelSettings:  channelSettingsKey:  "SSBDemodSettings"  channelSettingsKeys:  QList("dnrScheme")
+SSBDemod::webapiSettingsPutPatch: forward to GUI: 0xbed4a5cb0
+SSBDemod::handleMessage: MsgConfigureSSBDemod
+SSBDemod::applySettings: " m_dnrScheme: 0"
+SSBDemodGUI::handleMessage: SSBDemod::MsgConfigureSSBDemod
+
+
+WHAT THE LOG SUGGESTS
+
+The request is parsed and dnrScheme is recognised as the key being changed,
+but applySettings runs with the old value (0) rather than the one sent (2),
+and it does so before the GUI receives the message. So it does not look like
+the GUI writing its own value back. My guess, without having read the code,
+is that the step which copies REST fields into the SSB Demodulator's settings
+is missing dnrScheme.
+
+
+QUESTION
+
+Is this already known, or fixed in a later build? Is there another way to set
+the scheme remotely in the meantime?

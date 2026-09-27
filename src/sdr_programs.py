@@ -8,7 +8,7 @@ else's software, it goes stale when that software changes, and adding a
 program should not mean editing Python. So it lives in sdr_programs.json,
 beside this module, and an operator's own entries live in
 
-    ~/.ubitx_cec_desktop_sdr_programs.json
+    ~/.ubitx_cec_desktop/sdr_programs.json
 
 MERGED ENTRY BY ENTRY, not file over file. The theme file works the other way
 -- the first one found wins completely -- and Theming.md explains what that
@@ -34,6 +34,8 @@ import json
 import os
 import sys
 
+from app_paths import config_path
+
 # What an SDR can be asked to do. The interface greys out what is missing.
 FREQUENCY = "frequency"
 MODE = "mode"
@@ -56,8 +58,11 @@ RF_GAIN = "rf_gain"      # the SDR hardware's front-end gain, in dB
 # The width of the band the SDR samples -- what its spectrum and waterfall
 # show. SDRangel: the device's decimation.
 BANDWIDTH = "bandwidth"
+# A CW decoder whose text reaches the application -- SDRangel's Morse
+# Decoder feature, over UDP.
+DECODER = "decoder"
 CAPABILITIES = {FREQUENCY, MODE, FILTER, SIGNAL, VOLUME, SQUELCH, MUTE, AGC, NR,
-                NOTCH, NB, CW_PEAK, SQUELCH_SWITCH, RF_GAIN, BANDWIDTH}
+                NOTCH, NB, CW_PEAK, SQUELCH_SWITCH, RF_GAIN, BANDWIDTH, DECODER}
 
 # A "CW" from an SDR with no sideband of its own: the application has to
 # choose one -- see SDR_Link._from_sdr_mode. Written "cw" in the file.
@@ -68,8 +73,8 @@ RIG_MODES = ("LSB", "USB", "CWL", "CWU")
 
 SHIPPED_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                             "sdr_programs.json")
-USER_FILE = os.path.expanduser(
-    os.path.join("~", ".ubitx_cec_desktop_sdr_programs.json"))
+# The operator's own, in the application's folder -- see app_paths.
+USER_FILE = config_path("sdr_programs.json")
 
 
 class Profile:

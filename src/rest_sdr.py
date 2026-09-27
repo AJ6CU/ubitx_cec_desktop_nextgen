@@ -41,13 +41,16 @@ hung SDRangel, which is RigctlClient's worst case too.
 """
 import json
 import math
+import socket
 import time
 import urllib.error
 import urllib.request
 
 import globalvars as gv
+import sdr_controls
 from sdr_programs import (FREQUENCY, SIGNAL, VOLUME, MUTE, MODE, FILTER, AGC, NR,
-                          NOTCH, NB, CW_PEAK, SQUELCH_SWITCH, RF_GAIN, BANDWIDTH)
+                          NOTCH, NB, CW_PEAK, SQUELCH_SWITCH, RF_GAIN, BANDWIDTH,
+                          DECODER)
 
 POLL_MS = 200
 
@@ -155,103 +158,29 @@ SPAN_BASE_BY_CHANNEL = {"SSBDemod": 48000, "WDSPRx": 48000}
 # can be emptied.
 STALE_PASSBAND_CHANNELS = {"WDSPRx"}
 
-# THE DEMODULATOR'S DSP FUNCTIONS, PER CHANNEL TYPE. Each function is a switch
-# and its adjustments; each adjustment says what the knob for it is, so the
-# interface builds its frames from this table rather than knowing any channel.
+# THE DEMODULATOR'S DSP FUNCTIONS, PER CHANNEL TYPE, and each device's RF
+# gain: read from sdr_controls.json (see sdr_controls.py) -- which settings
+# a demodulator has, their ranges, labels, units and how each is stored.
+# Each function is a switch and its adjustments; each adjustment says what
+# the knob for it is, so the interface builds its pop-ups from this rather
+# than knowing any channel. An adjustment is held in DIAL UNITS -- the whole
+# number the operator reads, or a choice's index -- and converted at this
+# edge by its `store` and `load`.
 #
-# An adjustment is held in DIAL UNITS -- the whole number the operator reads,
-# or a choice's index -- and converted at this edge by `store` and `load`.
-# Its `kind` is the knob: "range" (end stops, labelled with low and high),
-# "choice" (a selector, one position per label), or "step" (a flywheel, for
-# a value whose stored number is not what is read -- a power of two).
-# Ranges read off the station, or from SDRangel's own dialog definitions.
-#
-# SSBDemod: the AGC time constant is stored as a power of two (agcTimeLog2 7
-# is 128 ms). NR's scheme picks which of avg, sigma and peaks applies, and is
-# READ-ONLY: dnrScheme is accepted over REST and not applied (SDRangel's log
-# shows why -- see the notes). Alpha is smoothing, stored as 1 - 10^(-n/10)
-# for dial position n: the 0.2056717... captured is exactly n = 1.
-#
-# WDSPRx: PATCH applies to every field, confirmed on the station. agcSlope is
-# stored in TENTHS of a dB (dial 10 read back 100) and held here in whole dB;
-# cwGain is a float stored as shown, held here in whole units. Numbering by
-# the dialogs' order, 0 Long and 3 Fast, NR2 1, AM 1 and FM 2 confirmed.
+# Facts behind the entries, kept here where the code that relies on them is:
+# SSBDemod's dnrScheme is accepted over REST and not applied (read-only --
+# see the notes); its alpha is 1 - 10^(-n/10), the 0.2056717... captured
+# being exactly n = 1. WDSPRx: PATCH applies to every field, confirmed on the
+# station; agcSlope is stored in TENTHS (dial 10 read back 100); numbering
+# by the dialogs' order, 0 Long and 3 Fast, NR2 1, AM 1 and FM 2 confirmed.
+# RTLSDR's gain is in tenths of a dB, in the R820T tuner's fixed steps, with
+# the dongle's own AGC in `agc`.
 
 def _int(value):
     return int(round(float(value)))
 
 
-def _alpha_store(n):
-    return 1.0 - 10 ** (-float(n) / 10.0)
-
-
-def _alpha_load(stored):
-    return _int(-10.0 * math.log10(max(1.0 - float(stored), 1e-9)))
-
-
-def _setting(field, caption, low, high, kind="range", unit="", labels=None,
-             short=None, store=None, load=None, read_only=False, text=None):
-    """One adjustment -- see the note above."""
-    return {"field": field, "caption": caption, "low": low, "high": high,
-            "kind": kind, "unit": unit, "labels": labels, "short": short or labels,
-            "store": store or _int, "load": load or _int,
-            "read_only": read_only, "text": text}
-
-
-CHANNEL_DSP = {
-    "SSBDemod": {
-        "agc": {"switch": "agc", "capability": AGC, "settings": {
-            "time": _setting("agcTimeLog2", "Time", 4, 11, kind="step",
-                             text=lambda v: f"{2 ** v} ms"),
-            "threshold": _setting("agcPowerThreshold", "Thr", -119, 0, unit="dB"),
-            "gate": _setting("agcThresholdGate", "Gate", 0, 500),
-        }},
-        "nr": {"switch": "dnr", "capability": NR, "settings": {
-            "scheme": _setting("dnrScheme", "Scheme", 0, 2, kind="choice",
-                               labels=("Average", "Std dev", "Peaks"),
-                               short=("Avg", "SD", "Pk"), read_only=True),
-            "avg": _setting("dnrAboveAvgFactor", "Avg\u00d7", 20, 99),
-            "sigma": _setting("dnrSigmaFactor", "Sigma", 2, 16),
-            "peaks": _setting("dnrNbPeaks", "Peaks", 1, 40),
-            "alpha": _setting("dnrAlpha", "Alpha", 0, 40,
-                              store=_alpha_store, load=_alpha_load),
-        },
-            # The middle knob is whichever setting the scheme uses.
-            "knobs": lambda held: ["scheme",
-                                   ("avg", "sigma", "peaks")[held.get("scheme", 0)
-                                                            if held.get("scheme", 0) in (0, 1, 2) else 0],
-                                   "alpha"]},
-    },
-    "WDSPRx": {
-        "agc": {"switch": "agc", "capability": AGC, "settings": {
-            "mode": _setting("agcMode", "Mode", 0, 3, kind="choice",
-                             labels=("Long", "Slow", "Medium", "Fast"),
-                             short=("L", "S", "M", "F")),
-            "top": _setting("agcGain", "Top", -20, 120, unit="dB"),
-            "slope": _setting("agcSlope", "Slope", 0, 20, unit="dB",
-                              store=lambda v: _int(v) * 10,
-                              load=lambda stored: _int(float(stored) / 10.0)),
-            "hang": _setting("agcHangThreshold", "Hang", 0, 100),
-        }},
-        "nr": {"switch": "dnr", "capability": NR, "settings": {
-            "scheme": _setting("nrScheme", "Scheme", 0, 1, kind="choice",
-                               labels=("NR", "NR2")),
-        }},
-        "notch": {"switch": "anf", "capability": NOTCH, "settings": {}},
-        "squelch": {"switch": "squelch", "capability": SQUELCH_SWITCH, "settings": {
-            "threshold": _setting("squelchThreshold", "Thr", 0, 100, unit="%"),
-        }},
-        "nb": {"switch": "dnb", "capability": NB, "settings": {
-            "scheme": _setting("nbScheme", "Scheme", 0, 1, kind="choice",
-                               labels=("NB", "NB2")),
-            "threshold": _setting("nbThreshold", "Thr", 2, 50),
-        }},
-        "cw": {"switch": "cwPeaking", "capability": CW_PEAK, "settings": {
-            "bandwidth": _setting("cwBandwidth", "Width", 20, 200, unit="Hz"),
-            "gain": _setting("cwGain", "Gain", 1, 10, store=float),
-        }},
-    },
-}
+CHANNEL_DSP, RF_GAIN_DEVICES = sdr_controls.load("sdrangel")
 
 # The demodulators, most wanted first. The WDSP receiver has everything the
 # SSB demodulator has and more; the operator's choice, 2026-09-27.
@@ -266,27 +195,21 @@ METER_CHANNEL = "ChannelPower"
 # cause read in its source -- see the notes).
 REPORT_UNSAFE = {"WDSPRx"}
 
+# SDRangel's Morse decoder, a FEATURE rather than a channel -- see
+# set_decoder. Its text comes over UDP, not REST: the feature has settings
+# over REST but no report.
+DECODER_FEATURE = "MorseDecoder"
+# The most one poll reads, so a flood cannot hold up the interface.
+DECODER_READS_PER_POLL = 20
+
 # The CW peaking filter's peak frequency, as its dialog allows.
 CW_PEAK_RANGE = (300, 1000)
 
 
 # RF GAIN IS THE DEVICE'S, and each kind names and scales it its own way, so
-# it is described per deviceHwType. A device not listed has no RF gain here:
-# the control is greyed rather than guessed at.
-#
-# RTLSDR, confirmed on the station: rtlSdrSettings.gain in TENTHS of a dB
-# (328 = 32.8 dB, 496 = 49.6 dB at the top), and rtlSdrSettings.agc, the
-# dongle's own AGC -- while that is on the dongle sets its own gain and the
-# field does nothing. The dongle takes gain in fixed steps; these are the
-# R820T tuner's, the usual chip, and both values captured are among them.
-RF_GAIN_DEVICES = {
-    "RTLSDR": {
-        "field": "gain", "per_db": 10, "auto": "agc",
-        "steps": (0, 9, 14, 27, 37, 77, 87, 125, 144, 157, 166, 197, 207, 229,
-                  254, 280, 297, 328, 338, 364, 372, 386, 402, 421, 434, 439,
-                  445, 480, 496),
-    },
-}
+# it is described per deviceHwType -- in sdr_controls.json, loaded above as
+# RF_GAIN_DEVICES. A device not listed has no RF gain here: the control is
+# greyed rather than guessed at.
 
 # The CW pitch when the rig has not reported its tone. SDR_Link passes the
 # rig's reported tone as cw_pitch before choosing a CW mode.
@@ -379,9 +302,17 @@ class RestClient:
             method="PATCH", headers={"Content-Type": "application/json"})
         return self._send(request) is not None
 
-    def post(self, path):
-        """An action with no body -- starting a device. True if accepted."""
-        request = urllib.request.Request(self._url(path), data=b"", method="POST")
+    def post(self, path, body=None):
+        """
+        An action -- starting a device, with no body; or one described by a
+        JSON body, as a feature's actions are. True if accepted.
+        """
+        if body is None:
+            request = urllib.request.Request(self._url(path), data=b"", method="POST")
+        else:
+            request = urllib.request.Request(
+                self._url(path), data=json.dumps(body).encode("utf-8"),
+                method="POST", headers={"Content-Type": "application/json"})
         return self._send(request) is not None
 
     def delete(self, path):
@@ -582,6 +513,11 @@ class RestSDR:
         self.cw_pitch = None            # set by SDR_Link: the rig's CW tone
         self._passband_check = None     # (mode, width, tries) -- see PASSBAND_RETRIES
         self._written_passband = None   # (rf, lc) last sent -- see STALE_PASSBAND_CHANNELS
+        self._decoder_index = None      # the Morse Decoder feature -- see set_decoder
+        self._decoder_socket = None
+        self._decoder_was = None
+        self._decoder_was_running = None
+        self.on_decoded = None          # called with decoded CW text
 
         # THE S-METER'S SOURCE -- see discover(): a Channel Power channel
         # when there is one, else the demodulator's own report where that is
@@ -805,10 +741,130 @@ class RestSDR:
                 self.mode = "LSB" if self._sideband == "L" else "USB"
             if self.mode in ("USB", "LSB"):
                 self._ssb_low = self._low
+        # THE CW DECODER: SDRangel's Morse Decoder feature, where there is one.
+        # Its audio source is chosen in its own window.
+        self._decoder_index = self._find_decoder()
+        if self._decoder_index is not None:
+            caps.add(DECODER)
         self.capabilities = frozenset(caps)
         return True
 
+    # ------------------------------------------------------------------
+    # The CW decoder -- SDRangel's Morse Decoder feature
+    # ------------------------------------------------------------------
+    def _find_decoder(self):
+        """The Morse Decoder feature's index, or None."""
+        listing = self._client.get("/featureset")
+        for feature in (listing or {}).get("features") or ():
+            if feature.get("id") == DECODER_FEATURE and isinstance(feature.get("index"), int):
+                return feature["index"]
+        return None
+
+    def set_decoder(self, on):
+        """
+        Starts or stops taking the Morse decoder's text.
+
+        ON, in order, each step said in the console:
+          1. a UDP socket of our own on 127.0.0.1, at a port the system picks;
+          2. the decoder's UDP output pointed at it (off by default) -- its
+             UDP settings as they were kept, to put back;
+          3. its SOURCE set to the demodulator this drives -- an ACTION
+             (deviceId, channelId), not a setting, which is why choosing it
+             in the decoder's own window was needed before;
+          4. the decoder started (its Start button), if it was not running --
+             and whether it was, kept, so stopping leaves it as found.
+        Checked afterwards by reading back: UDP on, and running.
+
+        OFF: its UDP settings put back, stopped if it was not running before,
+        and the socket closed.
+        """
+        if DECODER not in self.capabilities or self._decoder_index is None:
+            return False
+        base = f"/featureset/feature/{self._decoder_index}"
+        key = f"{DECODER_FEATURE}Settings"
+        try:
+            if not on:
+                if self._decoder_was:
+                    self._client.patch(f"{base}/settings",
+                                       {"featureType": DECODER_FEATURE, key: self._decoder_was})
+                if self._decoder_was_running is False:
+                    self._client.delete(f"{base}/run")
+                self._decoder_was, self._decoder_was_running = None, None
+                self._close_decoder_socket()
+                return True
+
+            if self._decoder_socket is None:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                sock.bind(("127.0.0.1", 0))
+                sock.setblocking(False)
+                self._decoder_socket = sock
+            port = self._decoder_socket.getsockname()[1]
+
+            held = (self._client.get(f"{base}/settings") or {}).get(key) or {}
+            self._decoder_was = {k: held[k] for k in ("udpEnabled", "udpAddress", "udpPort")
+                                 if k in held}
+            udp = self._client.patch(f"{base}/settings", {
+                "featureType": DECODER_FEATURE,
+                key: {"udpEnabled": 1, "udpAddress": "127.0.0.1", "udpPort": port}})
+            source = self._client.post(f"{base}/actions", {
+                "featureType": DECODER_FEATURE,
+                f"{DECODER_FEATURE}Actions": {"deviceId": self._set_index,
+                                              "channelId": self._channel_index}})
+            state = (self._client.get(f"{base}/run") or {}).get("state")
+            self._decoder_was_running = state == "running"
+            if not self._decoder_was_running:
+                self._client.post(f"{base}/run")
+                state = (self._client.get(f"{base}/run") or {}).get("state")
+
+            now = (self._client.get(f"{base}/settings") or {}).get(key) or {}
+            udp_ok = bool(udp) and now.get("udpEnabled") in (1, True) and now.get("udpPort") == port
+            print(f"[sdr] CW decoder: UDP to 127.0.0.1:{port} "
+                  f"{'on' if udp_ok else 'NOT on -- reads back ' + repr({k: now.get(k) for k in ('udpEnabled', 'udpPort')})}; "
+                  f"source device set {self._set_index} channel {self._channel_index} "
+                  f"({self._channel_type}) {'chosen' if source else 'NOT chosen'}; "
+                  f"decoder {state or 'state unknown'}")
+            if not udp_ok:
+                self._close_decoder_socket()
+                return False
+            return True
+        except ConnectionLost:
+            self._close_decoder_socket()
+            self._lost()
+            return False
+
+    def _close_decoder_socket(self):
+        if self._decoder_socket is not None:
+            try:
+                self._decoder_socket.close()
+            except OSError:
+                pass
+            self._decoder_socket = None
+
+    def _read_decoder(self):
+        """Whatever text the decoder has sent since the last poll, to on_decoded."""
+        if self._decoder_socket is None:
+            return
+        text = []
+        for _ in range(DECODER_READS_PER_POLL):
+            try:
+                data = self._decoder_socket.recv(4096)
+            except (BlockingIOError, InterruptedError):
+                break
+            except OSError:
+                self._close_decoder_socket()
+                break
+            text.append(data.decode("utf-8", errors="replace"))
+        if text:
+            self._call(self.on_decoded, "".join(text))
+
     def disconnect(self):
+        # The decoder's UDP settings put back as they were, while SDRangel
+        # can still be told.
+        if self._decoder_socket is not None:
+            try:
+                self.set_decoder(False)
+            except Exception:
+                self._close_decoder_socket()
         if self._poll_id is not None:
             try:
                 self.root.after_cancel(self._poll_id)
@@ -1378,6 +1434,43 @@ class RestSDR:
         return {key: spec[key] for key in ("caption", "kind", "low", "high",
                                            "labels", "short", "unit")}
 
+    def dsp_defaults(self, function):
+        """
+        {name: default} for every adjustment of a function that has one and
+        can be set -- all of them, not only the knobs on show (the SSB
+        demodulator's NR shows one of three numbers, and all three reset).
+        """
+        spec = self._dsp_spec(function)
+        if not spec:
+            return {}
+        held = self.dsp_settings.get(function, {})
+        return {name: setting["default"] for name, setting in spec["settings"].items()
+                if setting["default"] is not None and not setting["read_only"]
+                and name in held}
+
+    def reset_dsp(self, function):
+        """
+        Puts a function's adjustments back to their defaults, in ONE PATCH,
+        stored exactly -- a default between whole dial steps (WDSP's slope,
+        3.5 dB) is not rounded to the knob's step. The switch is left as it is.
+        """
+        defaults = self.dsp_defaults(function)
+        if not defaults:
+            return False
+        spec = self._dsp_spec(function)["settings"]
+        fields = {spec[name]["field"]: spec[name]["store"](value)
+                  for name, value in defaults.items()}
+        try:
+            ok = self._patch_channel(fields)
+        except ConnectionLost:
+            self._lost()
+            return False
+        if ok:
+            for name in defaults:
+                stored = fields[spec[name]["field"]]
+                self.dsp_settings[function][name] = spec[name]["load"](stored)
+        return ok
+
     def dsp_range(self, function, name):
         """(lowest, highest) of an adjustment, in dial units."""
         spec = self._dsp_setting_spec(function, name)
@@ -1485,6 +1578,7 @@ class RestSDR:
             if (self._polls % AUDIO_POLL_EVERY == 0
                     and RF_GAIN in self.capabilities):
                 self._read_rf_gain()
+            self._read_decoder()
         except ConnectionLost:
             self._lost()
             return

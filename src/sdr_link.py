@@ -47,7 +47,7 @@ from rigctl_sdr import RigctlSDR
 from rest_sdr import RestSDR
 from sdr_programs import (profile_for, CW_EITHER, FILTER, VOLUME, MUTE, SQUELCH, SIGNAL,
                           AGC, NR, NOTCH, NB, CW_PEAK, SQUELCH_SWITCH, RF_GAIN,
-                          BANDWIDTH)
+                          BANDWIDTH, DECODER)
 
 # A mode asked of the rig because the SDR changed is PENDING until the rig
 # reports it. Meanwhile the rig's older mode is not pushed back to the SDR:
@@ -118,6 +118,12 @@ class SDR_Link:
         # used when the SDR has no mute of its own.
         self._system_muted = False
 
+        # The CW decoder -- see _set_decoding. Called with each piece of
+        # decoded text. Set by the owner.
+        self.on_decoded = None
+        self._decoding = False
+        self._decode_saved = None       # what decoding changed, to put back
+
         # Volume changes wait for the slider to settle -- see set_volume.
         self._pending_volume = None
         self._volume_timer = None
@@ -186,6 +192,7 @@ class SDR_Link:
         self.controller.on_rf_gain = lambda: self._audio_changed()
         self.controller.on_squelch = lambda level: self._audio_changed()
         self.controller.on_signal = lambda level: self._signal_changed()
+        self.controller.on_decoded = self._decoded_text
         self.controller.on_disconnect = self._lost
         self._sent_hz = None            # FIX: was _sent_frequency, which nothing reads
         self._sent_mode = None
@@ -238,6 +245,7 @@ class SDR_Link:
         self.controller.on_rf_gain = lambda: self._audio_changed()
         self.controller.on_squelch = lambda level: self._audio_changed()
         self.controller.on_signal = lambda level: self._signal_changed()
+        self.controller.on_decoded = self._decoded_text
         self.controller.on_disconnect = self._lost
 
         if not self.controller.connect(host, port):
@@ -505,6 +513,7 @@ class SDR_Link:
 
     def _lost(self):
         """The controller found the connection gone -- SDR++ closed, say."""
+        self._decoding, self._decode_saved = False, None
         print(f"[sdr] lost the connection to {self.profile.name}")
         self._report(False)
 
@@ -554,6 +563,9 @@ class SDR_Link:
         if sdr_mode and sdr_mode != self._sent_mode:
             previous = self._sent_mode
             self._sent_mode = sdr_mode
+            # Out of CW, the decoder stops -- its filter is the new mode's.
+            if self._decoding and not str(rig_mode).upper().startswith("CW"):
+                self._set_decoding(False, restore_filter=False)
             # Between SSB and CW, the new mode's own default width: a 2600 Hz
             # SSB filter carried into CW lets in everything around the
             # signal. The defaults come from the configuration.
@@ -745,66 +757,244 @@ class SDR_Link:
             system_audio.unmute()
         self._system_muted = bool(muted)
 
-    # -- DSP: the demodulator's own functions -------------------------------
+    # -- The listening aids: AGC, NR, notch, squelch, NB, CW peak -----------
     #
-    # Where the SDR offers them (SDRangel), by name: "agc", "nr", "notch",
-    # "squelch", "nb", "cw". Each is on or off, with adjustments in the units
-    # the SDR's dials show. WHICH adjustments, and how each is drawn, comes
-    # from the transport (rest_sdr.CHANNEL_DSP), since it differs with the
-    # demodulator -- the WDSP receiver's AGC is not the SSB demodulator's.
-    # No stand-in for SDRs without them: the lamps and knobs are greyed.
+    # ONE WAY OF DESCRIBING EVERY FUNCTION, whatever the SDR, so the window
+    # needs no SDR's name and no SDR's numbers. By name -- "agc", "nr",
+    # "notch", "squelch", "nb", "cw" -- each function:
+    #
+    #   has_dsp          exists with this SDR
+    #   dsp_blocked      why it cannot be used just now, or None
+    #   dsp_switchable   has an on/off switch of its own
+    #   dsp_on           is on
+    #   toggle_dsp       what clicking its lamp does
+    #   dsp_knob_names   its adjustments, in order, each described by
+    #                    dsp_info / dsp_range / dsp_setting / dsp_setting_text
+    #                    and set by set_dsp_setting
+    #   dsp_actions      buttons of its own -- (label, action, enabled)
+    #
+    # TWO KINDS BEHIND IT. A SWITCHED function (SDRangel's) is described by
+    # the transport, from sdr_controls.json. A THRESHOLD SQUELCH (Gqrx's, a
+    # rigctld's) has no switch -- fully open is its "off" -- and is described
+    # here from the program's entry in sdr_programs.json: one threshold knob
+    # in the program's own units, and its A and R.
 
     DSP_CAPABILITY = {"agc": AGC, "nr": NR, "notch": NOTCH,
                       "squelch": SQUELCH_SWITCH, "nb": NB, "cw": CW_PEAK}
 
-    def has_dsp(self, function):
+    # Functions that must stay off in CW, and why -- the transport turns
+    # them off on entering CW (see RestSDR._automate_mode); this keeps the
+    # operator from turning them back on.
+    OFF_IN_CW = {"notch": "off in CW -- it would notch out the signal"}
+
+    THRESHOLD = "threshold"         # the threshold squelch's one knob
+
+    def _switched(self, function):
         return self.DSP_CAPABILITY.get(function) in self.capabilities
+
+    def _threshold_squelch(self, function):
+        return function == "squelch" and not self._switched(function) and self.has_squelch
+
+    def _decoder(self, function):
+        return function == "decode" and DECODER in self.capabilities
+
+    def has_dsp(self, function):
+        return (self._switched(function) or self._threshold_squelch(function)
+                or self._decoder(function))
+
+    def dsp_blocked(self, function):
+        """Why a function cannot be used just now -- or None if it can."""
+        if not self.has_dsp(function):
+            return (f"not available with {self.profile.name}" if self.connected
+                    else "needs a connected SDR")
+        in_cw = str(self._model.mode_of(self._model.rx_vfo)).upper().startswith("CW")
+        reason = self.OFF_IN_CW.get(function)
+        if reason and in_cw:
+            return reason
+        if function == "decode" and not in_cw:
+            return "CW only -- the decoder reads Morse"
+        return None
+
+    def dsp_switchable(self, function):
+        return self._switched(function) or self._decoder(function)
 
     def dsp_on(self, function):
         """Whether a function is on -- None where the SDR has none."""
-        if not self.has_dsp(function):
+        if self._decoder(function):
+            return self._decoding
+        if self._threshold_squelch(function):
+            threshold = self._squelch_now()
+            return threshold is not None and threshold > self.squelch_range()[0]
+        if not self._switched(function):
             return None
         return getattr(self.controller, "dsp_on", {}).get(function)
 
     def set_dsp(self, function, on):
-        """Turns a function on or off, where the SDR has it."""
-        if self.has_dsp(function):
+        """Turns a switched function on or off."""
+        if self._decoder(function):
+            if not (on and self.dsp_blocked(function)):
+                self._set_decoding(bool(on))
+            return
+        if self._switched(function) and not (on and self.dsp_blocked(function)):
             self.controller.set_dsp(function, bool(on))
+
+    def toggle_dsp(self, function):
+        """
+        What clicking a function's lamp does: a switched one flips; the
+        threshold squelch opens fully if closed (R), and otherwise closes
+        just above what is heard now (A).
+        """
+        if self.dsp_blocked(function):
+            return
+        if self._threshold_squelch(function):
+            if self.dsp_on(function):
+                self.reset_squelch()
+            elif self.can_auto_squelch:
+                self.auto_squelch()
+            return
+        self.set_dsp(function, not self.dsp_on(function))
+
+    def dsp_defaults(self, function):
+        """A function's adjustments' defaults, {name: value} -- {} where none are known."""
+        if not self._switched(function) or not hasattr(self.controller, "dsp_defaults"):
+            return {}
+        return self.controller.dsp_defaults(function)
+
+    def reset_dsp(self, function):
+        """Puts a function's adjustments back to their defaults; its switch is left alone."""
+        if self.dsp_defaults(function):
+            self.controller.reset_dsp(function)
+            self._audio_changed()
+
+    # -- The CW decoder ------------------------------------------------------
+    #
+    # DEC, the seventh lamp: the SDR's CW decoder (SDRangel's Morse Decoder
+    # feature), its text handed to on_decoded as it arrives. CW only.
+    #
+    # DECODING SETS THE RECEIVER FOR IT, and puts it back after -- the
+    # operator's choice, 2026-09-27. A decoder needs one signal in the
+    # passband and a clean keying envelope, which is most of the fiddling
+    # people do by hand: so the filter is narrowed to DECODE_FILTER_HZ (or
+    # left if already narrower), AGC is turned off (it pumps the level
+    # between elements), and the CW peak filter is turned on at the tone.
+    # Stopping restores all three as they were; leaving CW stops it, and
+    # the filter is then the new mode's, not restored.
+    DECODE_FILTER_HZ = 250
+
+    def _set_decoding(self, on, restore_filter=True):
+        if on == self._decoding:
+            return
+        if on:
+            if not self.controller.set_decoder(True):
+                print(f"[sdr] {self.profile.name}'s CW decoder could not be started")
+                return
+            self._decode_saved = {
+                "filter": self.controller.filter_width,
+                "agc": self.dsp_on("agc") if self._switched("agc") else None,
+                "cw": self.dsp_on("cw") if self._switched("cw") else None,
+            }
+            width = self.controller.filter_width
+            if FILTER in self.capabilities and (not width or width > self.DECODE_FILTER_HZ):
+                self.set_filter(self.DECODE_FILTER_HZ)
+            if self._decode_saved["agc"]:
+                self.controller.set_dsp("agc", False)
+            if self._decode_saved["cw"] is False:
+                self.controller.set_dsp("cw", True)
+            self._decoding = True
+            print(f"[sdr] decoding CW through {self.profile.name}")
+        else:
+            self.controller.set_decoder(False)
+            saved, self._decode_saved = self._decode_saved or {}, None
+            self._decoding = False
+            if restore_filter and saved.get("filter"):
+                self.set_filter(saved["filter"])
+            if saved.get("agc"):
+                self.controller.set_dsp("agc", True)
+            if saved.get("cw") is False:
+                self.controller.set_dsp("cw", False)
+        self._audio_changed()
+
+    def _decoded_text(self, text):
+        if self._decoding and callable(self.on_decoded):
+            try:
+                self.on_decoded(text)
+            except Exception as err:
+                print(f"[sdr] decoder callback failed: {err}")
+
+    def dsp_actions(self, function):
+        """A function's own buttons: [(label, action, enabled)] -- Gqrx's A and R."""
+        if self._threshold_squelch(function):
+            return [("A", self.auto_squelch, self.can_auto_squelch),
+                    ("R", self.reset_squelch, True)]
+        return []
+
+    # The threshold squelch's knob is in DIAL UNITS like every other: whole
+    # numbers, each one squelch_step of the program's own units -- 1 dB for
+    # Gqrx; a hundredth of the range for one as narrow as rigctld's 0 to 1.
+    def _squelch_step(self):
+        bottom, top = self.squelch_range()
+        return 1.0 if top - bottom >= 10 else (top - bottom) / 100.0
+
+    def _squelch_now(self):
+        """The threshold asked for and not yet sent, else the SDR's."""
+        pending = getattr(self, "_pending_squelch", None)
+        return pending if pending is not None else self.squelch
 
     def dsp_knob_names(self, function):
         """The adjustments a function's knobs show, in order -- [] without it."""
-        if not self.has_dsp(function):
+        if self._threshold_squelch(function):
+            return [self.THRESHOLD]
+        if not self._switched(function):
             return []
         return self.controller.dsp_knob_names(function)
 
     def dsp_info(self, function, name):
-        """Caption, kind, range and labels for an adjustment's knob."""
-        return self.controller.dsp_info(function, name) if self.has_dsp(function) else None
+        """Caption, kind, range, labels and unit for an adjustment's knob."""
+        if self._threshold_squelch(function):
+            low, high = self.dsp_range(function, name)
+            return {"caption": "Squelch", "kind": "range", "low": low, "high": high,
+                    "labels": None, "short": None, "unit": self.profile.squelch_unit}
+        return self.controller.dsp_info(function, name) if self._switched(function) else None
 
     def has_dsp_setting(self, function, name):
-        return (self.has_dsp(function)
+        if self._threshold_squelch(function):
+            return name == self.THRESHOLD and self.squelch is not None
+        return (self._switched(function)
                 and name in getattr(self.controller, "dsp_settings", {}).get(function, {}))
 
     def dsp_setting(self, function, name):
         """An adjustment's value in dial units, or None."""
         if not self.has_dsp_setting(function, name):
             return None
+        if self._threshold_squelch(function):
+            return int(round(self._squelch_now() / self._squelch_step()))
         return self.controller.dsp_settings[function][name]
 
     def dsp_range(self, function, name):
+        if self._threshold_squelch(function):
+            step = self._squelch_step()
+            bottom, top = self.squelch_range()
+            return int(round(bottom / step)), int(round(top / step))
         return self.controller.dsp_range(function, name)
 
     def dsp_adjustable(self, function, name):
         """Whether an adjustment can be set from here, or only shown -- SSB NR's scheme."""
+        if self._threshold_squelch(function):
+            return self.has_dsp_setting(function, name)
         return (self.has_dsp_setting(function, name)
                 and self.controller.dsp_adjustable(function, name))
 
     def dsp_setting_text(self, function, name, value):
-        """As the SDR's dial shows it: "128 ms", "-100 dB", "Medium", "20"."""
+        """As the SDR's dial shows it: "128 ms", "-100 dB", "Medium", "-95 dBFS"."""
+        if self._threshold_squelch(function):
+            return self.squelch_text(value * self._squelch_step())
         return self.controller.dsp_setting_text(function, name, value)
 
     def set_dsp_setting(self, function, name, value):
         """Sets an adjustment -- once its knob stops moving."""
+        if self._threshold_squelch(function):
+            self.set_squelch(float(value) * self._squelch_step())
+            return
         key = (function, name)
         pending = self.__dict__.setdefault("_pending_dsp", {})
         timers = self.__dict__.setdefault("_dsp_timers", {})
@@ -943,6 +1133,33 @@ class SDR_Link:
             return ""
         return f"{self.controller.snap_rf_gain(db):.1f} dB"
 
+    def rf_gain_blocked(self):
+        """Why the RF gain cannot be set just now -- or None if it can."""
+        if not self.has_rf_gain:
+            return (f"not available with {self.profile.name}" if self.connected
+                    else "needs a connected SDR")
+        if self.rf_gain_auto:
+            return f"set by the hardware's AGC -- switch it off in {self.profile.name}"
+        return None
+
+    def rf_gain_toward(self, shown, value):
+        """
+        The gain a knob move reaches: the move read as a DIRECTION, to the
+        hardware's next real step that way, however far apart they are -- an
+        RTL dongle's run 0, 0.9, 1.4, 2.7 ... 49.6 dB. None if it goes nowhere.
+        """
+        steps = self.rf_gain_steps()
+        if not steps:
+            return None
+        shown = shown or 0.0
+        if value > shown:
+            above = [step for step in steps if step > shown + 1e-6]
+            return min(above) if above else max(steps)
+        if value < shown:
+            below = [step for step in steps if step < shown - 1e-6]
+            return max(below) if below else min(steps)
+        return None
+
     def set_rf_gain(self, db):
         """Sets the RF gain -- once the slider stops moving."""
         self._pending_rf_gain = float(db)
@@ -1023,19 +1240,23 @@ class SDR_Link:
         # With the SDR's receiver stopped, the signal reads -200 dBFS and the
         # sum lands below the range; held at the bottom, which is "open".
         bottom, top = self.squelch_range()
+        self._pending_squelch = None
         self.controller.set_level("SQL", round(max(bottom, min(top, level)), 1))
         self._audio_changed()
 
     def reset_squelch(self):
         """Opens the squelch fully -- Gqrx's R: the bottom of its range."""
         if self.has_squelch:
+            self._pending_squelch = None
             self.controller.set_level("SQL", self.squelch_range()[0])
             self._audio_changed()
 
     def _apply_squelch(self):
         self._squelch_timer = None
-        if self.has_squelch and getattr(self, "_pending_squelch", None) is not None:
-            self.controller.set_level("SQL", round(self._pending_squelch, 1))
+        pending, self._pending_squelch = getattr(self, "_pending_squelch", None), None
+        if self.has_squelch and pending is not None:
+            # To a thousandth: a rigctld's squelch runs 0 to 1.
+            self.controller.set_level("SQL", round(pending, 3))
 
     # -- signal strength ------------------------------------------------------
     # WHERE S9 IS, in dBFS. Not derivable: dBFS is "below the loudest signal
@@ -1064,6 +1285,11 @@ class SDR_Link:
         if level is None or level <= self.NO_READING_DBFS:
             return None
         return level
+
+    def signal_text(self):
+        """The signal as a figure with its unit -- "-73 dBFS" -- or "" without one."""
+        dbfs = self.signal_dbfs
+        return f"{dbfs:.0f} dBFS" if dbfs is not None else ""
 
     def s_units(self):
         """

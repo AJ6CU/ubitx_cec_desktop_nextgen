@@ -439,7 +439,7 @@ What a program IS -- its port, where it installs, what it calls its modes,
 what it cannot do, how it must be shut down -- is DATA, and lives in
 `sdr_programs.json`. None of it is logic, all of it goes stale when somebody
 else ships a release, and adding a program should not mean editing Python.
-An operator's own entries, in `~/.ubitx_cec_desktop_sdr_programs.json`, are
+An operator's own entries, in `~/.ubitx_cec_desktop/sdr_programs.json`, are
 merged over the shipped ones ENTRY BY ENTRY -- not file over file, which is
 how the theme works and what `Theming.md` warns about: a copy made last year
 hides every block added since.
@@ -451,20 +451,48 @@ channels by index, needs a discovery step to find the right demodulator, and
 tunes a PAIR, the device's centre plus the channel's offset. The entry says
 WHICH transport; it never describes one.
 
-WHAT A CHANNEL CAN DO IS DATA TOO, inside the transport. SDRangel's two SSB
-demodulators -- the SSB demodulator and the WDSP receiver -- have different
-functions under different field names, so `rest_sdr.CHANNEL_DSP` describes
-each: every function's switch, and every adjustment's field, range, knob kind
-(range, choice or flywheel) and conversion. The Operate tab's listening aids
-are BUILT FROM THAT -- a lamp per function, pressed while on and switched by
-a click, and beside it an arrow opening a small non-modal pop-up
-(`AidPopup`) with a switch and the knobs the channel describes, in that
-SDR's own terms -- so neither `SDR_Link` nor the window knows any channel's
-fields, and a third demodulator is a table entry. A pop-up closes on Escape
-or a click elsewhere unless pinned; pinned ones can be dragged, several at
-once, and reopen where they were on the next start. Controls are registered
-only while their pop-up is open, so everything that updates them simply
-finds nothing for a closed one.
+WHAT A PROGRAM'S CONTROLS ARE IS DATA TOO, in `sdr_controls.json` (read by
+`sdr_controls.py`, merged over by `~/.ubitx_cec_desktop/sdr_controls.json`
+function by function). SDRangel's two SSB demodulators -- the SSB
+demodulator and the WDSP receiver -- have different functions under
+different field names, so the file describes each: every function's switch,
+and every adjustment's field, range, knob kind (range, choice or flywheel),
+labels and unit; and each device's RF gain steps. Where a dial position is
+stored as something other than a whole number -- WDSP's slope in tenths, the
+SSB demodulator's alpha -- the file NAMES a conversion ("convert": "tenths")
+that is written once in `sdr_controls.py`, so the file never has to be a
+programming language.
+
+THREE LAYERS, AND ONLY THE MIDDLE ONE IS ASKED. The window speaks the rig's
+vocabulary and the application's: LSB, USB, CWL, CWU, wider, narrower, and
+seven listening aids by name -- agc, nr, notch, squelch, nb, cw, decode. It never
+names an SDR, never holds an SDR's number, and never reaches a transport.
+`SDR_Link` translates: modes through the program's entry in
+`sdr_programs.json`, and every listening aid through ONE description --
+`has_dsp`, `dsp_blocked` (why not now, e.g. "off in CW"), `dsp_switchable`,
+`dsp_on`, `toggle_dsp` (what clicking the lamp does), the knobs
+(`dsp_knob_names`, `dsp_info`, `dsp_range`, `dsp_setting`,
+`dsp_setting_text`, `set_dsp_setting`) and `dsp_actions` (buttons of its
+own). A switched function is described by the transport from the controls
+file; a squelch with no switch (Gqrx's, a rigctld's -- fully open is its
+"off") is described by the link from the program's entry, as one threshold
+knob in the program's own units with A and R as its actions. RF gain the
+same way: `rf_gain_blocked` gives the reason, `rf_gain_toward` which of the
+hardware's steps a knob move reaches. Values arrive with their units
+(`signal_text`, `rf_gain_text`, `dsp_setting_text`). The transports drive
+the programs.
+
+The Operate tab's listening aids are BUILT FROM THAT DESCRIPTION -- a lamp
+per function, pressed while on and switched by a click, and beside it an
+arrow opening a small non-modal pop-up (`AidPopup`) with the function's
+switch if it has one, its knobs, its own buttons, and a note saying why it
+cannot be used when it cannot -- in that SDR's own terms. A third
+demodulator is an entry in the controls file; a new program is an entry in
+the programs file, plus a transport only if it speaks a new protocol. A
+pop-up closes on Escape or a click elsewhere unless pinned; pinned ones can
+be dragged, several at once, and reopen where they were on the next start.
+Controls are registered only while their pop-up is open, so everything that
+updates them simply finds nothing for a closed one.
 The WDSP receiver is preferred when SDRangel has both.
 
 THE S-METER IS A FALLBACK, never a requirement: a Channel Power channel when
@@ -543,14 +571,19 @@ honestly rather than taking a liberty.
 <a name="own-data"></a>
 ### The application's own data
 
+**Its files, in one folder: `~/.ubitx_cec_desktop/`** (see `app_paths.py`).
+The settings (`settings.json`), the channel sets (`channels.json`), the
+window's geometry, the pinned pop-ups, and the operator's own programs and
+controls files -- the same folder on every platform, the operator's choice.
+Files shipped with the application stay beside the code.
+
 Not everything belongs to the radio. Two pieces sit beside the model rather
 than in it, because the model's rule is that it holds what the hardware
 reported.
 
 **`ChannelSets` -- the operator's channel sets.** Named lists of channels,
 any length, kept in their own file in the user's home,
-`~/.ubitx_cec_desktop_channels.json`, beside the settings file and found by
-the same rule. JSON because the sets are nested lists. The file is written
+`~/.ubitx_cec_desktop/channels.json`, beside the settings file. JSON because the sets are nested lists. The file is written
 whole or not at all -- a temporary file swapped into place -- and a damaged
 one is kept aside, never overwritten. It also holds the scan settings.
 

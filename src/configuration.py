@@ -6,6 +6,7 @@ import threading
 import tkinter as tk
 from tkinter import messagebox
 import globalvars as gv
+from app_paths import config_path
 from defaultubitx_cec_desktop import default_config_data
 
 
@@ -18,8 +19,9 @@ class ConfigurationManager:
                 Dynamically targets a hidden user-space config file in the user's home directory.
                 """
         self.observers = {}
-        # Targets: /home/username/.ubitx_cec_desktop.ini safely across Linux, Windows, and Mac
-        self.configuration_file = os.path.expanduser(os.path.join("~", ".ubitx_cec_desktop.ini"))
+        # In the application's folder, ~/.ubitx_cec_desktop/settings.json --
+        # see app_paths.
+        self.configuration_file = config_path("settings.json")
         self.config_data = {}
         self.lock = threading.Lock()  # Thread-safe wrapper preventing race conditions
         self.loadConfig()
