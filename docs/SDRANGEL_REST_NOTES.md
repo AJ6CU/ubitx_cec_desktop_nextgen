@@ -232,3 +232,160 @@ sends still apply while the window is stuck. Looks like the window still
 waiting for the release of the right click that opened the dialog (the
 release went to the dialog). Reported separately from the dnrScheme bug.
 
+### WDSP receiver: reading its report CRASHES SDRangel
+
+`GET /sdrangel/deviceset/0/channel/1/report` on a WDSP receiver (`WDSPRx`)
+channel crashed SDRangel outright, losing its unsaved configuration -- seen on
+7.27.2-1315-gc43757c88, 2026-09-27. The same read on the SSB demodulator is
+safe; this application makes it five times a second for the S-meter.
+
+So a WDSPRx channel must NOT have its report polled until this is understood:
+the signal level has to come from somewhere else, or the crash has to be
+fixed upstream. Not yet reported to SDRangel.
+
+### WDSP receiver: its settings (first capture, 2026-09-27)
+
+`GET .../channel/1/settings` -- safe -- answers a `WDSPRxSettings` block,
+`channelType` "WDSPRx". Found by the same "...Settings" key rule as the SSB
+demodulator. Fields by function (values as captured, defaults untouched):
+
+    passband   rfBandwidth 3000, lowCutoff 300, spanLog2 3, dsb 0 --
+               SAME NAMES as the SSB demodulator (sign = sideband, per readme)
+    mode       demod 0 (SSB; readme order SSB, AM, SAM, FM -- unconfirmed)
+    tuning     inputFrequencyOffset 0; rit 0, ritFrequency 0
+    audio      volume 25.118864 (= 14 dB on 10 log10, as SSBDemod), audioMute 0
+    AGC        agc 0, agcMode 2, agcGain 80 ("top"), agcSlope 35,
+               agcHangThreshold 0
+    NR         dnr 0, nrScheme 0, nr2Gain 2, nr2NPE 0, nrPosition 0,
+               nr2ArtifactReduction 1
+    NB         dnb 0, nbScheme 0, nb2Mode 0, nbSlewTime, nbLeadTime,
+               nbLagTime, nbAvgTime 50, nbThreshold 30
+    notch      anf 0 -- a switch only
+    squelch    squelch 0, squelchMode 0, squelchThreshold 3, ssqlTauMute,
+               ssqlTauUnmute, amsqMaxTail 1.5
+    CW peak    cwPeaking 0, cwPeakFrequency 600, cwBandwidth 100, cwGain 2
+    also       equalizer/eqF/eqG, fm* fields, amFadeLevel, profileIndex
+
+In the device-set listing it is `"id": "WDSPRx"` beside `"SSBDemod"`, each
+with its own `index` and `deltaFrequency` -- no signal level there, so the
+listing is no substitute for the report. Discovery (`_locate`) takes the FIRST
+receiving channel, so with the SSB demodulator at index 0 the application
+keeps driving it; supporting WDSP means choosing between the two by `id`.
+
+PATCH APPLIES -- unlike the SSB demodulator's dnrScheme. On the station
+(2026-09-27), one PATCH of agcMode 3, nrScheme 1, squelchMode 2 and anf 1
+read back exactly as sent, and the WDSP window followed: AGC Fast, NR2,
+squelch FM, ANF on. So the numbering follows the dialogs' order:
+
+    agcMode      0 Long, 1 Slow, 2 Medium, 3 Fast    (0 and 3 confirmed)
+    nrScheme     0 NR (LMS), 1 NR2 (spectral)        (1 confirmed)
+    squelchMode  0 Voice, 1 AM, 2 FM                 (1 and 2 confirmed)
+
+Confirmed from both directions: set in the dialogs (Long, NR2, AM) and read
+back as 0, 1, 1; sent by PATCH (3, 1, 2) and shown in the dialogs as Fast,
+NR2, FM. The rest follow from the dialogs' order.
+
+Dial ranges, read off on the station:
+
+    agcGain            -20 .. 120      (captured 80)
+    agcSlope           dial 0 .. 20, STORED IN TENTHS: 0 .. 200 (dial 10
+                                        read back 100, on the station; the
+                                        captured 35 is 3.5 on the dial)
+    agcHangThreshold   0 .. 100        (captured 0)
+    squelchThreshold   0 .. 100        (captured 3 -- a percentage)
+
+Still wanted: a signal-level source that is not the report.
+
+### Why the WDSP report crashes -- and the Channel Power workaround
+
+THE CAUSE, from SDRangel's source (plugins/channelrx/wdsprx/wdsprx.cpp, still
+so on master, 2026-09-27): webapiReportGet() creates a WDSPRx report object,
+but webapiFormatChannelReport() writes the power, squelch and sample rates
+into response.getSsbDemodReport() -- the SSB DEMODULATOR's report, never
+created for this channel. A null pointer; the first write crashes SDRangel.
+A copy-paste slip: getSsbDemodReport should be getWdspRxReport on each line.
+The measurement itself (getMagSqLevels) is there. To report upstream.
+
+THE WORKAROUND: SDRangel's Channel Power channel (`ChannelPower`), which only
+measures power, and whose report code is written correctly. Added as channel
+2 on the station; both reads safe:
+
+    GET .../channel/2/report ->
+        {"ChannelPowerReport": {"channelPowerDB": -76.5, "channelPowerMaxDB":
+         -61.7, "channelPowerMinDB": -150, "channelPowerPulseDB": -150,
+         "channelSampleRate": 64000}, "channelType": "ChannelPower"}
+
+    GET .../channel/2/settings -> "ChannelPowerSettings":
+        inputFrequencyOffset 0, rfBandwidth 10000, frequencyMode 0 (offset,
+        "delta f"), frequency 0, averagePeriodUS 100000, pulseThreshold -50
+
+`channelPowerDB` in a block ending "Report" -- the same shape the SSB
+demodulator's report has, so the application's existing report reader takes
+it unchanged. To measure what is heard, it must cover the WDSP passband: its
+bandwidth is CENTRED on its offset, so offset = WDSP offset + sign x
+(low cut + high cut) / 2 and bandwidth = high cut - low cut, sign by
+sideband. Kept in step whenever the WDSP receiver is tuned or its filter
+changes. Unneeded once the WDSP report is fixed.
+
+### Built on this (2026-09-27)
+
+rest_sdr.py now holds a DSP table per channel type (`CHANNEL_DSP`): each
+function's switch field and each adjustment's field, range, knob kind and
+conversion, all from the captures and dial ranges above. Discovery prefers
+`WDSPRx` over `SSBDemod` (`DEMODULATOR_PREFERENCE`), never picks
+`ChannelPower` as the demodulator, and never reads a report of a channel in
+`REPORT_UNSAFE`. In CW on the WDSP receiver it sets rit/ritFrequency (minus
+the pitch in CWU, plus in CWL), squelchMode 1, anf 0, cwPeakFrequency (the
+rig's tone, 300-1000) and demod 0; in SSB, rit 0 and squelchMode 0. Channel
+Power is kept at offset + RIT + sign x (low + high) / 2, rfBandwidth = high
+- low, frequencyMode 0.
+
+WDSP SPAN (station, 2026-09-27): its SSB span is 24000 / 2^spanLog2 -- HALF
+the SSB demodulator's -- so 3 kHz at spanLog2 3: a high cut of 3400 sent was
+held at 3000. rest_sdr.SPAN_BASE_BY_CHANNEL. Widen the span in SDRangel's
+WDSP window for a wider SSB filter.
+
+## WDSP receiver: the passband is write-only over REST (2026-09-27)
+
+SDRangel 7.27.2-1315. USB <-> LSB never reached the WDSP receiver: every
+read-back showed rfBandwidth 3000, lowCutoff 600, whatever was sent or set at
+SDRangel's own knobs -- even with LSB dragged in its window, where only the
+spectrum's "usb" flag changed.
+
+The debug log shows why. A PATCH is built from the channel's STORED settings
+plus the fields sent, and the stored copy's cutoffs never take a change --
+"WDSPRx::applySettings" logs an empty string for lowCutoff and rfBandwidth
+patches. So, one field per PATCH:
+
+    PATCH rfBandwidth -3000  ->  WDSPRxGUI::applyBandwidths  bw: -30  lw: 6
+    PATCH lowCutoff    -600  ->  WDSPRxGUI::applyBandwidths  bw:  30  lw: -6
+
+each undoing the last. A positive passband (LSB to USB) seemed to work only
+because the stale copy was USB already.
+
+Built on this (rest_sdr.STALE_PASSBAND_CHANNELS):
+- both cutoffs in ONE PATCH;
+- no read-back check, and the poll reads no passband from a WDSP channel;
+- every other PATCH to it carries the passband last written, or SDRangel's
+  window reverts to the stale one on any AGC, RIT or volume change;
+- SDRangel's own filter knobs cannot be followed.
+
+The same log shows the WDSP far cut allowed to 6000 Hz at spanLog2 3
+(bwMax 60): its span base is 48 kHz, like the SSB demodulator's. The earlier
+"3400 sent, 3000 held" was this stale read-back, not a limit.
+
+Present in the latest build (7.27.2-1315, checked 2026-09-27). Report text:
+sdrangel_wdsp_cutoff_report.txt; the check to run after each update, and
+what to remove when it passes, are in TODO.md under "Waiting on SDRangel".
+
+## WDSP receiver: changing sideband (2026-09-27) -- SUPERSEDED by the above
+
+At the station, USB <-> LSB left the WDSP receiver's high cut -- "far cut" in
+its dialog -- where it was. With high cut first, low cut second, the first
+PATCH asks for a passband with its edges on opposite sides of zero (-2900
+against a low cut still at +300), which SDRangel corrects. A change of side
+now goes through a low cut of 0: lowCutoff 0, then rfBandwidth, then
+lowCutoff -- every state in between has both edges on one side. Tested
+against a stand-in that puts the far cut back and clamps the near cut to 0,
+which reproduces the fault with the old order. *To confirm at the station.*
+

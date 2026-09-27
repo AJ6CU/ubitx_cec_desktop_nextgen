@@ -1,0 +1,68 @@
+WDSP Receiver: filter cutoffs cannot be set through the REST API
+
+SDRangel version: 7.27.2-1315-gc43757c88 (Qt 6.11.1, arm64, macOS 26.6.2), GUI build
+
+
+SUMMARY
+
+Changing the WDSP Receiver's filter over the REST API does not stick, and
+reading the settings back always returns the cutoffs the channel was loaded
+with. PATCHing rfBandwidth ("far cut") and lowCutoff ("near cut") one at a
+time makes each request undo the other, so for example LSB can never be
+selected. Other WDSP Receiver fields (agc, anf, rit, ritFrequency, volume,
+squelch, ...) change as expected through the same kind of request.
+
+
+TO REPRODUCE
+
+1. Open a device set with a WDSP Receiver as channel 1, set to USB with far
+   cut 3.0k and near cut 0.6k.
+
+2. PATCH the far cut negative (LSB), then the near cut:
+
+   U=http://127.0.0.1:8091/sdrangel/deviceset/0/channel/1/settings
+   curl -s -X PATCH -H "Content-Type: application/json" -d '{"channelType":"WDSPRx","direction":0,"WDSPRxSettings":{"rfBandwidth":-3000}}' $U
+   curl -s -X PATCH -H "Content-Type: application/json" -d '{"channelType":"WDSPRx","direction":0,"WDSPRxSettings":{"lowCutoff":-600}}' $U
+
+3. Read back:
+
+   curl -s $U | python3 -m json.tool | grep -E 'rfBandwidth|lowCutoff'
+
+
+EXPECTED
+
+rfBandwidth -3000, lowCutoff -600, and the window showing LSB.
+
+
+ACTUAL
+
+rfBandwidth 3000, lowCutoff 600, and the window still USB. Also: after
+dragging the far cut to LSB in the window, a GET still returns 3000 and 600
+(only spectrumConfig.usb changes to 0).
+
+
+LOG (debug level, during step 2)
+
+WebAPIRequestMapper::getChannelSettings: channelSettingsKey: "WDSPRxSettings" channelSettingsKeys: QList("rfBandwidth")
+WDSPRx::applySettings: ""
+WDSPRxGUI::applyBandwidths: s2max: 5 dsb: false spanLog2: 3 m_spectrumRate: 6000 bw: -30 lw: 6 bwMax: 60 tickInterval: 5
+WebAPIRequestMapper::getChannelSettings: channelSettingsKey: "WDSPRxSettings" channelSettingsKeys: QList("lowCutoff")
+WDSPRx::applySettings: ""
+WDSPRxGUI::applyBandwidths: s2max: 5 dsb: false spanLog2: 3 m_spectrumRate: 6000 bw: 30 lw: -6 bwMax: 60 tickInterval: 5
+
+
+WHAT THE LOG SUGGESTS
+
+Each request's far cut / near cut pair is the value sent plus the OTHER
+value as originally loaded (-30 with 6, then 30 with -6), and
+applySettings logs nothing for either key. It looks as if the channel's
+stored settings never take the new cutoffs, so each PATCH (built from the
+stored settings) and each GET return the originals. This is the latest
+build; I have not traced where in the code the change is lost.
+
+Sending both cutoffs in one PATCH works as a workaround.
+
+
+QUESTION
+
+Is this known, or fixed in a later build?

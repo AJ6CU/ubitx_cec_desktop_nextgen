@@ -451,6 +451,29 @@ channels by index, needs a discovery step to find the right demodulator, and
 tunes a PAIR, the device's centre plus the channel's offset. The entry says
 WHICH transport; it never describes one.
 
+WHAT A CHANNEL CAN DO IS DATA TOO, inside the transport. SDRangel's two SSB
+demodulators -- the SSB demodulator and the WDSP receiver -- have different
+functions under different field names, so `rest_sdr.CHANNEL_DSP` describes
+each: every function's switch, and every adjustment's field, range, knob kind
+(range, choice or flywheel) and conversion. The Operate tab's listening aids
+are BUILT FROM THAT -- a lamp per function, pressed while on and switched by
+a click, and beside it an arrow opening a small non-modal pop-up
+(`AidPopup`) with a switch and the knobs the channel describes, in that
+SDR's own terms -- so neither `SDR_Link` nor the window knows any channel's
+fields, and a third demodulator is a table entry. A pop-up closes on Escape
+or a click elsewhere unless pinned; pinned ones can be dragged, several at
+once, and reopen where they were on the next start. Controls are registered
+only while their pop-up is open, so everything that updates them simply
+finds nothing for a closed one.
+The WDSP receiver is preferred when SDRangel has both.
+
+THE S-METER IS A FALLBACK, never a requirement: a Channel Power channel when
+there is one, kept on the passband by the transport, for either demodulator
+-- one source, one calibration; else the demodulator's own report; else none.
+Never the WDSP receiver's report: its code writes into the wrong report
+object and crashes SDRangel. A missing channel costs what that channel
+provides, never the connection.
+
 One entry per WAY OF DRIVING a program: a program that gains a second
 interface gets a second entry, never a flag. SDRangel had two, REST and
 rigctl, and the rigctl one was removed -- its server answers frequency and

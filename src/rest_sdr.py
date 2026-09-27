@@ -8,15 +8,21 @@ needs to know which one it has. See SDRANGEL_REST_NOTES.md for what was
 established by hand against a running SDRangel, and why REST rather than
 SDRangel's own rigctl server.
 
-FREQUENCY, SIGNAL, VOLUME, MUTE, AND STARTING AND STOPPING THE DEVICE, FOR
-NOW. Every method SDR_Link calls is here; what is not yet done -- mode and
-filter, squelch -- answers "cannot", and the interface greys it out, as it
-does for SDR++.
+WHAT IT DRIVES: frequency, mode and filter (the demodulator's passband),
+volume and mute, the device's RF gain and starting and stopping, and the
+demodulator's own DSP functions -- see CHANNEL_DSP. Each is offered only
+where the channel has it; the interface greys out what is not.
 
 WHAT IT TALKS TO. SDRangel has device sets, each with any number of
-channels. Discovery takes the FIRST RECEIVING device set that has a
-channel, and the first receiving channel in it -- and says so. With none, it
+channels. Discovery takes the first receiving device set with a demodulator
+in it, and in it the WDSP receiver where there is one, else the SSB
+demodulator -- see DEMODULATOR_PREFERENCE -- and says so. With none, it
 refuses to connect and says what to add.
+
+THE S-METER comes from a Channel Power channel in the same device set, kept
+on the passband, where there is one; else the demodulator's own report --
+never the WDSP receiver's, which crashes SDRangel (REPORT_UNSAFE); else
+none. See discover() and _sync_meter().
 
 TUNING IS A PAIR. What is heard is the device's centre frequency plus the
 channel's offset from it. A move that stays well inside the sampled band
@@ -40,7 +46,8 @@ import urllib.error
 import urllib.request
 
 import globalvars as gv
-from sdr_programs import FREQUENCY, SIGNAL, VOLUME, MUTE, MODE, FILTER, AGC, NR, RF_GAIN
+from sdr_programs import (FREQUENCY, SIGNAL, VOLUME, MUTE, MODE, FILTER, AGC, NR,
+                          NOTCH, NB, CW_PEAK, SQUELCH_SWITCH, RF_GAIN, BANDWIDTH)
 
 POLL_MS = 200
 
@@ -70,6 +77,13 @@ RETUNE_OFFSET_SHARE = 0.125
 # 11,000,115 reads "11000" and the 115 Hz looks lost; a centre on a whole kHz
 # reads true, and centre plus offset still equals the rig exactly.
 CENTRE_ROUNDING_HZ = 1000
+
+# THE SAMPLED BAND'S WIDTH is the device's sample rate over 2^log2Decim --
+# what SDRangel's spectrum and waterfall show. Never narrower than this: the
+# demodulators run at 48 kHz, and a narrower band starves them.
+MIN_BANDWIDTH_HZ = 48000
+# How far log2Decim goes -- 2^6, the most SDRangel's devices offer.
+MAX_LOG2_DECIMATION = 6
 
 # How long after connecting the RIG LEADS whatever SDRangel says. SDRangel
 # answers over REST before it has finished applying its saved settings, and
@@ -113,59 +127,147 @@ AUDIO_POLL_EVERY = 5
 # and the passband is kept inside it here: a wider request stops at the span.
 SPAN_BASE_HZ = 48000
 
-# THE DEMODULATOR'S DSP FUNCTIONS -- AGC and noise reduction -- each a switch
-# and its adjustments, by the application's name for each: (field, lowest,
-# highest) in the units SDRangel's dials show. Ranges read off the station.
+# THE SPAN'S BASE, by channel. FIX: the WDSP receiver's is the SAME as the SSB
+# demodulator's, 48 kHz / 2**spanLog2. It was taken as half -- "3400 sent,
+# 3000 held at spanLog2 3" -- but that 3000 was a STALE READ-BACK (see
+# STALE_PASSBAND_CHANNELS), not a limit: SDRangel's own log shows the WDSP
+# window allowing a far cut to 6000 Hz at spanLog2 3 (bwMax 60).
+SPAN_BASE_BY_CHANNEL = {"SSBDemod": 48000, "WDSPRx": 48000}
+
+# THE WDSP RECEIVER'S PASSBAND IS WRITE-ONLY over REST, in SDRangel
+# 7.27.2-1315 (found 2026-09-27 from its debug log). A PATCH is built from
+# the channel's STORED settings plus the fields sent -- and the stored copy's
+# cutoffs never take a change: "WDSPRx::applySettings" logs nothing for
+# lowCutoff or highCutoff, and every GET reads back the cutoffs the channel
+# was loaded with. So:
+#   - one field at a time undoes the other: rfBandwidth -3000 went out with
+#     the stale low cut +600, then lowCutoff -600 with the stale far cut
+#     +3000 -- the window showed bw -30 lw 6, then bw 30 lw -6, and the
+#     sideband never changed. Both cutoffs go in ONE PATCH.
+#   - a read-back says nothing: it is not checked, and the poll does not
+#     read a passband from it (it would report a mode change nobody made).
+#   - EVERY other PATCH -- AGC, RIT, volume -- would carry the stale cutoffs
+#     to SDRangel's window, which then showed the old passband while the
+#     receiver used the new one. The passband last written rides along with
+#     each one, so the window stays true.
+# Changes made at SDRangel's own filter knobs cannot be seen, for the same
+# reason. Worth reporting to SDRangel; if a later build fixes it, this set
+# can be emptied.
+STALE_PASSBAND_CHANNELS = {"WDSPRx"}
+
+# THE DEMODULATOR'S DSP FUNCTIONS, PER CHANNEL TYPE. Each function is a switch
+# and its adjustments; each adjustment says what the knob for it is, so the
+# interface builds its frames from this table rather than knowing any channel.
 #
-#   AGC: the time constant is stored as a power of two -- agcTimeLog2 7 is
-#   128 ms, the dial 16-2048 ms. Threshold in dB; the gate as the dial shows.
-#   NR: the scheme picks which of avg, sigma and peaks applies -- 0 Average,
-#   1 Avg Std Dev, 2 Peaks (all three confirmed on the station).
-#   Alpha is SMOOTHING, stored as 1 - 10^(-n/10) for dial position n (0-40;
-#   0 is none, stored 0): the 0.2056717... captured is exactly n = 1. See
-#   _to_stored / _from_stored.
-DSP_FUNCTIONS = {
-    "agc": {
-        "switch": "agc", "capability": AGC,
-        "settings": {
-            "time": ("agcTimeLog2", 4, 11),
-            "threshold": ("agcPowerThreshold", -119, 0),
-            "gate": ("agcThresholdGate", 0, 500),
+# An adjustment is held in DIAL UNITS -- the whole number the operator reads,
+# or a choice's index -- and converted at this edge by `store` and `load`.
+# Its `kind` is the knob: "range" (end stops, labelled with low and high),
+# "choice" (a selector, one position per label), or "step" (a flywheel, for
+# a value whose stored number is not what is read -- a power of two).
+# Ranges read off the station, or from SDRangel's own dialog definitions.
+#
+# SSBDemod: the AGC time constant is stored as a power of two (agcTimeLog2 7
+# is 128 ms). NR's scheme picks which of avg, sigma and peaks applies, and is
+# READ-ONLY: dnrScheme is accepted over REST and not applied (SDRangel's log
+# shows why -- see the notes). Alpha is smoothing, stored as 1 - 10^(-n/10)
+# for dial position n: the 0.2056717... captured is exactly n = 1.
+#
+# WDSPRx: PATCH applies to every field, confirmed on the station. agcSlope is
+# stored in TENTHS of a dB (dial 10 read back 100) and held here in whole dB;
+# cwGain is a float stored as shown, held here in whole units. Numbering by
+# the dialogs' order, 0 Long and 3 Fast, NR2 1, AM 1 and FM 2 confirmed.
+
+def _int(value):
+    return int(round(float(value)))
+
+
+def _alpha_store(n):
+    return 1.0 - 10 ** (-float(n) / 10.0)
+
+
+def _alpha_load(stored):
+    return _int(-10.0 * math.log10(max(1.0 - float(stored), 1e-9)))
+
+
+def _setting(field, caption, low, high, kind="range", unit="", labels=None,
+             short=None, store=None, load=None, read_only=False, text=None):
+    """One adjustment -- see the note above."""
+    return {"field": field, "caption": caption, "low": low, "high": high,
+            "kind": kind, "unit": unit, "labels": labels, "short": short or labels,
+            "store": store or _int, "load": load or _int,
+            "read_only": read_only, "text": text}
+
+
+CHANNEL_DSP = {
+    "SSBDemod": {
+        "agc": {"switch": "agc", "capability": AGC, "settings": {
+            "time": _setting("agcTimeLog2", "Time", 4, 11, kind="step",
+                             text=lambda v: f"{2 ** v} ms"),
+            "threshold": _setting("agcPowerThreshold", "Thr", -119, 0, unit="dB"),
+            "gate": _setting("agcThresholdGate", "Gate", 0, 500),
+        }},
+        "nr": {"switch": "dnr", "capability": NR, "settings": {
+            "scheme": _setting("dnrScheme", "Scheme", 0, 2, kind="choice",
+                               labels=("Average", "Std dev", "Peaks"),
+                               short=("Avg", "SD", "Pk"), read_only=True),
+            "avg": _setting("dnrAboveAvgFactor", "Avg\u00d7", 20, 99),
+            "sigma": _setting("dnrSigmaFactor", "Sigma", 2, 16),
+            "peaks": _setting("dnrNbPeaks", "Peaks", 1, 40),
+            "alpha": _setting("dnrAlpha", "Alpha", 0, 40,
+                              store=_alpha_store, load=_alpha_load),
         },
+            # The middle knob is whichever setting the scheme uses.
+            "knobs": lambda held: ["scheme",
+                                   ("avg", "sigma", "peaks")[held.get("scheme", 0)
+                                                            if held.get("scheme", 0) in (0, 1, 2) else 0],
+                                   "alpha"]},
     },
-    "nr": {
-        "switch": "dnr", "capability": NR,
-        "settings": {
-            "scheme": ("dnrScheme", 0, 2),
-            "avg": ("dnrAboveAvgFactor", 20, 99),
-            "sigma": ("dnrSigmaFactor", 2, 16),
-            "peaks": ("dnrNbPeaks", 1, 40),
-            "alpha": ("dnrAlpha", 0, 40),       # FIX: from 0 -- no smoothing; the dial showed 0
-        },
+    "WDSPRx": {
+        "agc": {"switch": "agc", "capability": AGC, "settings": {
+            "mode": _setting("agcMode", "Mode", 0, 3, kind="choice",
+                             labels=("Long", "Slow", "Medium", "Fast"),
+                             short=("L", "S", "M", "F")),
+            "top": _setting("agcGain", "Top", -20, 120, unit="dB"),
+            "slope": _setting("agcSlope", "Slope", 0, 20, unit="dB",
+                              store=lambda v: _int(v) * 10,
+                              load=lambda stored: _int(float(stored) / 10.0)),
+            "hang": _setting("agcHangThreshold", "Hang", 0, 100),
+        }},
+        "nr": {"switch": "dnr", "capability": NR, "settings": {
+            "scheme": _setting("nrScheme", "Scheme", 0, 1, kind="choice",
+                               labels=("NR", "NR2")),
+        }},
+        "notch": {"switch": "anf", "capability": NOTCH, "settings": {}},
+        "squelch": {"switch": "squelch", "capability": SQUELCH_SWITCH, "settings": {
+            "threshold": _setting("squelchThreshold", "Thr", 0, 100, unit="%"),
+        }},
+        "nb": {"switch": "dnb", "capability": NB, "settings": {
+            "scheme": _setting("nbScheme", "Scheme", 0, 1, kind="choice",
+                               labels=("NB", "NB2")),
+            "threshold": _setting("nbThreshold", "Thr", 2, 50),
+        }},
+        "cw": {"switch": "cwPeaking", "capability": CW_PEAK, "settings": {
+            "bandwidth": _setting("cwBandwidth", "Width", 20, 200, unit="Hz"),
+            "gain": _setting("cwGain", "Gain", 1, 10, store=float),
+        }},
     },
 }
 
+# The demodulators, most wanted first. The WDSP receiver has everything the
+# SSB demodulator has and more; the operator's choice, 2026-09-27.
+DEMODULATOR_PREFERENCE = ("WDSPRx", "SSBDemod")
 
-# READ-ONLY adjustments: read and shown, never sent. dnrScheme is accepted
-# over REST without error and NOT applied -- PATCHed to 2, it read back 0
-# and SDRangel's own NR dialog stayed on Average (on the station). The
-# scheme is chosen in that dialog, and followed here.
-DSP_READ_ONLY = {("nr", "scheme")}
+# The channel that measures power for the S-meter -- see _sync_meter.
+METER_CHANNEL = "ChannelPower"
 
+# Channels whose REPORT MUST NOT BE READ. The WDSP receiver's report code
+# writes into the SSB demodulator's report object, never created for it: a
+# null pointer, and SDRangel crashes (seen on the station, 2026-09-27; the
+# cause read in its source -- see the notes).
+REPORT_UNSAFE = {"WDSPRx"}
 
-def _to_stored(function, name, value):
-    """A dial value as SDRangel stores it."""
-    if (function, name) == ("nr", "alpha"):
-        return 1.0 - 10 ** (-float(value) / 10.0)
-    return int(value)
-
-
-def _from_stored(function, name, stored):
-    """A stored value as the dial shows it, a whole number."""
-    if (function, name) == ("nr", "alpha"):
-        remainder = max(1.0 - float(stored), 1e-9)
-        return int(round(-10.0 * math.log10(remainder)))
-    return int(round(float(stored)))
+# The CW peaking filter's peak frequency, as its dialog allows.
+CW_PEAK_RANGE = (300, 1000)
 
 
 # RF GAIN IS THE DEVICE'S, and each kind names and scales it its own way, so
@@ -198,6 +300,15 @@ CW_PITCH_FALLBACK_HZ = 500
 # kept both: a mismatch then is SDRangel's correction, not the operator's,
 # and is sent again rather than reported to the rig. Tried this many times.
 PASSBAND_RETRIES = 2
+#
+# FIX: CHANGING SIDEBAND GOES THROUGH ZERO. High cut first was not enough
+# for USB <-> LSB on the WDSP receiver: -2900 sent while the low cut was
+# still +300 is a passband with its edges on opposite sides of zero, and the
+# high cut ("far cut" in its dialog) was put back -- it never changed side.
+# So a change of side sends the low cut to 0 first, valid on either side,
+# then the high cut, then the low cut: every state SDRangel sees in between
+# is one it keeps. A retry goes the same way, since a correction may have
+# left the edges on opposite sides.
 
 # SDRangel's low-cut and high-cut sliders move in 100 Hz steps, and what the
 # slider can show is what it keeps: sent 250, it holds 200; sent -750, -700
@@ -347,8 +458,14 @@ def _locate(listing):
 
     Returns:
         (set index, channel index, channel type, centre Hz, offset Hz,
-        band Hz) -- or None if there is no receiving device set with a
-        receiving channel in it.
+        band Hz, meter index) -- or None if there is no receiving device set
+        with a demodulator in it. `meter index` is a Channel Power channel in
+        the same device set, or None.
+
+    WHICH DEMODULATOR: the first receiving device set that has one, and in it
+    the most wanted by DEMODULATOR_PREFERENCE -- the WDSP receiver over the
+    SSB demodulator -- else the first receiving channel that is not the
+    meter. A Channel Power channel is never the demodulator.
 
     THE BAND IS THE LIST'S "bandwidth" -- 64000 for an RTL dongle at
     1024000 samples a second decimated by 16, which is the sampled band a
@@ -361,16 +478,25 @@ def _locate(listing):
         device = device_set.get("samplingDevice") or {}
         if device.get("direction", 0) != 0:
             continue                    # a transmitter
-        for channel in device_set.get("channels") or ():
-            if channel.get("direction", 0) != 0:
-                continue
-            try:
-                return (set_index, int(channel["index"]), str(channel["id"]),
-                        int(device["centerFrequency"]),
-                        int(channel["deltaFrequency"]),
-                        int(device["bandwidth"]))
-            except (KeyError, TypeError, ValueError):
-                return None
+        receiving = [channel for channel in device_set.get("channels") or ()
+                     if channel.get("direction", 0) == 0]
+        meters = [channel for channel in receiving
+                  if channel.get("id") == METER_CHANNEL]
+        demodulators = [channel for channel in receiving
+                        if channel.get("id") != METER_CHANNEL]
+        if not demodulators:
+            continue
+        rank = {kind: n for n, kind in enumerate(DEMODULATOR_PREFERENCE)}
+        chosen = min(demodulators,
+                     key=lambda channel: rank.get(channel.get("id"), len(rank)))
+        try:
+            return (set_index, int(chosen["index"]), str(chosen["id"]),
+                    int(device["centerFrequency"]),
+                    int(chosen["deltaFrequency"]),
+                    int(device["bandwidth"]),
+                    int(meters[0]["index"]) if meters else None)
+        except (KeyError, TypeError, ValueError):
+            return None
     return None
 
 
@@ -390,7 +516,7 @@ class RestSDR:
         self.signal = None
         self.volume = None
         self.muted = None
-        # The demodulator's DSP functions -- see DSP_FUNCTIONS. On or off, and
+        # The demodulator's DSP functions -- see CHANNEL_DSP. On or off, and
         # their adjustments in dial units, by function; present only where
         # the demodulator has them. The AGC is the DEMODULATOR's
         # (SSBDemodSettings.agc) -- not the dongle's (rtlSdrSettings.agc),
@@ -430,6 +556,7 @@ class RestSDR:
         self._centre = None
         self._offset = None
         self._band = None
+        self._dev_rate = None           # the device's sample rate, for bandwidth
 
         self._quiet_until = 0.0         # see SETTLE_SECONDS
         self._lead_until = 0.0          # see STARTUP_LEAD_SECONDS
@@ -454,6 +581,23 @@ class RestSDR:
         self._ssb_low = 0               # the operator's SSB low cut, kept
         self.cw_pitch = None            # set by SDR_Link: the rig's CW tone
         self._passband_check = None     # (mode, width, tries) -- see PASSBAND_RETRIES
+        self._written_passband = None   # (rf, lc) last sent -- see STALE_PASSBAND_CHANNELS
+
+        # THE S-METER'S SOURCE -- see discover(): a Channel Power channel
+        # when there is one, else the demodulator's own report where that is
+        # safe to read, else none. `_signal_index` is the channel read.
+        self._meter_index = None        # the Channel Power channel, or None
+        self._meter_key = None          # "ChannelPowerSettings"
+        self._meter_sent = None         # (offset, bandwidth) last sent to it
+        self._signal_index = None
+        # Which source was last announced. Starts as something no source is,
+        # so the first -- even "none" -- is said.
+        self._signal_said = False
+
+        # The WDSP receiver's RIT, as last set -- see _automate_mode. The
+        # meter follows it, since RIT moves what is heard.
+        self._rit_hz = 0
+        self._peak_clamp_said = False
 
     @property
     def is_connected(self):
@@ -520,7 +664,7 @@ class RestSDR:
                       "set with a channel in it yet -- still loading, or it "
                       "needs a demodulator (SSB). Waiting for one.")
             return False
-        set_index, channel_index, channel_type, centre, offset, band = located
+        set_index, channel_index, channel_type, centre, offset, band, meter = located
 
         device = client.get(f"/deviceset/{set_index}/device/settings")
         hw_key = _settings_key(device)
@@ -564,6 +708,12 @@ class RestSDR:
             print(f"[sdr] driving SDRangel device set {set_index} "
                   f"({device.get('deviceHwType')}), channel {channel_index} "
                   f"({channel_type}); the sampled band is {band} Hz wide")
+        # A different kind of demodulator has different functions: what was
+        # held for the last one is not carried over.
+        if channel_type != self._channel_type:
+            self.dsp_on, self.dsp_settings = {}, {}
+            self._rit_hz = 0
+            self._written_passband = None
 
         self._set_index, self._channel_index = set_index, channel_index
         self._channel_type, self._channel_key = channel_type, channel_key
@@ -580,12 +730,39 @@ class RestSDR:
         self._nothing_said = False
 
         caps = {FREQUENCY}
-        # SIGNAL: the channel's report carries its power. Offered only if
-        # this channel's report has a number there.
-        level = self._read_report(set_index, channel_index)
+        # SIGNAL -- the S-meter. FALLBACK, never required (decided
+        # 2026-09-27): a Channel Power channel when there is one, for either
+        # demodulator, so the meter has one source and one calibration; else
+        # the demodulator's own report -- NEVER the WDSP receiver's, see
+        # REPORT_UNSAFE; else none. Missing Channel Power costs the meter and
+        # nothing else. Said once which it is.
+        self._meter_index, self._meter_key, self._meter_sent = None, None, None
+        if meter is not None:
+            block = client.get(f"/deviceset/{set_index}/channel/{meter}/settings")
+            self._meter_key = _settings_key(block)
+            if self._meter_key is not None:
+                self._meter_index = meter
+        if self._meter_index is not None:
+            source, where = self._meter_index, f"SDRangel's Channel Power channel {meter}"
+        elif channel_type not in REPORT_UNSAFE:
+            source, where = channel_index, f"the {channel_type} channel's own report"
+        else:
+            source, where = None, None
+        level = self._read_report(set_index, source) if source is not None else None
         if level is not None:
             caps.add(SIGNAL)
             self.signal = level
+            self._signal_index = source
+        else:
+            self._signal_index, where = None, None
+        if where != self._signal_said:
+            self._signal_said = where
+            if where:
+                print(f"[sdr] S-meter from {where}")
+            else:
+                print(f"[sdr] no S-meter: {channel_type}'s own report cannot be "
+                      f"read safely -- add a Channel Power channel to device set "
+                      f"{set_index} in SDRangel for one")
         # VOLUME and MUTE: fields of the channel's own settings, already read
         # above. Offered where this channel type has them -- SSBDemod does.
         if isinstance(settings.get("volume"), (int, float)):
@@ -594,19 +771,29 @@ class RestSDR:
         if settings.get("audioMute") in (0, 1, True, False):
             caps.add(MUTE)
             self.muted = bool(settings["audioMute"])
+        # BANDWIDTH: the device's decimation, where it has one with a sample
+        # rate to divide -- an RTL dongle does. See set_bandwidth.
+        if (isinstance(hardware.get("devSampleRate"), int)
+                and isinstance(hardware.get("log2Decim"), int)):
+            self._dev_rate = int(hardware["devSampleRate"])
+            if self.bandwidth_choices():
+                caps.add(BANDWIDTH)
         # RF GAIN: the device's -- see RF_GAIN_DEVICES.
         spec = RF_GAIN_DEVICES.get(self._hw_type)
         if spec and isinstance(hardware.get(spec["field"]), (int, float)):
             caps.add(RF_GAIN)
             self._rf_spec = spec
             self._take_rf_gain(hardware)
-        # AGC and NR: the demodulator's own switches -- see DSP_FUNCTIONS.
-        for function, spec in DSP_FUNCTIONS.items():
+        # The demodulator's own functions -- see CHANNEL_DSP. Offered where
+        # this channel's settings have the function's switch.
+        for function, spec in self._dsp_table(channel_type).items():
             if settings.get(spec["switch"]) in (0, 1, True, False):
                 caps.add(spec["capability"])
                 self.dsp_on[function] = bool(settings[spec["switch"]])
                 self.dsp_settings[function] = {}
                 self._take_dsp_settings(function, settings)
+        if isinstance(settings.get("ritFrequency"), (int, float)) and settings.get("rit"):
+            self._rit_hz = int(settings["ritFrequency"])
         # MODE and FILTER: the passband -- see the note above SPAN_BASE_HZ.
         rf, lc, span = (settings.get("rfBandwidth"), settings.get("lowCutoff"),
                         settings.get("spanLog2"))
@@ -714,11 +901,58 @@ class RestSDR:
     # ------------------------------------------------------------------
     # Frequency
     # ------------------------------------------------------------------
-    def set_frequency(self, hz):
+    # ------------------------------------------------------------------
+    # The sampled band's width -- the spectrum and waterfall
+    # ------------------------------------------------------------------
+    @property
+    def bandwidth(self):
+        """The sampled band's width in Hz, as SDRangel last reported it."""
+        return self._band
+
+    def bandwidth_choices(self):
+        """
+        The widths the device can sample, narrowest first: its sample rate
+        over each power of two, no narrower than MIN_BANDWIDTH_HZ.
+        """
+        rate = getattr(self, "_dev_rate", None)
+        if not rate:
+            return []
+        return sorted(rate >> n for n in range(MAX_LOG2_DECIMATION + 1)
+                      if rate >> n >= MIN_BANDWIDTH_HZ)
+
+    def set_bandwidth(self, hz):
+        """
+        Sets the sampled band's width -- the device's log2Decim, to the
+        choice nearest `hz`. The caller retunes afterwards (SDR_Link frames
+        the band again): a narrower band may leave the channel's offset
+        outside it.
+        """
+        if BANDWIDTH not in self.capabilities or not self._dev_rate:
+            return False
+        width = min(self.bandwidth_choices(), key=lambda w: abs(w - int(hz)))
+        decimation = int(round(math.log2(self._dev_rate / width)))
+        try:
+            if not self._patch_device({"log2Decim": decimation}):
+                return False
+        except ConnectionLost:
+            self._lost()
+            return False
+        self._band = width
+        self._quiet_until = time.monotonic() + SETTLE_SECONDS
+        return True
+
+    def set_frequency(self, hz, band=None):
         """
         Tunes SDRangel to a frequency -- by the channel offset where the
         signal stays well inside the sampled band, else by retuning the
         centre and resetting the offset.
+
+        FRAMING A BAND: given `band`, the amateur band's (start, end), the
+        centre is placed half the sampled band above its start, so the
+        spectrum starts at the band edge rather than showing what lies below
+        it -- after a band change, say. Never so far that the signal itself
+        falls outside OFFSET_REACH_SHARE: a signal near the top of a band
+        wider than the sampled one keeps the usual placement.
 
         RECORDS WHAT SDRANGEL WAS LEFT AT, not what was asked for. If the
         centre moved and the offset then failed, SDRangel is somewhere new;
@@ -730,22 +964,37 @@ class RestSDR:
         hz = int(hz)
         self._wanted = hz               # the rig's, for STARTUP_LEAD_SECONDS
         reach = int(self._band * OFFSET_REACH_SHARE)
+        framed = None
+        if band is not None:
+            framed = int(band[0]) + self._band // 2
+            framed = max(hz - reach, min(hz + reach, framed))
+            # Down to a whole kHz -- see CENTRE_ROUNDING_HZ -- and not
+            # below what reach allows.
+            framed -= framed % CENTRE_ROUNDING_HZ
+            if hz - framed > reach:
+                framed += CENTRE_ROUNDING_HZ
         try:
             # FIX: a centre off a whole kHz -- left by an earlier session, or
             # set over the API -- is retuned once rather than kept, or its
             # odd Hz ride along in every offset and SDRangel's kHz dial
             # never reads true. See CENTRE_ROUNDING_HZ.
-            if (abs(hz - self._centre) <= reach
+            if (framed is None and abs(hz - self._centre) <= reach
                     and self._centre % CENTRE_ROUNDING_HZ == 0):
                 if self._patch_offset(hz - self._centre):
                     self._offset = hz - self._centre
             else:
-                centre = hz - int(self._band * RETUNE_OFFSET_SHARE)
-                # FIX: down to a whole kHz -- see CENTRE_ROUNDING_HZ. Down,
-                # so the offset only grows, by under a kHz, and stays well
-                # inside OFFSET_REACH_SHARE.
-                centre -= centre % CENTRE_ROUNDING_HZ
-                if self._patch_centre(centre):
+                if framed is not None:
+                    centre = framed
+                else:
+                    centre = hz - int(self._band * RETUNE_OFFSET_SHARE)
+                    # FIX: down to a whole kHz -- see CENTRE_ROUNDING_HZ.
+                    # Down, so the offset only grows, by under a kHz, and
+                    # stays well inside OFFSET_REACH_SHARE.
+                    centre -= centre % CENTRE_ROUNDING_HZ
+                if centre == self._centre:
+                    if self._patch_offset(hz - centre):
+                        self._offset = hz - centre
+                elif self._patch_centre(centre):
                     self._centre = centre
                     if self._patch_offset(hz - centre):
                         self._offset = hz - centre
@@ -754,13 +1003,23 @@ class RestSDR:
             return False
         self.frequency = self._centre + self._offset
         self._quiet_until = time.monotonic() + SETTLE_SECONDS
+        self._sync_meter()
         return self.frequency == hz
 
     def _patch_offset(self, offset):
         return self._patch_channel({"inputFrequencyOffset": int(offset)})
 
     def _patch_channel(self, fields):
-        """A partial change to the channel's own settings."""
+        """
+        A partial change to the channel's own settings -- with the passband
+        last written riding along, for a channel whose stored passband is
+        stale (see STALE_PASSBAND_CHANNELS).
+        """
+        if (self._channel_type in STALE_PASSBAND_CHANNELS
+                and self._written_passband is not None
+                and "rfBandwidth" not in fields and "lowCutoff" not in fields):
+            rf, lc = self._written_passband
+            fields = dict(fields, rfBandwidth=rf, lowCutoff=lc)
         return self._client.patch(
             f"/deviceset/{self._set_index}/channel/{self._channel_index}/settings",
             {"channelType": self._channel_type, "direction": 0,
@@ -780,7 +1039,7 @@ class RestSDR:
              self._hw_key: {"centerFrequency": int(centre)}})
 
     # ------------------------------------------------------------------
-    # Not yet -- each answers "cannot", so the interface greys it out
+    # Mode and filter -- the demodulator's passband
     # ------------------------------------------------------------------
     def set_mode(self, sdr_mode, width=0):
         """
@@ -796,16 +1055,104 @@ class RestSDR:
         if mode not in ("USB", "LSB", "CWU", "CWL"):
             return False
         width = int(width) if width else self.default_filter_width(mode)
+        # The WDSP receiver's automatic CW behaviour FIRST: RIT moves where
+        # the passband is heard, and the meter follows both.
+        self._automate_mode(mode)
         if not self._write_passband(mode, width):
             return False
         self.mode = mode
+        self._sync_meter()
         return True
+
+    # ------------------------------------------------------------------
+    # The WDSP receiver's automatic behaviour, by mode -- no controls
+    #
+    # Decided 2026-09-27. In CW:
+    #   RIT to minus the CW pitch (plus in CWL) -- the WDSP readme's trick:
+    #     the signal on the tuned frequency is heard at the pitch, and sits on
+    #     the channel marker. ASSUMES the rig's displayed CW frequency is the
+    #     signal's own -- the open question in TODO step 5; CW_RIT is the
+    #     switch if it proves otherwise.
+    #   squelch type AM, the level squelch -- the voice squelch opens on
+    #     speech, which CW is not;
+    #   ANF off -- an automatic notch takes out any steady tone, and a CW
+    #     signal is one;
+    #   the CW peaking filter's peak on the rig's CW tone, within what its
+    #     dialog allows (CW_PEAK_RANGE).
+    # In SSB: RIT off, and squelch type Voice. FM never: the rig has no FM.
+    # ------------------------------------------------------------------
+    CW_RIT = True
+
+    def _automate_mode(self, mode):
+        if self._channel_type != "WDSPRx":
+            return
+        cw = mode.startswith("CW")
+        fields = {"demod": 0}               # SSB: every rig mode is sideband
+        if cw:
+            pitch = int(self.cw_pitch or CW_PITCH_FALLBACK_HZ)
+            low, high = CW_PEAK_RANGE
+            peak = max(low, min(high, pitch))
+            if peak != pitch and not self._peak_clamp_said:
+                print(f"[sdr] the rig's CW tone of {pitch} Hz is outside the WDSP "
+                      f"peaking filter's {low}-{high} Hz; peaking at {peak}")
+                self._peak_clamp_said = True
+            rit = (-pitch if mode == "CWU" else pitch) if self.CW_RIT else 0
+            fields.update({"rit": 1 if rit else 0, "ritFrequency": rit,
+                           "squelchMode": 1, "anf": 0,
+                           "cwPeakFrequency": float(peak)})
+        else:
+            rit = 0
+            fields.update({"rit": 0, "ritFrequency": 0, "squelchMode": 0})
+        try:
+            ok = self._patch_channel(fields)
+        except ConnectionLost:
+            self._lost()
+            return
+        if ok:
+            self._rit_hz = rit
+            if cw:
+                self.dsp_on["notch"] = False
+
+    # ------------------------------------------------------------------
+    # The S-meter's Channel Power channel, kept on what is heard
+    #
+    # Its bandwidth is CENTRED on its offset; the passband sits to one side
+    # of the tuned frequency. So it is put midway between the cuts, on the
+    # passband's sideband, shifted by RIT, and made as wide as the passband:
+    # USB 300-3000 Hz is 1650 Hz above the channel, 2700 Hz wide. Sent only
+    # when that changes; checked every poll, so a click in SDRangel's
+    # waterfall or a filter dragged there moves it too.
+    # ------------------------------------------------------------------
+    def _sync_meter(self):
+        if self._meter_index is None or self._offset is None:
+            return
+        wanted_offset = self._offset + self._rit_hz
+        wanted = {"frequencyMode": 0}       # by offset, not absolute frequency
+        if self._low is not None and self._high:
+            sign = -1 if self._sideband == "L" else 1
+            wanted_offset += sign * (self._low + self._high) // 2
+            wanted["rfBandwidth"] = int(self._high - self._low)
+        wanted["inputFrequencyOffset"] = int(wanted_offset)
+        key = (wanted["inputFrequencyOffset"], wanted.get("rfBandwidth"))
+        if key == self._meter_sent:
+            return
+        try:
+            ok = self._client.patch(
+                f"/deviceset/{self._set_index}/channel/{self._meter_index}/settings",
+                {"channelType": METER_CHANNEL, "direction": 0, self._meter_key: wanted})
+        except ConnectionLost:
+            self._lost()
+            return
+        if ok:
+            self._meter_sent = key
 
     def set_filter_width(self, width):
         """Narrows or widens the passband, in the current mode."""
         if FILTER not in self.capabilities or self.mode is None:
             return False
-        return self._write_passband(self.mode, int(width))
+        ok = self._write_passband(self.mode, int(width))
+        self._sync_meter()
+        return ok
 
     def _passband_for(self, mode, width):
         """(low, high) magnitudes, in Hz, for a mode and a width."""
@@ -820,7 +1167,8 @@ class RestSDR:
         # Inside the span -- see the note above SPAN_BASE_HZ. On the grid, so
         # the edge is one SDRangel's slider can show.
         if self._span_log2 is not None:
-            span = int(SPAN_BASE_HZ / 2 ** self._span_log2) // step * step
+            base = SPAN_BASE_BY_CHANNEL.get(self._channel_type, SPAN_BASE_HZ)
+            span = int(base / 2 ** self._span_log2) // step * step
             if high > span:
                 high = span
                 low = min(low, high - step)
@@ -829,19 +1177,31 @@ class RestSDR:
     def _write_passband(self, mode, width, tries=0):
         """
         PATCHes the passband, kept inside the span -- see SPAN_BASE_HZ.
-        High cut first, low cut second: see PASSBAND_RETRIES.
+        High cut first, low cut second -- and through a low cut of 0 when
+        the side changes, or on a retry: see PASSBAND_RETRIES.
         """
         low, high = self._passband_for(mode, width)
         sideband = "L" if mode in ("LSB", "CWL") else "U"
         sign = -1 if sideband == "L" else 1
-        first = {"rfBandwidth": sign * high}
+        stale = self._channel_type in STALE_PASSBAND_CHANNELS
+        through_zero = tries > 0 or (self._sideband is not None
+                                     and sideband != self._sideband)
         try:
-            ok = (self._patch_channel(first)
-                  and self._patch_channel({"lowCutoff": sign * low}))
+            if stale:
+                # Both in ONE PATCH -- see STALE_PASSBAND_CHANNELS.
+                ok = self._patch_channel({"rfBandwidth": sign * high,
+                                          "lowCutoff": sign * low})
+            else:
+                ok = ((not through_zero or self._patch_channel({"lowCutoff": 0}))
+                      and self._patch_channel({"rfBandwidth": sign * high})
+                      and self._patch_channel({"lowCutoff": sign * low}))
         except ConnectionLost:
             self._lost()
             return False
-        self._passband_check = (mode, width, tries) if ok else None
+        if ok and stale:
+            self._written_passband = (sign * high, sign * low)
+        # Checked against the next read -- except where the read is stale.
+        self._passband_check = (mode, width, tries) if ok and not stale else None
         if ok:
             # Recorded as written, so the next read does not report it back.
             self._sideband, self._low, self._high = sideband, low, high
@@ -922,7 +1282,7 @@ class RestSDR:
         if level != "STRENGTH" or SIGNAL not in self.capabilities:
             return None
         try:
-            return self._read_report(self._set_index, self._channel_index)
+            return self._read_report(self._set_index, self._signal_index)
         except ConnectionLost:
             self._lost()
             return None
@@ -984,25 +1344,73 @@ class RestSDR:
             if self._take_rf_gain(block[self._hw_key]):
                 self._call(self.on_rf_gain)
 
+    # ------------------------------------------------------------------
+    # The demodulator's DSP functions -- see CHANNEL_DSP
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _dsp_table(channel_type):
+        return CHANNEL_DSP.get(channel_type, {})
+
+    def _dsp_spec(self, function):
+        return self._dsp_table(self._channel_type).get(function)
+
+    def _dsp_setting_spec(self, function, name):
+        spec = self._dsp_spec(function)
+        return spec["settings"].get(name) if spec else None
+
+    def dsp_knob_names(self, function):
+        """The adjustments a function's knobs show, in order."""
+        spec = self._dsp_spec(function)
+        if not spec:
+            return []
+        if "knobs" in spec:
+            return spec["knobs"](self.dsp_settings.get(function, {}))
+        return list(spec["settings"])
+
+    def dsp_info(self, function, name):
+        """
+        What the interface needs to draw a knob: caption, kind, low, high,
+        and for a choice its labels -- `short` for around the dial.
+        """
+        spec = self._dsp_setting_spec(function, name)
+        if spec is None:
+            return None
+        return {key: spec[key] for key in ("caption", "kind", "low", "high",
+                                           "labels", "short", "unit")}
+
     def dsp_range(self, function, name):
-        """(lowest, highest) of an adjustment, in dial units -- see DSP_FUNCTIONS."""
-        _, low, high = DSP_FUNCTIONS[function]["settings"][name]
-        return low, high
+        """(lowest, highest) of an adjustment, in dial units."""
+        spec = self._dsp_setting_spec(function, name)
+        return (spec["low"], spec["high"]) if spec else (0, 0)
 
     def dsp_adjustable(self, function, name):
-        """Whether an adjustment can be set from here -- see DSP_READ_ONLY."""
-        return (function, name) not in DSP_READ_ONLY
+        """Whether an adjustment can be set from here, or is only shown."""
+        spec = self._dsp_setting_spec(function, name)
+        return bool(spec) and not spec["read_only"]
+
+    def dsp_setting_text(self, function, name, value):
+        """An adjustment as the SDR's own dial shows it: "128 ms", "Medium"."""
+        spec = self._dsp_setting_spec(function, name)
+        value = _int(value)
+        if spec is None:
+            return str(value)
+        if spec["text"]:
+            return spec["text"](value)
+        if spec["labels"]:
+            labels = spec["labels"]
+            return labels[value] if 0 <= value < len(labels) else str(value)
+        return f"{value} {spec['unit']}".strip()
 
     def set_dsp_setting(self, function, name, value):
         """Sets one adjustment, within its range, in dial units."""
+        spec = self._dsp_setting_spec(function, name)
+        if spec is None or spec["read_only"]:
+            return False
         if name not in self.dsp_settings.get(function, {}):
             return False
-        if not self.dsp_adjustable(function, name):
-            return False
-        field, low, high = DSP_FUNCTIONS[function]["settings"][name]
-        value = int(round(max(low, min(high, float(value)))))
+        value = _int(max(spec["low"], min(spec["high"], float(value))))
         try:
-            ok = self._patch_channel({field: _to_stored(function, name, value)})
+            ok = self._patch_channel({spec["field"]: spec["store"](value)})
         except ConnectionLost:
             self._lost()
             return False
@@ -1012,20 +1420,26 @@ class RestSDR:
 
     def _take_dsp_settings(self, function, settings):
         """Records a function's adjustments from channel settings; True if any changed."""
+        spec = self._dsp_spec(function)
+        if not spec:
+            return False
         changed = False
         held = self.dsp_settings.setdefault(function, {})
-        for name, (field, _, _) in DSP_FUNCTIONS[function]["settings"].items():
-            stored = settings.get(field)
+        for name, setting in spec["settings"].items():
+            stored = settings.get(setting["field"])
             if isinstance(stored, (int, float)):
-                value = _from_stored(function, name, stored)
+                # Held within the knob's range: a stored value past its end --
+                # an SSB alpha of exactly 1, "infinite" smoothing, loads as 90
+                # -- would put the pointer off the dial.
+                value = max(setting["low"], min(setting["high"], setting["load"](stored)))
                 if held.get(name) != value:
                     held[name] = value
                     changed = True
         return changed
 
     def set_dsp(self, function, on):
-        """A DSP function -- "agc" or "nr" -- on or off."""
-        spec = DSP_FUNCTIONS.get(function)
+        """A DSP function -- "agc", "nr", "notch", ... -- on or off."""
+        spec = self._dsp_spec(function)
         if not spec or spec["capability"] not in self.capabilities:
             return False
         try:
@@ -1060,11 +1474,13 @@ class RestSDR:
             return
         try:
             self._read_frequency()
+            self._sync_meter()
             if SIGNAL in self.capabilities:
                 self._read_signal()
             self._polls += 1
             if (self._polls % AUDIO_POLL_EVERY == 0
-                    and self.capabilities & {VOLUME, MUTE, MODE, FILTER, AGC, NR}):
+                    and self.capabilities & {VOLUME, MUTE, MODE, FILTER, AGC, NR,
+                                             NOTCH, NB, CW_PEAK, SQUELCH_SWITCH}):
                 self._read_audio()
             if (self._polls % AUDIO_POLL_EVERY == 0
                     and RF_GAIN in self.capabilities):
@@ -1083,9 +1499,12 @@ class RestSDR:
                 print("[sdr] SDRangel's demodulator has gone; waiting for one")
                 self._missing_said = True
             return
-        set_index, channel_index, _, centre, offset, band = located
+        set_index, channel_index, _, centre, offset, band, meter = located
         before = self.frequency
-        if (set_index, channel_index) != (self._set_index, self._channel_index):
+        # Rediscovered, too, when a Channel Power channel is added or
+        # removed: the S-meter's source changes with it.
+        if ((set_index, channel_index) != (self._set_index, self._channel_index)
+                or meter != self._meter_index):
             # A different channel is now the first: find out about it before
             # reading it, so a PATCH never goes to a channel not looked at.
             if not self.discover():
@@ -1127,6 +1546,11 @@ class RestSDR:
         {"channelPowerDB": -150}, ...} -- the block named after the channel
         type, found the same way as a settings block.
         """
+        # NEVER a channel in REPORT_UNSAFE -- reading it crashes SDRangel.
+        # Discovery never chooses one; this refuses one anyway.
+        if channel_index is None or (channel_index == self._channel_index
+                                     and self._channel_type in REPORT_UNSAFE):
+            return None
         report = self._client.get(
             f"/deviceset/{set_index}/channel/{channel_index}/report")
         key = _block_key(report, "Report")
@@ -1159,7 +1583,7 @@ class RestSDR:
             if muted != self.muted:
                 self.muted = muted
                 self._call(self.on_mute, muted)
-        for function, spec in DSP_FUNCTIONS.items():
+        for function, spec in self._dsp_table(self._channel_type).items():
             if (spec["capability"] in self.capabilities
                     and settings.get(spec["switch"]) in (0, 1, True, False)):
                 on = bool(settings[spec["switch"]])
@@ -1170,7 +1594,8 @@ class RestSDR:
         # The passband, changed at SDRangel's own knobs: the high cut dragged
         # across zero is a change of sideband -- CWU to CWL if in CW, USB to
         # LSB otherwise -- and any other move is a new width.
-        if MODE in self.capabilities:
+        # Not where the read-back is stale -- see STALE_PASSBAND_CHANNELS.
+        if MODE in self.capabilities and self._channel_type not in STALE_PASSBAND_CHANNELS:
             rf, lc = settings.get("rfBandwidth"), settings.get("lowCutoff")
             if isinstance(rf, (int, float)) and isinstance(lc, (int, float)):
                 if isinstance(settings.get("spanLog2"), (int, float)):
@@ -1190,7 +1615,9 @@ class RestSDR:
 
     def _read_signal(self):
         """Reads the signal and reports it -- every poll, as RigctlSDR does."""
-        level = self._read_report(self._set_index, self._channel_index)
+        if self._signal_index is None:
+            return
+        level = self._read_report(self._set_index, self._signal_index)
         if level is not None:
             self.signal = level
             self._call(self.on_signal, level)

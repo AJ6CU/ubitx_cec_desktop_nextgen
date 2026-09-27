@@ -45,7 +45,9 @@ import sdr_launcher
 import system_audio
 from rigctl_sdr import RigctlSDR
 from rest_sdr import RestSDR
-from sdr_programs import profile_for, CW_EITHER, FILTER, VOLUME, MUTE, SQUELCH, SIGNAL, AGC, NR, RF_GAIN
+from sdr_programs import (profile_for, CW_EITHER, FILTER, VOLUME, MUTE, SQUELCH, SIGNAL,
+                          AGC, NR, NOTCH, NB, CW_PEAK, SQUELCH_SWITCH, RF_GAIN,
+                          BANDWIDTH)
 
 # A mode asked of the rig because the SDR changed is PENDING until the rig
 # reports it. Meanwhile the rig's older mode is not pushed back to the SDR:
@@ -531,7 +533,12 @@ class SDR_Link:
         hz = self._model.role_frequency("rx")
         if hz and hz != self._sent_hz:
             self._sent_hz = hz
-            self.controller.set_frequency(hz)
+            # After a band change, the new band FRAMED -- see frame_band.
+            band = self._framing_for(hz)
+            if band is not None:
+                self.controller.set_frequency(hz, band=band)
+            else:
+                self.controller.set_frequency(hz)
 
         rig_mode = self._model.mode_of(self._model.rx_vfo)
         if self._rig_mode_asked is not None:
@@ -738,19 +745,17 @@ class SDR_Link:
             system_audio.unmute()
         self._system_muted = bool(muted)
 
-    # -- DSP: AGC and noise reduction ---------------------------------------
+    # -- DSP: the demodulator's own functions -------------------------------
     #
-    # The demodulator's own functions, where the SDR offers them (SDRangel),
-    # by name: "agc", "nr". Each is on or off, with adjustments in the units
-    # the SDR's dials show. No stand-in for SDRs without them -- the buttons
-    # and knobs are greyed, as the filter's are.
+    # Where the SDR offers them (SDRangel), by name: "agc", "nr", "notch",
+    # "squelch", "nb", "cw". Each is on or off, with adjustments in the units
+    # the SDR's dials show. WHICH adjustments, and how each is drawn, comes
+    # from the transport (rest_sdr.CHANNEL_DSP), since it differs with the
+    # demodulator -- the WDSP receiver's AGC is not the SSB demodulator's.
+    # No stand-in for SDRs without them: the lamps and knobs are greyed.
 
-    DSP_CAPABILITY = {"agc": AGC, "nr": NR}
-
-    # NR's scheme picks which adjustment applies: 0 Average, 1 Avg Std Dev,
-    # 2 Peaks -- see rest_sdr.DSP_FUNCTIONS.
-    NR_SCHEMES = ("Average", "Std dev", "Peaks")
-    NR_SCHEME_SETTING = ("avg", "sigma", "peaks")
+    DSP_CAPABILITY = {"agc": AGC, "nr": NR, "notch": NOTCH,
+                      "squelch": SQUELCH_SWITCH, "nb": NB, "cw": CW_PEAK}
 
     def has_dsp(self, function):
         return self.DSP_CAPABILITY.get(function) in self.capabilities
@@ -766,6 +771,16 @@ class SDR_Link:
         if self.has_dsp(function):
             self.controller.set_dsp(function, bool(on))
 
+    def dsp_knob_names(self, function):
+        """The adjustments a function's knobs show, in order -- [] without it."""
+        if not self.has_dsp(function):
+            return []
+        return self.controller.dsp_knob_names(function)
+
+    def dsp_info(self, function, name):
+        """Caption, kind, range and labels for an adjustment's knob."""
+        return self.controller.dsp_info(function, name) if self.has_dsp(function) else None
+
     def has_dsp_setting(self, function, name):
         return (self.has_dsp(function)
                 and name in getattr(self.controller, "dsp_settings", {}).get(function, {}))
@@ -780,20 +795,13 @@ class SDR_Link:
         return self.controller.dsp_range(function, name)
 
     def dsp_adjustable(self, function, name):
-        """Whether an adjustment can be set from here, or only shown -- NR's scheme."""
+        """Whether an adjustment can be set from here, or only shown -- SSB NR's scheme."""
         return (self.has_dsp_setting(function, name)
                 and self.controller.dsp_adjustable(function, name))
 
     def dsp_setting_text(self, function, name, value):
-        """As the SDR's dial shows it: "128 ms", "-100 dB", "Average", "20"."""
-        value = int(round(float(value)))
-        if (function, name) == ("agc", "time"):
-            return f"{2 ** value} ms"
-        if (function, name) == ("agc", "threshold"):
-            return f"{value} dB"
-        if (function, name) == ("nr", "scheme"):
-            return self.NR_SCHEMES[value] if 0 <= value < len(self.NR_SCHEMES) else str(value)
-        return str(value)
+        """As the SDR's dial shows it: "128 ms", "-100 dB", "Medium", "20"."""
+        return self.controller.dsp_setting_text(function, name, value)
 
     def set_dsp_setting(self, function, name, value):
         """Sets an adjustment -- once its knob stops moving."""
@@ -814,6 +822,91 @@ class SDR_Link:
         value = self._pending_dsp.pop(key, None)
         if value is not None and self.has_dsp_setting(*key):
             self.controller.set_dsp_setting(*key, value)
+
+    # -- The sampled band: its width, and where it sits ---------------------
+    #
+    # What the SDR's spectrum and waterfall show. Its WIDTH is the device's
+    # (SDRangel: decimation), set from the slider under the modes. Where it
+    # SITS follows the frequency -- see the transport's set_frequency -- and,
+    # after a band change, starts at the band's edge: on 20 m there is no
+    # reason to look below 14 MHz.
+
+    # How long after a band is chosen the rig's arrival there frames it.
+    FRAME_BAND_SECONDS = 5.0
+
+    @property
+    def has_bandwidth(self):
+        return BANDWIDTH in self.capabilities
+
+    @property
+    def bandwidth(self):
+        """The sampled band's width in Hz, or None."""
+        return self.controller.bandwidth if self.has_bandwidth else None
+
+    def bandwidth_choices(self):
+        """The widths the SDR can sample, narrowest first."""
+        return self.controller.bandwidth_choices() if self.has_bandwidth else []
+
+    def set_bandwidth(self, hz):
+        """Sets the width -- once the slider settles -- then frames the band again."""
+        self._pending_bandwidth = int(hz)
+        timer = getattr(self, "_bandwidth_timer", None)
+        if timer is not None:
+            try:
+                self.root.after_cancel(timer)
+            except Exception:
+                pass
+        self._bandwidth_timer = self.root.after(self.VOLUME_SETTLE_MS,
+                                                self._apply_bandwidth)
+
+    def _apply_bandwidth(self):
+        self._bandwidth_timer = None
+        width = getattr(self, "_pending_bandwidth", None)
+        if not self.has_bandwidth or width is None:
+            return
+        if self.controller.set_bandwidth(width):
+            # Wider or narrower, the view is placed afresh on the band the
+            # receiver is in -- a narrower one may no longer hold the signal.
+            hz = self._model.role_frequency("rx")
+            if hz:
+                self._sent_hz = hz
+                band = self._band_of(hz)
+                if band is not None:
+                    self.controller.set_frequency(hz, band=band)
+                else:
+                    self.controller.set_frequency(hz)
+
+    def frame_band(self, start, end):
+        """
+        A band was chosen: when the rig arrives in it, the SDR's view starts
+        at its lower edge. Only where the transport can place its view.
+        """
+        self._frame_band = (int(start), int(end), monotonic())
+
+    def _framing_for(self, hz):
+        """The (start, end) to frame `hz` in, if a band was just chosen and hz is in it."""
+        pending = getattr(self, "_frame_band", None)
+        if pending is None or not self.has_bandwidth:
+            return None
+        start, end, asked = pending
+        if monotonic() - asked > self.FRAME_BAND_SECONDS:
+            self._frame_band = None
+            return None
+        if start <= hz <= end:
+            self._frame_band = None
+            return (start, end)
+        return None
+
+    def _band_of(self, hz):
+        """The amateur band (start, end) holding hz, from the model's list, or None."""
+        for entry in getattr(self._model, "BANDS", ()) or ():
+            try:
+                _, start, end = entry[:3]
+            except (TypeError, ValueError):
+                continue
+            if start <= hz <= end:
+                return (int(start), int(end))
+        return None
 
     # -- RF gain -------------------------------------------------------------
     #

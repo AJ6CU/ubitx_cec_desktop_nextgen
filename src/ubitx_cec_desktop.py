@@ -80,6 +80,9 @@ from scustomtkinter import (
     sCTkProgressBar, sCTkTableview, sCTkScrollableFrame,
     sCTkFrameLabeledSecondary,
 )
+# From its module, as the Designer's builder file imports it -- whether or not
+# the package's top level exports it.
+from scustomtkinter.sctk_dial import sCTkDialSelector
 
 # ---------------------------------------------------------------------------
 # Simulated radio
@@ -225,6 +228,9 @@ LATCHING_DIALS = False
 # one moved.
 GEOMETRY_FILE = os.path.expanduser("~/.ubitx_cec_desktop_geometry.json")
 
+# Which listening-aid pop-ups were left PINNED, and where -- see AidPopup.
+PINNED_AIDS_FILE = os.path.expanduser("~/.ubitx_cec_desktop_pinned_aids.json")
+
 
 class NullRig:
     """
@@ -312,17 +318,21 @@ class SmallKnob(sCTkFrame):
     every change, so without the guard a value the SDR sent would be sent
     straight back to it.
 
+    CHOICE (on_set, labels) -- sCTkDialSelector, one position per label, the
+    labels drawn round it (short ones: "L S M F"); the value beneath says the
+    choice in full. Handed the chosen index; set_position() as for RANGE.
+
     The caption can change -- NR's middle knob says which setting its scheme
     uses.
 
-    Both kinds sit in a HOLDER of one size for a given diameter -- the Range
+    Every kind sits in a HOLDER of one size for a given diameter -- the Range
     canvas's, which is the larger -- so knobs side by side keep their
     captions on one line and their values on another.
     """
 
     def __init__(self, master, caption, on_step=None, on_set=None, span=None,
-                 diameter=SMALL_KNOB_DIAMETER, column=SMALL_KNOB_COLUMN,
-                 widest_label="-150", **kwargs):
+                 labels=None, diameter=SMALL_KNOB_DIAMETER, column=SMALL_KNOB_COLUMN,
+                 widest_label="-150", on_double=None, **kwargs):
         super().__init__(master, fg_color="transparent", border_width=0, **kwargs)
         # Every knob of a diameter gets the RANGE canvas's size, flywheel
         # too, so side by side their captions and values line up.
@@ -338,7 +348,19 @@ class SmallKnob(sCTkFrame):
         holder.pack(side="top")
         holder.pack_propagate(False)
         backdrop = _backdrop_colour(self)
-        if span is not None:
+        self.kind = "choice" if labels else ("range" if span is not None else "step")
+        if labels:
+            # Placed as a Range knob's end labels are -- on the arc's
+            # diagonals -- so the same canvas holds them.
+            self.is_range = True            # set_position applies
+            self._span = (0, len(labels) - 1)
+            width, height = range_width, range_height
+            self.dial = sCTkDialSelector(
+                holder, labels=list(labels), arc_angle=270,
+                knob_diameter=diameter, width=width, height=height,
+                fg_color=backdrop, label_font=RANGE_KNOB_LABEL_FONT,
+                command=self._on_range)
+        elif span is not None:
             self.is_range = True
             self._span = (int(span[0]), int(span[1]))
             width, height = range_width, range_height
@@ -365,6 +387,9 @@ class SmallKnob(sCTkFrame):
         # 30px knob -- which is right for a dial laid out in the Designer and
         # too big here.
         self.dial.configure(width=width, height=height)
+        if on_double is not None:
+            # The dial's own double-click; it hands back the dial.
+            self.dial.configure(double_click_command=lambda dial: on_double())
         self.dial.pack(expand=True)          # centred in the holder
         self.value = sCTkLabelPrimary(self, text="", font=("Arial", 11),
                                       width=holder_width, height=14, anchor="center")
@@ -381,7 +406,7 @@ class SmallKnob(sCTkFrame):
     def set_span(self, low, high):
         """A RANGE knob's ends -- redrawn only when they change."""
         span = (int(low), int(high))
-        if self.is_range and span != self._span:
+        if self.kind == "range" and span != self._span:
             self._span = span
             self.dial.configure(from_=span[0], to=span[1])
 
@@ -406,6 +431,110 @@ class SmallKnob(sCTkFrame):
 
     def set_caption(self, text):
         self.caption.configure(text=text)
+
+
+class AidPopup(ctk.CTkToplevel):
+    """
+    One listening aid's controls -- AGC, NR, ... -- in a small window of its
+    own, opened by the arrow beside its lamp.
+
+    WHY A WINDOW. The controls behind a function differ from SDR to SDR, in
+    names as well as number, and are shown in each SDR's own terms rather
+    than mapped onto one invented set. The lamps, which are the same for
+    every SDR, stay on the Operate tab; these open on demand, so they cost
+    the tab no height.
+
+    OPEN AND CLOSE. It opens under its lamp and closes on Escape or a click
+    elsewhere -- a quick adjustment stays quick. PINNED, it stays until
+    closed, can be dragged anywhere, and is reopened where it was on the
+    next start; several can be pinned at once. One per function: opening an
+    open one brings it forward.
+
+    The controls in it are the application's -- built by
+    _build_aid_content, updated like everything else -- and registered
+    while it is open, so a closed one is simply not updated.
+    """
+
+    def __init__(self, app, key, label, position=None):
+        super().__init__(app)
+        self.app, self.key, self.label = app, key, label
+        self.pinned = False
+        self._closing = False
+        self.title(label)
+        self.transient(app)
+        self.resizable(False, False)
+        # A themed body, so the knobs find a real colour behind them.
+        body = sCTkFrame(self, border_width=0)
+        body.pack(fill="both", expand=True)
+        top = sCTkFrame(body, fg_color="transparent", border_width=0)
+        top.pack(fill="x", padx=8, pady=(6, 0))
+        self.heading = sCTkLabelSecondary(top, text=label, font=("Arial", 12, "bold"))
+        self.heading.pack(side="left")
+        # Secondary, for its pressed look -- pressed while pinned.
+        self.pin_button = sCTkButtonSecondary(top, text="pin", width=44, height=22,
+                                             font=("Arial", 11), command=self.toggle_pin)
+        self.pin_button.pack(side="right")
+        self.content = sCTkFrame(body, fg_color="transparent", border_width=0)
+        self.content.pack(padx=8, pady=(4, 8))
+        if position:
+            self.geometry(position)
+        self.bind("<Escape>", lambda event: self.close())
+        self.bind("<FocusOut>", self._focus_out)
+        self.bind("<Configure>", self._moved)
+        self.protocol("WM_DELETE_WINDOW", self.close)
+        self._move_timer = None
+
+    def place_under(self, widget):
+        """Opens just below a widget -- the lamp's arrow."""
+        widget.update_idletasks()
+        self.geometry(f"+{widget.winfo_rootx()}"
+                      f"+{widget.winfo_rooty() + widget.winfo_height() + 4}")
+
+    def bring_forward(self):
+        self.deiconify()
+        self.lift()
+        self.after(50, self._take_focus)
+
+    def _take_focus(self):
+        if not self._closing and self.winfo_exists():
+            self.focus_force()
+
+    def toggle_pin(self):
+        self.pinned = not self.pinned
+        self.pin_button.configure(text="pinned" if self.pinned else "pin")
+        self.pin_button.set_pressed(self.pinned)
+        self.app._save_pinned_aids()
+
+    def _focus_out(self, event):
+        # FocusOut arrives for the window's children too -- a knob taking
+        # focus as the pointer enters it. Looked at a moment later: closed
+        # only if focus has gone outside this window altogether.
+        if not self.pinned and not self._closing:
+            self.after(200, self._close_if_elsewhere)
+
+    def _close_if_elsewhere(self):
+        if self.pinned or self._closing or not self.winfo_exists():
+            return
+        try:
+            focus = self.focus_get()
+        except Exception:
+            focus = None
+        if focus is None or not str(focus).startswith(str(self)):
+            self.close()
+
+    def _moved(self, event):
+        # Saved when a pinned one stops moving, as the main window's is.
+        if self.pinned and event.widget is self:
+            if self._move_timer is not None:
+                self.after_cancel(self._move_timer)
+            self._move_timer = self.after(500, self.app._save_pinned_aids)
+
+    def close(self):
+        if self._closing:
+            return
+        self._closing = True
+        self.app._aid_closed(self.key)
+        self.destroy()
 
 
 class RolePanel(sCTkFrame):
@@ -462,6 +591,14 @@ class RolePanel(sCTkFrame):
             right_click_callback=lambda: self._click_step(+1),
             double_click_command=lambda d: d.set_pressed(True),
             shift_double_click_command=lambda d: d.set_pressed(False))
+        # FIX: the canvas size through configure(), as the small knobs do.
+        # The constructor takes width and height only as a starting point and
+        # sizes the canvas for the knob plus a generous label margin -- room
+        # this dial has no labels to fill. That margin made the canvas, and
+        # so the whole panel, much taller than the frequency beside it: an
+        # empty band under the readout that no window height could remove,
+        # and a panel whose border was cut off when the window was shortened.
+        self.dial.configure(width=KNOB_DIAMETER + 10, height=KNOB_DIAMETER + 10)
         self.dial.pack(side="right", padx=(4, 6), pady=2)
 
         header = sCTkFrame(self, fg_color="transparent", border_width=0)
@@ -516,8 +653,30 @@ class RolePanel(sCTkFrame):
             min_digit=1, command=self._on_digit)
         self.display.pack(anchor="w")
 
-        self.note = sCTkLabelTertiary(left, text="", font=("Arial", 10))
-        self.note.pack(anchor="w")
+        # THE PANEL'S OWN BUTTONS, under the frequency, at the Split
+        # button's size, with the note beside them. RX: RIT and Lock -- the
+        # frequency they act on. Lock freezes both panels, but receive is
+        # where you tune; the note under each frequency says "locked" too.
+        # Pressed while on (see refresh). TX: TX off -- transmit inhibit,
+        # the control you want when something is wrong (a bad SWR, the wrong
+        # antenna, a neighbour on frequency) -- in the ALARM colour while on,
+        # since it means the rig will not transmit.
+        under = sCTkFrame(left, fg_color="transparent", border_width=0)
+        under.pack(anchor="w", pady=(2, 0))
+        size = dict(width=60, height=26, font=("Arial", 12))
+        if role == "rx":
+            app._toggles["rit"] = sCTkButtonSecondary(
+                under, text="RIT", command=lambda: app._toggle("rit"), **size)
+            app._toggles["rit"].pack(side="left", padx=(0, 4))
+            app._toggles["locked"] = sCTkButtonSecondary(
+                under, text="Lock", command=lambda: app._toggle("locked"), **size)
+            app._toggles["locked"].pack(side="left", padx=(0, 4))
+        else:
+            app.tx_off_button = sCTkButtonSecondary(
+                under, text="TX off", command=lambda: app._toggle("tx_inhibit"), **size)
+            app.tx_off_button.pack(side="left", padx=(0, 4))
+        self.note = sCTkLabelTertiary(under, text="", font=("Arial", 10))
+        self.note.pack(side="left", padx=(4, 0))
 
         left.pack(side="left", fill="x", expand=True)
 
@@ -813,6 +972,8 @@ class UbitxCecDesktop(sCTk):
         # shape the real rig imposes, kept so the controls are wired
         # correctly for it.
         self._toggles = {}
+        # What each latched control last showed -- see refresh.
+        self._toggle_shown = {}
 
         # refresh() touches widgets from every tab, and sCTkSpinbox.set()
         # invokes its command -- so setting an initial value while building
@@ -978,7 +1139,7 @@ class UbitxCecDesktop(sCTk):
             # window belongs depends on where the SDR's window sits on each
             # screen, so the window manager places it.
             #
-            # macOS: 1455x360, MEASURED -- the size the finished layout was
+            # macOS: 1470x364 at +0+33, MEASURED -- the size the finished layout was
             # set to by hand on a 13" MacBook Air (1470 points wide), read
             # back from the geometry file. Two ten-digit readouts at 56pt
             # plus their dials do not fit in much less width, and the first
@@ -989,7 +1150,7 @@ class UbitxCecDesktop(sCTk):
             # Fonts and window borders differ enough that the Mac figure may
             # clip there.
             import sys
-            return "1455x360" if sys.platform == "darwin" else "1440x520"
+            return "1470x364+0+33" if sys.platform == "darwin" else "1440x520"
 
     def _on_close(self):
         """The window's close button."""
@@ -1092,11 +1253,15 @@ class UbitxCecDesktop(sCTk):
         has_filter = "filter" in self.sdr.capabilities
         for btn in self.filter_buttons:
             btn.state("normal" if has_filter else "disabled")
-        for function, switch in self.dsp_switches.items():
-            switch.state("normal" if self.sdr.has_dsp(function) else "disabled")
-        self.notch_note.configure(
-            text=(f"no notch in {self.sdr.profile.name}'s demodulator"
-                  if connected else "needs a connected SDR"))
+        # The listening aids: every lamp repainted afresh, and each open
+        # pop-up rebuilt -- another SDR, or another demodulator, has other
+        # controls for the same function.
+        self._lamp_live.clear()
+        self._lamp_states.clear()
+        for popup in list(self._popups.values()):
+            if popup.winfo_exists():
+                self._build_aid_content(popup)
+        self._show_lamps()
 
         # AN SDR THAT CONNECTS BECOMES THE RECEIVER. With no SDR at startup
         # -- which is how a new settings file begins -- the application comes
@@ -1114,49 +1279,34 @@ class UbitxCecDesktop(sCTk):
 
         self.audio_note.configure(
             text="Listening through the SDR quiets the rig's speaker. "
+                 "Double-click the volume knob to mute. "
                  f"{self.sdr.audio_description()} Listening through the rig, "
                  "the level is its front-panel knob.")
 
-        # Squelch: live with its range where the SDR has one; otherwise
-        # greyed, saying why.
-        # Greyed alone says it: SDRangel has no squelch of its own.
-        if self.sdr.has_squelch:
-            self.squelch_knob.set_span(*self.sdr.squelch_range())
-            self.squelch_knob.set_live(True)
-            self.squelch_reset.state("normal")
-            self.squelch_auto.state("normal" if self.sdr.can_auto_squelch else "disabled")
-        else:
+        if not self.sdr.has_squelch:
             self._knob_values.pop("squelch", None)
-            self.squelch_knob.set_live(False)
-            self.squelch_auto.state("disabled")
-            self.squelch_reset.state("disabled")
-            self.squelch_knob.show("")
         self._sdr_audio_changed()
 
-    # The shared knobs' captions, by function and adjustment.
-    DSP_KNOB_CAPTIONS = {
-        ("agc", "time"): "Time", ("agc", "threshold"): "Thr", ("agc", "gate"): "Gate",
-        ("nr", "scheme"): "Scheme", ("nr", "avg"): "Avg×", ("nr", "sigma"): "Sigma",
-        ("nr", "peaks"): "Peaks", ("nr", "alpha"): "Alpha",
-    }
+    # The listening aids: each one's key, and the text on its lamp.
+    AIDS_LAMPS = (("agc", "AGC"), ("nr", "NR"), ("notch", "Notch"),
+                  ("squelch", "SQL"), ("nb", "NB"), ("cw", "CW"))
 
-    def _dsp_knob_names(self, function):
-        """What the three knobs set for a function. NR's middle one follows its scheme."""
-        if function == "agc":
-            return ["time", "threshold", "gate"]
-        scheme = self._knob_values.get(("nr", "scheme"), self.sdr.dsp_setting("nr", "scheme")) or 0
-        settings = self.sdr.NR_SCHEME_SETTING
-        return ["scheme", settings[scheme] if 0 <= scheme < len(settings) else "avg", "alpha"]
+    def _is_cw(self):
+        """Whether the receiving VFO is in a CW mode."""
+        return str(self.model.mode_of(self.model.rx_vfo)).upper().startswith("CW")
 
     def _dsp_step(self, function, index, clicks):
         """
-        A function's knob clicked or turned: one dial step per click, in the
-        adjustment's own units -- the AGC time constant doubles or halves --
-        shown at once and sent when the knob settles. Stepped from what was
-        last SHOWN, so a quick run of clicks adds up rather than each
-        starting again from the SDR's value.
+        A FLYWHEEL knob clicked or turned: one dial step per click, in the
+        adjustment's own units -- the SSB demodulator's AGC time constant
+        doubles or halves -- shown at once and sent when the knob settles.
+        Stepped from what was last SHOWN, so a quick run of clicks adds up
+        rather than each starting again from the SDR's value.
         """
-        name = self._dsp_knob_names(function)[index]
+        names = self.sdr.dsp_knob_names(function)
+        if index >= len(names):
+            return
+        name = names[index]
         if not self.sdr.dsp_adjustable(function, name):
             return
         low, high = self.sdr.dsp_range(function, name)
@@ -1164,16 +1314,20 @@ class UbitxCecDesktop(sCTk):
         shown = self._knob_values.get(key, self.sdr.dsp_setting(function, name))
         value = max(low, min(high, shown + clicks))
         self._knob_values[key] = value
+        self.dsp_knobs[function][index].show(
+            self.sdr.dsp_setting_text(function, name, value))
         self.sdr.set_dsp_setting(function, name, value)
-        # A new NR scheme brings its own setting to the middle knob.
-        self._draw_dsp_knobs()
 
     def _dsp_set(self, function, index, value):
         """
-        A RANGE knob moved to a value: shown at once, sent when it settles.
-        The knob itself keeps the position, so there is nothing to step from.
+        A RANGE or CHOICE knob moved to a value: shown at once, sent when it
+        settles. The knob itself keeps the position, so there is nothing to
+        step from.
         """
-        name = self._dsp_knob_names(function)[index]
+        names = self.sdr.dsp_knob_names(function)
+        if index >= len(names):
+            return
+        name = names[index]
         if not self.sdr.dsp_adjustable(function, name):
             return
         self._knob_values[(function, name)] = value
@@ -1181,37 +1335,103 @@ class UbitxCecDesktop(sCTk):
         self.sdr.set_dsp_setting(function, name, value)
 
     def _lamp_on(self, key):
-        """Whether a function is on. Squelch: while its threshold is above fully open."""
-        if key in ("agc", "nr"):
+        """
+        Whether a function is on. SQL: the switched squelch's switch where
+        there is one; else Gqrx's, on while its threshold is above fully open.
+        """
+        if self.sdr.has_dsp(key):
             return bool(self.sdr.dsp_on(key))
         if key == "squelch" and self.sdr.has_squelch:
             threshold = self._knob_values.get("squelch", self.sdr.squelch)
             bottom, _ = self.sdr.squelch_range()
             return threshold is not None and threshold > bottom
-        return False                   # notch: nothing to drive yet
+        return False
 
-    # The bar beneath the open lamp.
-    OPEN_LAMP_BAR = ("#D97706", "#F59E0B")
+    def _switch_live(self, key):
+        """
+        Whether a function's switch can be used: where the SDR has it -- and
+        the notch not in CW, where it would take out the signal. The
+        transport switches it off on entering CW; this keeps it there.
+        """
+        if not self.sdr.has_dsp(key):
+            return False
+        return not (key == "notch" and self._is_cw())
+
+    def _lamp_available(self, key):
+        """Whether a lamp can be used: the SDR has the function, and may use it now."""
+        if key == "squelch" and not self.sdr.has_dsp("squelch"):
+            return self.sdr.has_squelch
+        return self._switch_live(key)
 
     def _show_lamps(self):
         """
-        The lamps -- pressed while their function is on, plain otherwise --
-        AGC's and NR's switches to match, and the bar beneath the open one.
-        Each is repainted only when it changes.
+        The lamps -- pressed while their function is on, plain while off,
+        greyed where the SDR has none -- and, in any open pop-up, the switch
+        to match. Each is repainted only when it changes.
+
+        A lamp is made live BEFORE it is pressed: the button ignores
+        set_pressed() while disabled, so a lamp coming back is pressed afresh.
         """
         for key, lamp in getattr(self, "aids_lamps", {}).items():
+            live = self._lamp_available(key)
+            if live != self._lamp_live.get(key):
+                self._lamp_live[key] = live
+                lamp.state("normal" if live else "disabled")
+                self._lamp_states.pop(key, None)
             on = self._lamp_on(key)
             if on != self._lamp_states.get(key):
                 self._lamp_states[key] = on
                 lamp.set_pressed(on)
-                switch = getattr(self, "dsp_switches", {}).get(key)
+                switch = self.dsp_switches.get(key)
                 if switch is not None:
                     switch.select() if on else switch.deselect()
-        if getattr(self, "aids_lamps", None) and self._aid_open != self._lamp_open_shown:
-            for key, bar in self._lamp_bars.items():
-                bar.configure(fg_color=self.OPEN_LAMP_BAR if key == self._aid_open
-                              else "transparent")
-            self._lamp_open_shown = self._aid_open
+            switch = self.dsp_switches.get(key)
+            if switch is not None:
+                live = self._switch_live(key)
+                if live != self._switch_states.get(key):
+                    self._switch_states[key] = live
+                    switch.state("normal" if live else "disabled")
+                    self._show_dsp_note(key)
+
+    def _lamp_clicked(self, key):
+        """
+        A lamp clicked: its function switched. Gqrx's squelch has no switch
+        -- fully open is its "off" -- so on, it opens fully (R); off, it
+        closes just above what is heard now (A).
+        """
+        if key == "squelch" and not self.sdr.has_dsp("squelch"):
+            if not self.sdr.has_squelch:
+                return
+            if self._lamp_on(key):
+                self.sdr.reset_squelch()
+            elif self.sdr.can_auto_squelch:
+                self.sdr.auto_squelch()
+            self._knob_values.pop("squelch", None)
+            self._show_squelch_value()
+            self._show_lamps()
+            return
+        if not self._switch_live(key):
+            return
+        self.sdr.set_dsp(key, not self.sdr.dsp_on(key))
+        self.refresh()
+
+    def _show_dsp_note(self, key):
+        """A function frame's note: why it cannot be used, or nothing."""
+        note = self._dsp_notes.get(key)
+        if note is None:
+            return
+        if not self.sdr.has_dsp(key):
+            text = (f"not available with {self.sdr.profile.name}"
+                    if self.sdr.connected else "needs a connected SDR")
+        elif key == "notch" and self._is_cw():
+            text = "off in CW -- it would notch out the signal"
+        else:
+            text = ""
+        note.configure(text=text)
+        if text:
+            note.pack(side="left", padx=(4, 0))
+        else:
+            note.pack_forget()
 
     def _dsp_switched(self, function, value):
         """
@@ -1227,42 +1447,204 @@ class UbitxCecDesktop(sCTk):
         switch.select() if self.sdr.dsp_on(function) else switch.deselect()
         self.refresh()
 
-    # The listening aids: each one's key, and the text on its lamp.
-    AIDS_LAMPS = (("agc", "AGC"), ("nr", "NR"), ("notch", "Notch"), ("squelch", "SQL"))
+    def _open_aid(self, key, position=None, pinned=False):
+        """
+        The arrow beside a lamp: that function's pop-up, opened under it --
+        or, if already open, brought forward. See AidPopup.
+        """
+        popup = self._popups.get(key)
+        if popup is not None and popup.winfo_exists():
+            popup.bring_forward()
+            return popup
+        label = dict(self.AIDS_LAMPS)[key]
+        popup = AidPopup(self, key, f"{label} \u2014 {self.sdr.profile.name}", position)
+        self._popups[key] = popup
+        self._build_aid_content(popup)
+        if position is None:
+            popup.place_under(self._lamp_arrows[key])
+        if pinned:
+            popup.toggle_pin()
+        else:
+            popup.bring_forward()
+        return popup
 
-    def _open_aid(self, key):
-        """A lamp clicked: its frame raised over the others, the lamp outlined."""
-        self._aid_open = key
-        self._aid_frames[key].tkraise()
+    def _forget_aid_controls(self, key):
+        """A pop-up's controls no longer on screen: nothing updates them."""
+        for table in (self.dsp_switches, self.dsp_knobs, self._knob_boxes,
+                      self._dsp_notes, self._knob_layout, self._switch_states):
+            table.pop(key, None)
+        if key == "squelch":
+            self.squelch_knob = self.squelch_auto = self.squelch_reset = None
+
+    def _build_aid_content(self, popup):
+        """
+        A pop-up's controls, built from what the SDR offers for that function
+        -- and built again whenever it connects, since another SDR, or
+        another demodulator, has other controls. Registered, so the rest of
+        the application updates them as it does everything else.
+        """
+        key = popup.key
+        self._forget_aid_controls(key)
+        for child in popup.content.winfo_children():
+            child.destroy()
+        popup.title(f"{dict(self.AIDS_LAMPS)[key]} \u2014 {self.sdr.profile.name}")
+        popup.heading.configure(text=popup.title())
+        page = popup.content
+
+        # GQRX'S SQUELCH: its own threshold in its own units, with A and R --
+        # set just above what is heard now, and open fully -- named as Gqrx
+        # names them. No switch: fully open is its "off".
+        if key == "squelch" and not self.sdr.has_dsp("squelch") and self.sdr.has_squelch:
+            self.squelch_knob = SmallKnob(page, "Squelch", span=self.sdr.squelch_range(),
+                                          on_set=self._squelch_set)
+            self.squelch_knob.pack(side="left")
+            buttons = sCTkFrame(page, fg_color="transparent", border_width=0)
+            buttons.pack(side="left", padx=(4, 0))
+            self.squelch_auto = sCTkButtonSecondary(buttons, text="A", width=26,
+                                                    command=self.sdr.auto_squelch)
+            self.squelch_auto.pack(pady=1)
+            self.squelch_reset = sCTkButtonSecondary(buttons, text="R", width=26,
+                                                     command=self.sdr.reset_squelch)
+            self.squelch_reset.pack(pady=1)
+            self.squelch_knob.set_live(True)
+            self.squelch_auto.state("normal" if self.sdr.can_auto_squelch else "disabled")
+            self._show_squelch_value()
+            return
+
+        # A SWITCHED FUNCTION: an on/off switch, its knobs, and a note.
+        # FIX: sCTkSwitch calls its command WITH the switch's new value
+        # (1 or 0) when the command can take one -- and a lambda with a
+        # default argument can, so that value arrived as the function's
+        # name: KeyError: 1. The value is taken explicitly.
+        switch = sCTkSwitch(page, text="", width=44,
+                            command=lambda value, f=key: self._dsp_switched(f, value))
+        switch.pack(side="left", padx=(2, 6))
+        switch.select() if self._lamp_on(key) else switch.deselect()
+        self.dsp_switches[key] = switch
+        # 1 x 1, not the default 200 x 200: an EMPTY frame keeps its default
+        # size, and the notch's box is empty under WDSP.
+        box = sCTkFrame(page, fg_color="transparent", border_width=0,
+                        width=1, height=1)
+        box.pack(side="left")
+        note = sCTkLabelTertiary(page, text="", font=("Arial", 10),
+                                 wraplength=190, justify="left")
+        self._knob_boxes[key], self._dsp_notes[key] = box, note
+        self.dsp_knobs[key], self._knob_layout[key] = [], None
+        self._draw_dsp_knobs()
         self._show_lamps()
+        self._show_dsp_note(key)
+
+    def _aid_closed(self, key):
+        self._popups.pop(key, None)
+        self._forget_aid_controls(key)
+        self._save_pinned_aids()
+
+    def _save_pinned_aids(self):
+        """The pinned pop-ups and where they are, for the next start."""
+        # Not while they are being reopened: one not yet on screen reports
+        # itself at +0+0, and would be remembered there.
+        if getattr(self, "_restoring_aids", False):
+            return
+        pinned = {key: f"+{popup.winfo_x()}+{popup.winfo_y()}"
+                  for key, popup in self._popups.items()
+                  if popup.pinned and popup.winfo_exists()}
+        try:
+            with open(PINNED_AIDS_FILE, "w") as handle:
+                json.dump(pinned, handle)
+        except Exception:
+            pass
+
+    def _restore_pinned_aids(self):
+        """Reopens the pop-ups left pinned last time, where they were."""
+        try:
+            with open(PINNED_AIDS_FILE) as handle:
+                pinned = json.load(handle)
+        except Exception:
+            return
+        self._restoring_aids = True
+        try:
+            for key, position in pinned.items():
+                if key in dict(self.AIDS_LAMPS):
+                    self._open_aid(key, position=position, pinned=True)
+        finally:
+            self._restoring_aids = False
+
+    def _knob_signature(self, function):
+        """What a function's knobs are -- kind, range, labels -- to know when to rebuild."""
+        signature = []
+        for name in self.sdr.dsp_knob_names(function):
+            info = self.sdr.dsp_info(function, name) or {}
+            signature.append((info.get("kind"), info.get("low"), info.get("high"),
+                              tuple(info.get("short") or ())))
+        return tuple(signature)
+
+    def _rebuild_dsp_knobs(self, function):
+        """
+        A function's knobs, built from what the channel offers -- a CHOICE
+        for a choice, a RANGE labelled with its ends, a FLYWHEEL for a stored
+        value that is not what is read. Rebuilt only when that changes: on
+        connecting to another demodulator, or when the SSB demodulator's NR
+        scheme brings a different middle setting.
+        """
+        signature = self._knob_signature(function)
+        if signature == self._knob_layout.get(function):
+            return
+        self._knob_layout[function] = signature
+        for knob in self.dsp_knobs[function]:
+            knob.destroy()
+        knobs = []
+        box = self._knob_boxes[function]
+        for index, name in enumerate(self.sdr.dsp_knob_names(function)):
+            info = self.sdr.dsp_info(function, name) or {}
+            caption, kind = info.get("caption", ""), info.get("kind")
+            if kind == "choice":
+                short = list(info.get("short") or info.get("labels") or ())
+                knob = SmallKnob(box, caption, labels=short,
+                                 widest_label=max(short, key=len) if short else "M",
+                                 on_set=lambda value, f=function, i=index:
+                                 self._dsp_set(f, i, value))
+            elif kind == "range":
+                low, high = info["low"], info["high"]
+                knob = SmallKnob(box, caption, span=(low, high),
+                                 widest_label=max(str(low), str(high), key=len),
+                                 on_set=lambda value, f=function, i=index:
+                                 self._dsp_set(f, i, value))
+            else:
+                knob = SmallKnob(box, caption,
+                                 on_step=lambda clicks, f=function, i=index:
+                                 self._dsp_step(f, i, clicks))
+            knob.pack(side="left")
+            knobs.append(knob)
+        self.dsp_knobs[function] = knobs
 
     def _draw_dsp_knobs(self, from_sdr=False):
         """
-        The AGC and NR knobs, each on its own tab: captions, values, live or
-        greyed. `from_sdr` takes the values afresh from the SDR -- on
-        connecting, or when changed there -- rather than from what the knobs
-        last showed.
+        Every function's knobs: rebuilt if what they set has changed, then
+        captions, values, live or greyed. `from_sdr` takes the values afresh
+        from the SDR -- on connecting, or when changed there -- rather than
+        from what the knobs last showed.
         """
         if from_sdr:
             for key in [k for k in self._knob_values if isinstance(k, tuple)]:
                 del self._knob_values[key]
-        for function, knobs in self.dsp_knobs.items():
-            self._draw_function_knobs(function, knobs)
+        for function in self.dsp_knobs:
+            self._rebuild_dsp_knobs(function)
+            self._draw_function_knobs(function, self.dsp_knobs[function])
 
     def _draw_function_knobs(self, function, knobs):
-        """One function's three knobs. NR's middle one follows its scheme."""
-        for knob, name in zip(knobs, self._dsp_knob_names(function)):
-            knob.set_caption(self.DSP_KNOB_CAPTIONS.get((function, name), ""))
+        """One function's knobs: caption, pointer and value, live where settable."""
+        for knob, name in zip(knobs, self.sdr.dsp_knob_names(function)):
+            info = self.sdr.dsp_info(function, name) or {}
+            knob.set_caption(info.get("caption", ""))
             if self.sdr.has_dsp_setting(function, name):
                 value = self._knob_values.setdefault(
                     (function, name), self.sdr.dsp_setting(function, name))
-                # A RANGE knob's ends follow the setting -- NR's middle knob
-                # changes setting with the scheme -- and its pointer the value.
-                if knob.is_range:
+                if knob.kind == "range":
                     knob.set_span(*self.sdr.dsp_range(function, name))
+                if knob.is_range:
                     knob.set_position(value)
                 # Shown either way; turnable only where the SDR takes it --
-                # NR's scheme is SDRangel's, set in its own NR dialog.
+                # the SSB demodulator's NR scheme is SDRangel's to set.
                 knob.set_live(self.sdr.dsp_adjustable(function, name))
                 knob.show(self.sdr.dsp_setting_text(function, name, value))
             else:
@@ -1348,7 +1730,8 @@ class UbitxCecDesktop(sCTk):
         S-meter, where a reading belongs -- beside the threshold it read as
         part of the squelch setting.
         """
-        if not self.sdr.has_squelch:
+        # Only while Gqrx's squelch pop-up is open: nowhere else shows it.
+        if not self.sdr.has_squelch or self.squelch_knob is None:
             return
         # The KNOB'S value, not the SDR's: while it is being turned, the SDR
         # has not been sent the new threshold yet -- that waits for the knob
@@ -1388,13 +1771,52 @@ class UbitxCecDesktop(sCTk):
             value = self.model.s_value
         self.s_meter.set(s_value=value, sig_text=text)
 
+    def _volume_set(self, value):
+        """
+        The volume knob moved: shown at once, sent when it settles (see
+        SDR_Link.set_volume). The level before is kept a moment, so a
+        double-click -- whose first click steps the knob -- can put it back.
+        """
+        self._volume_before = (time.monotonic(), self._volume_level)
+        self._volume_level = value
+        self.sdr.set_volume(value)
+        self._show_volume()
+
+    def _volume_double(self):
+        """
+        Double-click on the volume knob: mute, or unmute. Its first click has
+        already stepped the knob down one; that step is undone.
+        """
+        before = self._volume_before
+        if before and time.monotonic() - before[0] < 0.8:
+            self._volume_level = before[1]
+            self.sdr.set_volume(self._volume_level)
+        self._volume_before = None
+        self._mute_pressed()
+        self._show_volume()
+
+    def _show_volume(self):
+        """The volume knob: its level, or "muted". Repainted only on a change."""
+        knob = getattr(self, "volume_knob", None)
+        if knob is None:
+            return
+        muted = bool(self.sdr.muted)
+        shown = (int(round(self._volume_level)), muted)
+        if shown == self._volume_shown:
+            return
+        self._volume_shown = shown
+        knob.set_position(shown[0])
+        knob.show("muted" if muted else f"{shown[0]}")
+
     def _sdr_audio_changed(self):
         """
         The SDR's audio level or mute changed -- in the SDR itself, or by
         connecting. The slider moves to match; set() on a slider does not
         fire its command, so this cannot loop back to the SDR.
         """
-        self.volume_slider.set(self.sdr.get_volume())
+        self._volume_before = None
+        self._volume_shown = None
+        self._volume_level = self.sdr.get_volume()
         self._show_rf_gain()
         self._draw_dsp_knobs(from_sdr=True)
         if self.sdr.has_squelch and self.sdr.squelch is not None:
@@ -1508,59 +1930,231 @@ class UbitxCecDesktop(sCTk):
                                      width=460, height=46)
         self.p_meter.grid(row=0, column=1, sticky="ew", padx=(4, 0))
 
-        # Actions ----------------------------------------------------------
-        actions = sCTkFrame(page, fg_color="transparent", border_width=0)
-        actions.grid(row=3, column=0, sticky="ew", padx=6, pady=(4, 2))
-
-        sCTkButtonPrimary(actions, text="Log QSO", width=96,
-                          command=self._log_qso).pack(side="left", padx=(0, 4))
-
-        for key, label in (("split", "Split"), ("rit", "RIT")):
-            btn = sCTkButtonSecondary(actions, text=label, width=64,
-                                      command=lambda k=key: self._toggle(k))
-            btn.pack(side="left", padx=2)
-            self._toggles[key] = btn
-
-        sCTkButtonSecondary(actions, text="A ⇄ B", width=64,
-                            command=self._swap).pack(side="left", padx=2)
-
-        sCTkButtonSecondary(actions, text="A→B", width=64,
-                            command=self._copy_AtoB).pack(side="left", padx=2)
-
-        # Lock, then TX off, then Mute and its volume -- the two "stop"
-        # controls together, and the two audio controls together.
-        self._toggles["locked"] = sCTkButtonSecondary(
-            actions, text="Lock", width=64,
-            command=lambda: self._toggle("locked"))
-        self._toggles["locked"].pack(side="left", padx=2)
-
-        # Transmit inhibit lives on Operate, not behind a tab. It is the
-        # control you want when something is wrong -- a bad SWR, the wrong
-        # antenna, a neighbour on frequency -- and hunting for it is exactly
-        # what you cannot afford then.
-        self._toggles["tx_inhibit"] = sCTkButtonSecondary(
-            actions, text="TX off", width=68,
-            command=lambda: self._toggle("tx_inhibit"))
-        self._toggles["tx_inhibit"].pack(side="left", padx=2)
-
-        # Wider than Lock: its label says which receiver it mutes.
-        self._toggles["muted"] = sCTkButtonSecondary(
-            actions, text="Mute", width=78,
-            command=lambda: self._toggle("muted"))
-        self._toggles["muted"].pack(side="left", padx=2)
-
-        # Volume on Operate, beside the Mute it goes with -- it is something
-        # you reach for while operating, not a setting. Asked of the SDR
-        # rather than done here: see SDR_Link.set_volume. Active only when
-        # listening through SDR++; the rig has no volume command, its level
-        # is the knob on the front panel.
+        # Role controls ----------------------------------------------------
         #
-        # 143 wide, up from 110: at 110 the knob took a large share of the
-        # track, leaving little travel to set a level with.
-        self.volume_slider = sCTkSlider(
-            actions, from_=0, to=100, width=143,
-            command=lambda value: self.sdr.set_volume(value))
-        self.volume_slider.pack(side="left", padx=(4, 2))
+        # RECEIVE ON THE LEFT, TRANSMIT ON THE RIGHT. The receive group --
+        # filter, the listening aids' lamps, RF gain -- then band and mode,
+        # packed together towards the RX panel; the transmit group -- Split,
+        # A<->B, A->B, and the offsets -- pinned under the TX panel. The
+        # spare width goes between them, so band and mode sit close to what
+        # they are mostly changed alongside.
+        role_row = sCTkFrame(page, fg_color="transparent", border_width=0)
+        role_row.grid(row=2, column=0, sticky="ew", padx=6, pady=(2, 0))
+        # Left to right: the lamps, the filter beneath; band over mode, centred
+        # between the lamps and the knobs; RF gain and volume, with spare
+        # width either side of them; the transmit group, pinned right under
+        # the TX panel. Columns 1 and 3 share the spare width equally.
+        role_row.grid_columnconfigure(0, weight=0)
+        role_row.grid_columnconfigure(1, weight=1)
+        role_row.grid_columnconfigure(2, weight=0)
+        role_row.grid_columnconfigure(3, weight=1)
+        role_row.grid_columnconfigure(4, weight=0)
+
+        # Receive controls, under the receive frequency --------------------
+        rx_column = sCTkFrame(role_row, fg_color="transparent", border_width=0)
+        rx_column.grid(row=0, column=0, sticky="nw")
+
+        # THE LISTENING AIDS -- AGC, NR, Notch, SQL, NB, CW -- a row of LAMPS.
+        #
+        # What every SDR shares is that a function exists and is on or off,
+        # and the lamp says that the same way for all of them: PRESSED while
+        # on -- the button's own held pressed state, coloured by its theme's
+        # pressed_map -- plain while off, greyed where the SDR has none.
+        # CLICKING THE LAMP SWITCHES IT, the thing done while listening.
+        #
+        # What differs between SDRs -- the controls behind a function, in
+        # that SDR's own terms -- is in a POP-UP, opened by the small arrow
+        # beside the lamp: the WDSP receiver's AGC is mode, top, slope and
+        # hang, the SSB demodulator's time, threshold and gate; Gqrx's
+        # squelch a dBFS threshold with A and R. Built from the transport's
+        # description of the channel (rest_sdr.CHANNEL_DSP), so nothing here
+        # maps one SDR's controls onto another's. See AidPopup.
+        aids = sCTkFrame(rx_column, fg_color="transparent", border_width=0)
+        aids.grid(row=0, column=0, sticky="nw", pady=(2, 0))
+        self.aids_lamps, self._lamp_arrows = {}, {}
+        for column, (key, text) in enumerate(self.AIDS_LAMPS):
+            cell = sCTkFrame(aids, fg_color="transparent", border_width=0)
+            cell.grid(row=column // 3, column=column % 3, padx=2, pady=2, sticky="w")
+            lamp = sCTkButtonSecondary(cell, text=text, width=52, height=26,
+                                       font=("Arial", 12),
+                                       command=lambda k=key: self._lamp_clicked(k))
+            lamp.pack(side="left")
+            arrow = sCTkButtonTertiary(cell, text="\u25be", width=16, height=26,
+                                       font=("Arial", 12),
+                                       command=lambda k=key: self._open_aid(k))
+            arrow.pack(side="left", padx=(1, 0))
+            self.aids_lamps[key], self._lamp_arrows[key] = lamp, arrow
+        self._lamp_states, self._lamp_live = {}, {}
+
+        # THE FILTER, under the lamps on ONE line: "Filter", wide, narrow,
+        # reset, then its width. A clear gap above it, so it does not read
+        # as more of the lamps -- it is the passband, not a listening aid.
+        # Kept, so they can be greyed out when the SDR takes no filter width
+        # -- see _show_sdr_status.
+        self.filter_buttons = []
+        filter_row = sCTkFrame(rx_column, fg_color="transparent", border_width=0)
+        filter_row.grid(row=1, column=0, sticky="w", pady=(14, 0))
+        sCTkLabelTertiary(filter_row, text="Filter",
+                          font=("Arial", 11)).pack(side="left", padx=(2, 6))
+        for text, action in (("wide", lambda: self._filter(+1)),
+                             ("narrow", lambda: self._filter(-1)),
+                             ("reset", self._filter_reset)):
+            btn = sCTkButtonSecondary(filter_row, text=text, width=56, height=24,
+                                      font=("Arial", 12), command=action)
+            btn.pack(side="left", padx=1)
+            self.filter_buttons.append(btn)
+        self.filter_label = sCTkLabelPrimary(filter_row, text="2400 Hz",
+                                             font=("Arial", 11))
+        self.filter_label.pack(side="left", padx=(6, 0))
+
+        # What each small knob last showed -- see _dsp_step, _dsp_set,
+        # _rf_gain_set, _squelch_set.
+        self._knob_values = {}
+        # The controls in whichever pop-ups are open, by function -- filled
+        # and emptied by AidPopup. Everything that updates a control looks
+        # here, and finds nothing for a function whose pop-up is closed.
+        self.dsp_switches, self.dsp_knobs = {}, {}
+        self._knob_boxes, self._dsp_notes, self._knob_layout = {}, {}, {}
+        self._switch_states = {}
+        self._popups = {}
+        self.squelch_knob = self.squelch_auto = self.squelch_reset = None
+
+        # RF GAIN, beside the lamps: the SDR hardware's front-end gain, where
+        # it has one. On Operate rather than Receive because it is ridden
+        # while listening -- turned down to drop the noise under a weak CW
+        # signal -- so a large knob, always on show. Greyed, with a note
+        # beneath saying why, while the hardware's own AGC is setting it.
+        # The two knobs share a frame in the middle column, which takes the
+        # spare width -- so they sit centred between band and mode and the
+        # transmit group.
+        knobs = sCTkFrame(role_row, fg_color="transparent", border_width=0)
+        knobs.grid(row=0, column=2, sticky="n")
+        rf_area = sCTkFrame(knobs, fg_color="transparent", border_width=0)
+        rf_area.grid(row=0, column=0, sticky="n", padx=(0, 8))
+        self.rf_gain_knob = SmallKnob(rf_area, "RF gain", span=(0, 50),
+                                      on_set=self._rf_gain_set,
+                                      diameter=RF_GAIN_KNOB_DIAMETER,
+                                      column=RF_GAIN_KNOB_COLUMN, widest_label="50")
+        self.rf_gain_knob.pack()
+        # Packed only while it has something to say -- see _set_rf_gain_note.
+        # An empty label still takes a line's height beneath the knob.
+        self.rf_gain_note = sCTkLabelTertiary(rf_area, text="", font=("Arial", 10),
+                                              wraplength=110, justify="center")
+
+        # VOLUME, beside RF gain and the same size: the two knobs ridden
+        # while listening. A RANGE knob, 0-100 -- the SDR's level spread
+        # evenly over its range (see SDR_Link.get_volume). DOUBLE-CLICK
+        # MUTES, and again unmutes; while muted the value beneath says so.
+        # It acts on the SDR, so it is greyed while listening through the
+        # rig, whose level is its front-panel knob.
+        volume_area = sCTkFrame(knobs, fg_color="transparent", border_width=0)
+        volume_area.grid(row=0, column=1, sticky="n")
+        self.volume_knob = SmallKnob(volume_area, "Volume", span=(0, 100),
+                                     on_set=self._volume_set,
+                                     on_double=self._volume_double,
+                                     diameter=RF_GAIN_KNOB_DIAMETER,
+                                     column=RF_GAIN_KNOB_COLUMN, widest_label="100")
+        self.volume_knob.pack()
+        # The level before the latest step -- see _volume_double.
+        self._volume_before = None
+        self._volume_shown = None
+        # The knob's level. NOT asked of the SDR on every refresh: for the
+        # computer's own volume that runs an external program. Taken from
+        # the SDR when it reports a change -- see _sdr_audio_changed.
+        self._volume_level = 50
+
+        # Band and mode, beside the receive group --------------------------
+        # Band ABOVE mode, between the lamps and the knobs. They act on both frequencies, but are changed alongside
+        # receiving.
+        centre = sCTkFrame(role_row, fg_color="transparent", border_width=0)
+        centre.grid(row=0, column=1, padx=12, sticky="n")   # centred in its cell
+
+        # Band is a short ordered list you step through, which is what a
+        # spinbox is. It also shows where you are without being read.
+        self.band_picker = sCTkSpinbox(
+            centre, values=[b[0] for b in self.model.BANDS], wrap=False, width=110,
+            command=self._on_band)
+        self.band_picker.pack(pady=(2, 8))
+
+        # Mode is DIRECT selection, not a rotary: you jump between modes
+        # rather than sweeping through them.
+        self.mode_picker = sCTkSegmentedButton(
+            centre, values=MODES, command=self._on_mode)
+        self.mode_picker.pack()
+
+        # BANDWIDTH, under the modes: how wide a band the SDR samples -- what
+        # its spectrum and waterfall show (SDRangel: the device's
+        # decimation). A slider over the widths the device offers, narrowest
+        # at the left; the width itself beside it. Greyed where the SDR has
+        # no such setting. After it moves, the view is placed on the band
+        # again -- see SDR_Link.set_bandwidth.
+        width_row = sCTkFrame(centre, fg_color="transparent", border_width=0)
+        width_row.pack(pady=(6, 0))
+        sCTkLabelTertiary(width_row, text="Bandwidth",
+                          font=("Arial", 11)).pack(side="left", padx=(0, 6))
+        self.bandwidth_slider = sCTkSlider(
+            width_row, from_=0, to=1, number_of_steps=1, width=110,
+            command=self._bandwidth_moved)
+        self.bandwidth_slider.pack(side="left")
+        self.bandwidth_label = sCTkLabelPrimary(width_row, text=" ",
+                                                font=("Arial", 11), width=64)
+        self.bandwidth_label.pack(side="left", padx=(6, 0))
+        # What the slider was last set to show: (choices, width, live).
+        self._bandwidth_shown = None
+
+
+        # Transmit controls, under the transmit frequency ------------------
+        #
+        # Row 1: Split, A<->B, A->B -- what sets up the transmit VFO. Row 2:
+        # the offsets, which place it. Simplex is gone: it did what A->B
+        # does, TX back onto RX.
+        #
+        # The offsets are DIMMED out of split, not hidden: hiding them moved
+        # everything around them each time split toggled. They exist because
+        # a pileup is the one time the dial is too slow -- the DX says "up 5"
+        # and fifty clicks later someone else has him. The note beneath says
+        # where TX is; it sits under the buttons so its changing width never
+        # moves them.
+        offset_column = sCTkFrame(role_row, fg_color="transparent",
+                                  border_width=0)
+        offset_column.grid(row=0, column=4, sticky="ne", padx=(0, 16), pady=(2, 0))
+
+        self.offset_row = sCTkFrame(offset_column, fg_color="transparent",
+                                    border_width=0)
+        self.offset_row.pack(anchor="e")
+        self._offset_buttons = []
+
+        def tx_button(text, command, column, width=60):
+            btn = sCTkButtonSecondary(
+                self.offset_row, text=text, width=width, height=26,
+                font=("Arial", 12), command=command)
+            btn.grid(row=0, column=column, padx=2, pady=2, sticky="ew")
+            return btn
+
+        self._toggles["split"] = tx_button("Split", lambda: self._toggle("split"), 0)
+        tx_button("A \u21c4 B", self._swap, 1)
+        tx_button("A\u2192B", self._copy_AtoB, 2)
+        # Log QSO at the end of the row: what you do when a contact ends.
+        log = sCTkButtonPrimary(self.offset_row, text="Log QSO", height=26,
+                                font=("Arial", 12), command=self._log_qso)
+        log.grid(row=0, column=3, columnspan=3, padx=(10, 2), pady=2, sticky="ew")
+
+        for column, (label, khz) in enumerate(SPLIT_OFFSETS):
+            btn = sCTkButtonSecondary(
+                self.offset_row, text=label, width=48, height=26, font=("Arial", 12),
+                command=lambda k=khz: self._split_offset(k))
+            btn.grid(row=1, column=column, padx=2, pady=2, sticky="ew")
+            self._offset_buttons.append(btn)
+
+        self.offset_note = sCTkLabelTertiary(offset_column, text="",
+                                             font=("Arial", 10))
+        self.offset_note.pack(anchor="e", pady=(2, 0))
+
+        # STATUS, under the transmit group. It had a row of its own under
+        # everything, which the window could not shrink away; everything else
+        # in that row has moved into the panels and the groups above.
+        actions = sCTkFrame(offset_column, fg_color="transparent", border_width=0)
+        actions.pack(anchor="e", pady=(4, 0))
 
         # CONNECTION STATUS and the on-top toggle, at the right end of this
         # row. They had a row of their own at the bottom of the window, which
@@ -1586,246 +2180,8 @@ class UbitxCecDesktop(sCTk):
             command=self._toggle_on_top)
         self.on_top_button.pack(side="right", padx=8)
 
-        # Role controls ----------------------------------------------------
-        #
-        # Three columns. The outer two sit under the frequency they belong to
-        # -- the filter is a RECEIVE property, the offsets are TRANSMIT ones
-        # -- and band and mode go between them, because they act on both and
-        # would be claiming otherwise under either panel.
-        #
-        # The middle column takes no spare width, so the two role groups stay
-        # pinned under their own panels as the window grows.
-        role_row = sCTkFrame(page, fg_color="transparent", border_width=0)
-        role_row.grid(row=2, column=0, sticky="ew", padx=6, pady=(2, 0))
-        role_row.grid_columnconfigure(0, weight=1)
-        role_row.grid_columnconfigure(1, weight=0)
-        role_row.grid_columnconfigure(2, weight=1)
-
-        # Split offsets ----------------------------------------------------
-        #
-        # DIMMED out of split, not hidden.
-        #
-        # They mean nothing out of split -- TX and RX are the same frequency,
-        # so an offset from RX is just retuning -- but hiding them moves
-        # everything around them each time split toggles, and a row that
-        # appears and disappears is harder to learn than one that greys. Same
-        # treatment AGC and NR get on the other side.
-        #
-        # They exist because a pileup is the one time the dial is too slow.
-        # The DX says "up 5" and fifty clicks later someone else has him.
-        # A column, not a row: the buttons on the first line and the note
-        # UNDER them.
-        #
-        # Beside them, the note changed width whenever the offset changed --
-        # "transmitting 10 kHz above rx" is wider than "5 kHz" -- and pushed
-        # the whole set of buttons sideways. A control that moves because its
-        # own label grew is worse than no label.
-        offset_column = sCTkFrame(role_row, fg_color="transparent",
-                                  border_width=0)
-        offset_column.grid(row=0, column=2, sticky="e")
-
-        self.offset_row = sCTkFrame(offset_column, fg_color="transparent",
-                                    border_width=0)
-        self.offset_row.pack(anchor="e")
-        self._offset_buttons = []
-
-        sCTkLabelTertiary(self.offset_row, text="tx offset",
-                          font=("Arial", 11)).pack(side="left", padx=(0, 6))
-
-        simplex = sCTkButtonSecondary(self.offset_row, text="simplex", width=74,
-                                      command=lambda: self._split_offset(0))
-        simplex.pack(side="left", padx=2)
-        self._offset_buttons.append(simplex)
-
-        for label, khz in SPLIT_OFFSETS:
-            btn = sCTkButtonSecondary(
-                self.offset_row, text=label, width=58,
-                command=lambda k=khz: self._split_offset(k))
-            btn.pack(side="left", padx=2)
-            self._offset_buttons.append(btn)
-
-        self.offset_note = sCTkLabelTertiary(offset_column, text="",
-                                             font=("Arial", 10))
-        self.offset_note.pack(anchor="e", pady=(2, 0))
-
-        # Band and mode, between the two -----------------------------------
-        # Band ABOVE mode, both centred: two short lines rather than one long
-        # one, which leaves the receive controls beside them room to breathe.
-        centre = sCTkFrame(role_row, fg_color="transparent", border_width=0)
-        centre.grid(row=0, column=1, padx=16, sticky="n")
-
-        # Band is a short ordered list you step through, which is what a
-        # spinbox is. It also shows where you are without being read.
-        self.band_picker = sCTkSpinbox(
-            centre, values=[b[0] for b in self.model.BANDS], wrap=False, width=110,
-            command=self._on_band)
-        self.band_picker.pack(pady=(0, 14))
-
-        # Mode is DIRECT selection, not a rotary: you jump between modes
-        # rather than sweeping through them.
-        self.mode_picker = sCTkSegmentedButton(
-            centre, values=MODES, command=self._on_mode)
-        self.mode_picker.pack()
-
-        # Receive controls, under the receive frequency --------------------
-        # The FILTER on the left; the listening aids beside it, outlined, as
-        # tabs -- AGC, NR, Notch, Squelch; and RF GAIN to their right, next
-        # to band and mode.
-        rx_column = sCTkFrame(role_row, fg_color="transparent", border_width=0)
-        rx_column.grid(row=0, column=0, sticky="w")
-
-        rx_row = sCTkFrame(rx_column, fg_color="transparent", border_width=0)
-        # Top padding lines the filter up with the first line INSIDE the
-        # outlined group beside it -- its border plus its inner padding.
-        rx_row.grid(row=0, column=0, sticky="nw", pady=(4, 0))
-        sCTkLabelTertiary(rx_row, text="filter",
-                          font=("Arial", 11)).pack(side="left", padx=(0, 6))
-        # Kept, so they can be greyed out when the SDR takes no filter width
-        # -- see _show_sdr_status.
-        self.filter_buttons = []
-        for text, width, action in (("wide", 60, lambda: self._filter(+1)),
-                                    ("narrow", 60, lambda: self._filter(-1)),
-                                    ("reset", 56, self._filter_reset)):
-            btn = sCTkButtonSecondary(rx_row, text=text, width=width, command=action)
-            btn.pack(side="left", padx=2)
-            self.filter_buttons.append(btn)
-        self.filter_label = sCTkLabelPrimary(rx_row, text="2400 Hz",
-                                             font=("Arial", 11))
-        self.filter_label.pack(side="left", padx=8)
-
-        # THE LISTENING AIDS -- AGC, NR, Notch, Squelch -- in a thin border:
-        # a row of LAMPS, and beneath it the chosen function's frame. Set
-        # well apart from the filter, so the two groups read as two, and
-        # spanning both of its rows.
-        #
-        # A lamp is PRESSED while its function is on -- the button's own held
-        # pressed state, coloured by its theme's pressed_map -- and plain
-        # while it is not, so what is on shows at a glance whichever frame is
-        # open. Clicking a lamp opens its frame; a thin bar beneath marks the
-        # open one. The bar is a frame of its own, not the button's border:
-        # the button repaints its colours and border from its theme on every
-        # state change, so anything set on it from outside does not last.
-        # Each frame holds only its own controls: AGC and NR an on/off
-        # switch and three knobs; Notch nothing to drive in SDRangel's SSB
-        # demodulator; Squelch, Gqrx's own, its knob with A and R to the
-        # right and no switch, since fully open (R) is its "off". The frames
-        # share one grid cell and the chosen one is raised, so the group
-        # keeps one size whichever shows; each is centred in the cell.
-        aids = sCTkFrame(rx_column, fg_color="transparent", border_width=1)
-        aids.grid(row=0, column=1, rowspan=2, sticky="nw", padx=(28, 0))
-
-        lamp_row = sCTkFrame(aids, fg_color="transparent", border_width=0)
-        lamp_row.pack(padx=6, pady=(5, 2))
-        self.aids_lamps, self._lamp_bars = {}, {}
-        for key, text in self.AIDS_LAMPS:
-            column = sCTkFrame(lamp_row, fg_color="transparent", border_width=0)
-            column.pack(side="left", padx=2)
-            lamp = sCTkButtonSecondary(column, text=text, width=56,
-                                       command=lambda k=key: self._open_aid(k))
-            lamp.pack()
-            bar = sCTkFrame(column, fg_color="transparent", border_width=0,
-                            width=44, height=3, corner_radius=1)
-            bar.pack(pady=(2, 0))
-            self.aids_lamps[key], self._lamp_bars[key] = lamp, bar
-        self._lamp_states, self._lamp_open_shown = {}, None
-
-        frames = sCTkFrame(aids, fg_color="transparent", border_width=0)
-        frames.pack(padx=6, pady=(0, 5))
-        self.aids_pages, self._aid_frames = {}, {}
-        for key, _ in self.AIDS_LAMPS:
-            cell = sCTkFrame(frames, fg_color="transparent", border_width=0)
-            cell.grid(row=0, column=0, sticky="nsew")
-            inner = sCTkFrame(cell, fg_color="transparent", border_width=0)
-            inner.pack(expand=True)
-            self._aid_frames[key] = cell
-            self.aids_pages[key] = inner
-
-        # What each small knob last showed -- see _dsp_step, _dsp_set,
-        # _rf_gain_set, _squelch_set.
-        self._knob_values = {}
-
-        # AGC AND NR: the SDR demodulator's own, where it has them
-        # (SDRangel) -- live then, greyed otherwise. Each frame: an on/off
-        # switch and three knobs -- AGC's time, threshold and gate; NR's
-        # scheme, the scheme's own setting, and alpha. The knobs are live
-        # wherever the function has them, on or off, so they can be set
-        # before it is switched on. See _draw_dsp_knobs.
-        self.dsp_switches, self.dsp_knobs = {}, {}
-        for function in ("agc", "nr"):
-            page = self.aids_pages[function]
-            # FIX: sCTkSwitch calls its command WITH the switch's new value
-            # (1 or 0) when the command can take one -- and a lambda with a
-            # default argument can, so that value arrived as the function's
-            # name: KeyError: 1. The value is taken explicitly now.
-            switch = sCTkSwitch(page, text="", width=44,
-                                command=lambda value, f=function: self._dsp_switched(f, value))
-            switch.pack(side="left", padx=(2, 6))
-            switch.state("disabled")
-            self.dsp_switches[function] = switch
-            # The first knob a FLYWHEEL -- AGC's time constant is stored as
-            # a power of two, and NR's scheme only shows -- the other two
-            # RANGE knobs, whose raw numbers are what an operator reads. The
-            # spans here are placeholders until connecting sets the real
-            # ones -- see _draw_function_knobs.
-            knobs = [SmallKnob(page, "", on_step=lambda clicks, f=function:
-                               self._dsp_step(f, 0, clicks))]
-            for index in (1, 2):
-                knobs.append(SmallKnob(page, "", span=(0, 100),
-                                       on_set=lambda value, f=function, i=index:
-                                       self._dsp_set(f, i, value)))
-            for knob in knobs:
-                knob.pack(side="left")
-            self.dsp_knobs[function] = knobs
-
-        # NOTCH: nothing to switch, and why.
-        self.notch_note = sCTkLabelTertiary(self.aids_pages["notch"], text="",
-                                            font=("Arial", 10), wraplength=200,
-                                            justify="center")
-        self.notch_note.pack()
-
-        # SQUELCH: the SDR's own, where it has one (Gqrx), in its own units
-        # so it reads as the SDR shows it -- one unit a click. Greyed where
-        # it has none (SDRangel). A and R to the right of the knob, as on
-        # Gqrx's own squelch: set just above what is heard now, and open
-        # fully -- named as Gqrx names them. Range and state are set on
-        # connecting -- see _show_sdr_status -- and it follows a change made
-        # in the SDR itself, as volume does.
-        sq_page = self.aids_pages["squelch"]
-        self.squelch_knob = SmallKnob(sq_page, "Squelch", span=(-150, 0),
-                                      on_set=self._squelch_set)
-        self.squelch_knob.pack(side="left")
-        sq_buttons = sCTkFrame(sq_page, fg_color="transparent", border_width=0)
-        sq_buttons.pack(side="left", padx=(4, 0))
-        self.squelch_auto = sCTkButtonSecondary(sq_buttons, text="A", width=26,
-                                                command=self.sdr.auto_squelch)
-        self.squelch_auto.pack(pady=1)
-        self.squelch_reset = sCTkButtonSecondary(sq_buttons, text="R", width=26,
-                                                 command=self.sdr.reset_squelch)
-        self.squelch_reset.pack(pady=1)
-
-        self._aid_open = "agc"
-        self._aid_frames["agc"].tkraise()
-
-        # RF GAIN, to the right of the box, next to band and mode: the SDR
-        # hardware's front-end gain, where it has one. On Operate rather than
-        # Receive because it is ridden while listening -- turned down to drop
-        # the noise under a weak CW signal -- so a large knob.
-        # Greyed, with a note beneath saying why, while the hardware's own
-        # AGC is setting the gain.
-        rf_area = sCTkFrame(rx_column, fg_color="transparent", border_width=0)
-        # Room on the right as well: the band and mode column beside it
-        # clipped the knob's right-hand end label.
-        rf_area.grid(row=0, column=2, rowspan=2, sticky="n", padx=(16, 12))
-        self.rf_gain_knob = SmallKnob(rf_area, "RF gain", span=(0, 50),
-                                      on_set=self._rf_gain_set,
-                                      diameter=RF_GAIN_KNOB_DIAMETER,
-                                      column=RF_GAIN_KNOB_COLUMN, widest_label="50")
-        self.rf_gain_knob.pack()
-        # Packed only while it has something to say -- see _set_rf_gain_note.
-        # An empty label still takes a line's height beneath the knob.
-        self.rf_gain_note = sCTkLabelTertiary(rf_area, text="", font=("Arial", 10),
-                                              wraplength=110, justify="center")
-
+        # Pop-ups left pinned last time, back where they were.
+        self.after(800, self._restore_pinned_aids)
 
     def _build_rx(self, page):
         wrap = sCTkFrame(page, fg_color="transparent", border_width=0)
@@ -3561,8 +3917,7 @@ class UbitxCecDesktop(sCTk):
         # startup would cancel the first.
         if self._ready and self.model.muted != rig_should_be_muted:
             self.connection.Toggle_Speaker()
-        self.volume_slider.configure(
-            state="normal" if source == "SDR" else "disabled")
+        self.volume_knob.set_live(source == "SDR")
         self.refresh()
 
     def _split_offset(self, khz):
@@ -3644,6 +3999,9 @@ class UbitxCecDesktop(sCTk):
                 # primary slot and retuned the TRANSMIT vfo while receive
                 # stayed put. Changing band is a receive action: it is where
                 # you want to listen.
+                # The SDR's view starts at the band's lower edge when the
+                # rig gets there -- see SDR_Link.frame_band.
+                self.sdr.frame_band(freq, endfreq)
                 self.connection.set_role_frequency("rx", freq)
                 # Bands imply modes -- below 10 MHz is LSB by convention.
                 # If in CW mode, maintain CW mode
@@ -3654,6 +4012,44 @@ class UbitxCecDesktop(sCTk):
                 self.connection.set_mode(mode)
                 self.mode_picker.set(mode)    #MJH #probably shouldnt be here as rig should set it
                 break
+
+    @staticmethod
+    def _width_text(hz):
+        return f"{hz / 1_000_000:g} MHz" if hz >= 1_000_000 else f"{hz / 1000:g} kHz"
+
+    def _bandwidth_moved(self, value):
+        """The bandwidth slider moved: the width shown at once, sent when it settles."""
+        choices = self.sdr.bandwidth_choices()
+        if not choices:
+            return
+        width = choices[max(0, min(len(choices) - 1, int(round(value))))]
+        self.bandwidth_label.configure(text=self._width_text(width))
+        self._bandwidth_shown = (tuple(choices), width, True)
+        # Held while it is sent: the SDR reports the old width until then,
+        # and the slider would jump back mid-drag.
+        self._bandwidth_held_until = time.monotonic() + 1.5
+        self.sdr.set_bandwidth(width)
+
+    def _show_bandwidth(self):
+        """The bandwidth slider: the SDR's choices and width, or greyed. Only on a change."""
+        slider = getattr(self, "bandwidth_slider", None)
+        if slider is None or time.monotonic() < getattr(self, "_bandwidth_held_until", 0):
+            return
+        choices = tuple(self.sdr.bandwidth_choices())
+        width = self.sdr.bandwidth if choices else None
+        shown = (choices, width, bool(choices))
+        if shown == self._bandwidth_shown:
+            return
+        self._bandwidth_shown = shown
+        if choices:
+            steps = max(1, len(choices) - 1)
+            slider.configure(from_=0, to=steps, number_of_steps=steps, state="normal")
+            nearest = min(range(len(choices)), key=lambda i: abs(choices[i] - (width or 0)))
+            slider.set(nearest)
+            self.bandwidth_label.configure(text=self._width_text(width or choices[nearest]))
+        else:
+            slider.configure(state="disabled")
+            self.bandwidth_label.configure(text=" ")
 
     def _filter_reset(self):
         """Back to the configured default width for the current mode."""
@@ -3892,22 +4288,26 @@ class UbitxCecDesktop(sCTk):
         self.panel_tx.update_view(s)
 
         # Latched controls read as lit or unlit.
+        # FIX: PRESSED, not recoloured. Setting fg_color was overwritten
+        # whenever the theme repainted the button -- the lamps' lesson -- and
+        # set_pressed is the library's own "on" look. Repainted only on a
+        # change.
         for key, btn in self._toggles.items():
-            if key == "muted":
-                # Lit for whichever receiver Mute acts on, and says which, so
-                # there is no doubt what pressing it will silence.
-                on = (self.sdr.muted if self._listen_source == "SDR"
-                      else s.muted)
-                btn.configure(text=("Mute SDR" if self._listen_source == "SDR"
-                                    else "Mute rig"))
-            else:
-                on = getattr(s, key)
-            btn.configure(fg_color=("#0F6E56", "#0F6E56") if on else
-                          ("#E2E8F0", "#1F2937"))
+            on = bool(getattr(s, key))
+            if on != self._toggle_shown.get(key):
+                self._toggle_shown[key] = on
+                btn.set_pressed(on)
+        # TX off: the alarm colour while on, not pressed.
+        inhibited = bool(s.tx_inhibit)
+        if inhibited != self._toggle_shown.get("tx_inhibit"):
+            self._toggle_shown["tx_inhibit"] = inhibited
+            self.tx_off_button.set_alarm_state(inhibited)
 
         # The listening aids' lamps and switches. (Guarded inside: refresh
         # can run before the Operate tab is built.)
         self._show_lamps()
+        self._show_volume()
+        self._show_bandwidth()
 
         # The split offsets are live only in split. state() repaints, so it
         # is called only when the answer changes.

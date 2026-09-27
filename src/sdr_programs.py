@@ -45,8 +45,19 @@ MUTE = "mute"
 
 AGC = "agc"              # the demodulator's AGC, on or off -- a receiver's AGC switch
 NR = "nr"                # the demodulator's noise reduction, on or off
+NOTCH = "notch"          # an automatic notch (SDRangel WDSP's ANF), on or off
+NB = "nb"                # a noise blanker, on or off
+CW_PEAK = "cw_peak"      # a CW peaking filter, on or off
+# A squelch with a SWITCH of its own and a threshold in percent (SDRangel's
+# WDSP receiver) -- not SQUELCH, which is a threshold in the SDR's own units
+# with fully open as its "off" (Gqrx).
+SQUELCH_SWITCH = "squelch_switch"
 RF_GAIN = "rf_gain"      # the SDR hardware's front-end gain, in dB
-CAPABILITIES = {FREQUENCY, MODE, FILTER, SIGNAL, VOLUME, SQUELCH, MUTE, AGC, NR, RF_GAIN}
+# The width of the band the SDR samples -- what its spectrum and waterfall
+# show. SDRangel: the device's decimation.
+BANDWIDTH = "bandwidth"
+CAPABILITIES = {FREQUENCY, MODE, FILTER, SIGNAL, VOLUME, SQUELCH, MUTE, AGC, NR,
+                NOTCH, NB, CW_PEAK, SQUELCH_SWITCH, RF_GAIN, BANDWIDTH}
 
 # A "CW" from an SDR with no sideband of its own: the application has to
 # choose one -- see SDR_Link._from_sdr_mode. Written "cw" in the file.

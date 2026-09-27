@@ -298,38 +298,184 @@ each tested against a running SDRangel before the next. Findings are in
    needs a matching shift in CW -- the last piece of this step to build.
    Without an antenna, any steady CW carrier the dongle can hear will do (a
    signal generator, for one).
-6. AGC -- BUILT, tested against a stand-in; NOT yet confirmed on the
-   station. The Operate tab's AGC button drives the DEMODULATOR's AGC
-   (`SSBDemodSettings.agc`, 0/1) -- a receiver's AGC switch -- latched, and
-   following a change made in SDRangel. Greyed for SDRs without one.
-   RF GAIN -- BUILT, tested against a stand-in: a slider on Operate beneath
-   squelch, for riding while listening. The device's (`rtlSdrSettings.gain`,
-   tenths of a dB, 0-49.6 on the R820T's fixed steps -- confirmed on the
-   station), described per deviceHwType in `RF_GAIN_DEVICES`; greyed for
-   devices not listed. Greyed, saying so, while the dongle's own AGC
-   (`rtlSdrSettings.agc`) sets the gain; that switch stays in SDRangel.
-   The Receive page's placeholder AGC switch is gone -- one AGC, on Operate.
-   SHARED KNOBS, AGC AND NR -- BUILT, tested against a stand-in. Three small
-   knobs (left click down, right click up, turn) beneath AGC/NR/Notch,
-   shared: left click on AGC or NR switches it and takes the knobs; right
-   click takes them without switching. The holder is outlined; captions
-   follow it. AGC: time (`agcTimeLog2` 4-11, 16-2048 ms), threshold
-   (`agcPowerThreshold` -119..0 dB), gate (`agcThresholdGate` 0-500). NR
-   (`dnr`): scheme (`dnrScheme`), the scheme's own setting -- Average
-   `dnrAboveAvgFactor` 20-99, Avg Std Dev `dnrSigmaFactor` 2-16, Peaks
-   `dnrNbPeaks` 1-40 -- and alpha, dial 0-40 stored as 1 - 10^(-n/10) (0 = no smoothing).
-   RF gain is a knob too. Notch: nothing to drive in SDRangel's SSB
-   demodulator; stays greyed.
-   NR's scheme is READ-ONLY: SDRangel accepts `dnrScheme` over REST without
-   error and does not apply it (PATCHed to 2, read back 0, its dialog stayed
-   on Average -- on the station). The scheme knob shows SDRangel's scheme,
-   greyed; it is chosen in SDRangel's NR dialog, and the middle knob follows.
-   Worth reporting to SDRangel.
-   Scheme numbers confirmed on the station: 0 Average, 1 Avg Std Dev,
-   2 Peaks -- chosen in SDRangel's dialog, the app's caption followed.
+6. AGC, NR and RF gain on the SSB demodulator -- DONE, confirmed on the
+   station, and since folded into step 7's layout: lamps over frames built
+   from the channel. What stays true of the SSB demodulator:
+   AGC (`agc`): time (`agcTimeLog2` 4-11, a power of two -- 16-2048 ms, a
+   flywheel knob), threshold (`agcPowerThreshold` -119..0 dB), gate
+   (`agcThresholdGate` 0-500).
+   NR (`dnr`): scheme (`dnrScheme`: 0 Average, 1 Avg Std Dev, 2 Peaks --
+   confirmed) is READ-ONLY -- accepted over REST and not applied, an
+   SDRangel bug (see the notes and sdrangel_dnrScheme_report.txt); chosen in
+   SDRangel's NR dialog, and followed. The middle knob is the scheme's own
+   setting: `dnrAboveAvgFactor` 20-99, `dnrSigmaFactor` 2-16, `dnrNbPeaks`
+   1-40. Alpha dial 0-40, stored as 1 - 10^(-n/10) (0 = no smoothing).
+   No notch, squelch, NB or CW peak: those lamps are greyed under it.
+   RF gain (`rtlSdrSettings.gain`, tenths of a dB on the R820T's fixed
+   steps) is the device's, a large Range knob beside the aids; greyed,
+   saying so, while the dongle's own AGC (`rtlSdrSettings.agc`) sets it.
    *Seen, no antenna:* the demodulator AGC "breathes" on noise; much less
    with it off, but not gone. Look again with an antenna.
-   NR and Notch still await a backend.
+7. The WDSP receiver -- BUILT 2026-09-27, tested against a stand-in built from
+   the station's captures (SSBDemod, WDSPRx, ChannelPower); NOT yet on the
+   station. *To check there:* the six lamps and their frames; each switch
+   and knob against SDRangel's WDSP window; the S-meter from Channel Power
+   (moves with the filter and with a click in the waterfall); CW -- RIT,
+   squelch type, ANF off, peak on the tone -- and whether CW is then heard
+   at the pitch (step 5's open question, still wanting an antenna); the
+   selector knobs' labels fit; and the AGC slope captured as 3.5 dB now
+   shows 4 (held in whole dB -- turning it writes whole dB).
+   SDRangel's other SSB/CW channel, `WDSPRx`
+   (plugins/channelrx/wdsprx), built on NR0V's WDSP library from OpenHPSDR
+   and Pi-HPSDR; its author recommends it over the SSB demodulator for SSB
+   and CW. It has what the SSB demodulator lacks: an automatic NOTCH (ANF --
+   not for CW, it would cancel the signal), a SQUELCH (voice type for SSB,
+   AM/level type for AM and CW), NR and NR2, two noise blankers, a CW
+   peaking filter, and RIT -- set to minus the CW pitch it puts the signal
+   on the marker, which bears on the CW pitch question in step 5.
+   Its AGC differs from the SSB demodulator's: on/off; mode Long, Slow,
+   Medium or Fast (each fixing hang and decay); slope and hang threshold;
+   and a top value in dB. The AGC frame's knobs change with the channel.
+   *Plan:* a second channel type in rest_sdr.py -- its own settings block
+   and entries in DSP_FUNCTIONS -- so the application drives whichever of
+   the two SDRangel has. Notch and SQL then work under WDSP.
+   *WARNING:* `GET .../channel/N/report` on a WDSPRx channel CRASHES
+   SDRangel -- a null pointer in its report code (see the notes; to report
+   upstream). Never read it. The S-meter comes instead from a Channel Power
+   channel in the same device set, kept on the WDSP passband -- confirmed
+   on the station to report channelPowerDB safely.
+   *Decided:* prefer WDSP when SDRangel has it, the SSB demodulator
+   otherwise. Captures DONE: every field, its numbering and its dial range
+   are in the notes, and PATCH applies (unlike SSBDemod's dnrScheme).
+   *Decided, the S-meter -- FALLBACK, never required:* a Channel Power
+   channel when there is one, for EITHER demodulator (one source, one
+   calibration); without it, the SSB demodulator's own report; under WDSP
+   without it, no reading. Said once in the console which it is. Missing
+   Channel Power costs the meter and nothing else -- never the connection.
+   *Decided, the Operate tab under WDSP:* the lamps and frames are BUILT
+   FROM WHAT THE CHANNEL OFFERS, so each demodulator shows its own knobs.
+     AGC    switch; mode as a selector (Long/Slow/Medium/Fast --
+            sCTkDialSelector); top, slope, hang threshold as Range knobs
+     NR     switch; scheme NR/NR2 -- live now, REST applies it; NR2's
+            other choices left in SDRangel
+     Notch  the ANF switch
+     SQL    a real switch (WDSP has one); threshold 0-100 %; A needs a
+            signal level (Channel Power), R sets 0
+     NB     NEW LAMP: switch; NB/NB2; threshold
+     CW     NEW LAMP: the CW peaking filter -- switch; bandwidth; gain.
+            Its peak frequency follows the rig's CW tone, no knob
+   Six lamps -- check the row still fits. *Since reworked:* the lamps in
+   two rows of three; a click switches the function; the arrow beside each
+   opens its controls in a pop-up (closes on Escape or a click elsewhere;
+   PIN keeps it, draggable, several at once, remembered across restarts).
+   Gqrx's squelch lamp: click = A when open, R when closed.
+   *To check at the station:* each lamp toggles; each arrow opens under its
+   lamp; a click back on the main window closes an unpinned one; pinned
+   ones survive a restart in place; switching SDR or demodulator rebuilds
+   open pop-ups; Split, A⇄B, A→B and the offsets on the TX side.
+   *Then:* RIT and a padlock (Lock) as tags in the RX panel's header; TX
+   off beside A→B and Log QSO at the end of that row; Mute is the speaker
+   icon before the volume slider (crossed out while muted). The bottom row
+   is now only mute, volume and status. All latched buttons show ON by the
+   library's pressed state rather than a recoloured fg_color. *To check:*
+   the emoji icons render on macOS (swap to text if not); each tag lights.
+   *Then:* mode on band's line, just right of it; the filter back in a row
+   (wide, narrow, reset) with its width beneath; VOLUME a range knob the
+   size of RF gain, just right of it, 0-100 -- double-click mutes and
+   unmutes (the step its first click made is undone), "muted" beneath
+   while muted, greyed while listening through the rig. The bottom row
+   holds only the status now. *To check:* double-click on the knob mutes
+   without moving the level; the knob follows a volume change made in
+   SDRangel.
+   *Then:* left to right -- lamps with the filter row beneath them; band
+   over mode; RF gain and volume centred in the spare width; the TX group
+   at the right.
+   *Then:* band over mode over the filter (buttons, "filter" and width on
+   one line), centred between the lamps and the knobs; RIT and Lock right
+   of the RX dial, TX off right of the TX dial, all at Split's size; TX off
+   shows the ALARM colour while on.
+   *Then:* the filter back under the lamps with a gap above it ("Filter",
+   wide, narrow, reset, width, one line); RIT/Lock and TX off UNDER each
+   frequency, the note beside them; the TX group 16 px in from the edge;
+   the status (on top, rig ok, sdr) under the TX group -- its own bottom
+   row is gone.
+   *Decided, automatic -- no controls:* in CW, RIT set to minus the CW
+   pitch (the readme's trick: the signal lands on the marker -- may settle
+   step 5's pitch question), undone in SSB; squelch type Voice in SSB and
+   AM in CW (FM never); ANF off in CW, its lamp greyed with a note saying
+   why -- it would notch out the signal.
+   *Left in SDRangel:* equalizer, profiles, audio pan and binaural, the
+   AM/SAM/FM demodulators.
+   NB threshold: 2-50, stored as shown (30 on the dial, 30 captured).
+   CW peak filter: spin boxes, stored as shown -- cwPeakFrequency 600 Hz,
+   cwBandwidth 100 Hz (its -3 dB width), cwGain 2 (linear, not dB).
+   Limits from SDRangel's own dialog definitions (wdsprxcwpeakdialog.ui,
+   wdsprxgui.ui): peak frequency 300-1000 Hz (step 10), bandwidth 20-200 Hz
+   (step 10), gain 1.0-10.0 (step 0.1 -- a FRACTION, unlike every other
+   knob; a Range knob in tenths); RIT frequency -1000..+1000 Hz. So a rig CW
+   tone outside 300-1000 cannot be the peak frequency -- clamp and say so.
+   All dial ranges now in hand.
+8. ARRANGE SDRangel's window -- DROPPED (2026-09-27): done by
+   documentation instead. Tried: rolling the channel windows up through each
+   channel's rollupState works over REST (section names settingsContainer
+   plus spectrumContainer, or dataContainer for Channel Power); moving a
+   window to another workspace works too (PUT .../channel/{n}/workspace)
+   but was not wanted. Not possible over REST: a window's hide (eye) button
+   -- Qt's plain hide(), recorded nowhere -- z-order, and window position or
+   size. Kept here so it is not rediscovered.
+9. SDRangel set up BY the application -- LATER. (Step 8, arranging its
+   windows, was dropped: the windows' layout is left to documentation.) Install SDRangel,
+   plug in a dongle, and the application does the rest: the device set, the
+   dongle in it, a WDSP receiver (or SSB demodulator) and a Channel Power
+   channel, then saved in SDRangel so it is there next time. Possibly a list
+   of the dongles SDRangel can see, to choose one. Today every one of those
+   is a step the operator has to know to take, and the first thing a new
+   user meets.
+   *To find out first* -- believed from SDRangel's API, NOT yet tried:
+   `GET /sdrangel/devices` (the hardware it can see -- the dongle list),
+   `POST /sdrangel/deviceset` (a new device set), `PUT .../device` (put a
+   dongle in it), `POST .../channel` (add a channel by type), and whether a
+   whole SDRangel configuration or preset can be shipped and loaded over
+   REST instead of built step by step. And what SDRangel does when a device
+   set is added while it already has one.
+   *Rule to keep:* the application attaches to what the operator has and
+   only closes what it started. Building a setup is a new kind of reach into
+   somebody else's program, so it happens only when ASKED -- a "Set up
+   SDRangel for me" button on Setup, with what it will add listed first --
+   never automatically on connecting, and never over a setup that exists.
+10. WATERFALL WIDTH from the application -- BUILT (first candidate, the
+   device's sampled band): a "Bandwidth" slider under the modes steps
+   log2Decim over the sample rate's divisions, 48 kHz and up (1024000 gives
+   64k, 128k, 256k, 512k, 1024k); sent when it settles, then the band is
+   framed again. BAND FRAMING: after a band change, and after a bandwidth
+   change, the device centre goes to band start + bandwidth/2 -- never so far
+   that the signal leaves the inner 80 % of the sampled band. The model's
+   BANDS are (name, start, end) -- confirmed. *To check:* each step shows in
+   SDRangel's spectrum; 20 m opens at 14.000 not below; the WDSP channel
+   keeps working at every width; CPU at 1024k. The note below is the
+   original survey.
+   WATERFALL WIDTH, original note. A control on Operate that
+   sets how much spectrum SDRangel's waterfall shows: wide to look round the
+   band, narrow to see a pile-up or a CW signal close up. Three different
+   things in SDRangel are called that, and which one is meant decides it:
+   * THE DEVICE'S SAMPLED BAND -- the main waterfall, 64 kHz now: the
+     dongle's sample rate over 2^`log2Decim` (`rtlSdrSettings`), both
+     settable over REST like the gain. Wider shows more but CHANGES TUNING:
+     the transport moves the channel offset within this band and retunes
+     the centre beyond it (OFFSET_REACH_SHARE), so the band it knows must be
+     re-read when this changes. Also CPU, and the dongle's usable rates.
+   * THE MAIN SPECTRUM'S ZOOM -- the same band, magnified. Whether REST
+     reaches it at all is unknown: SDRangel has per-device-set spectrum
+     settings (`/deviceset/N/spectrum` -- believed, NOT tried); zoom may be
+     GUI-only.
+   * THE CHANNEL'S OWN SPECTRUM -- `spanLog2`, the span beside the passband.
+     On the SSB demodulator a `spanLog2` PATCH did NOT take (see the notes);
+     untried on the WDSP receiver. It also limits the passband -- the span
+     is what the filter is kept inside.
+   *To find out first:* which of the three is the waterfall that matters
+   beside this application, and whether REST moves it. The first is known
+   to be settable and is the likeliest; its cost is the tuning rework.
+   Fits with 8 (Arrange SDRangel), which decides which waterfall is shown.
 
 **Test SDRangel's REST API.** The highest-value open question: does it report
 signal strength, and does it accept filter, AGC and noise-reduction changes?
@@ -498,6 +644,20 @@ across two passes (the "skipping prior byte" floods), and a continuous stream
 froze the interface. Partial reports now carry over; each pass is capped at
 512 bytes.
 
+SEEN AGAIN, 2026-09-27, adapter plugged in: at start-up the line from the rig
+was held LOW for 17344 zero bytes (~3 s at 57600), then came back. The start
+of the boot burst was lost with it -- presets through the primary VFO -- and
+VFO A read 27,926,000, far from the last sessions. A second symptom of the
+same adapter, it seems: it gets into a stuck state. Unplug it when not
+monitoring until it is rewired; if it recurs WITHOUT the adapter, it is not
+the adapter. Unplugging and replugging the adapter cleared it: the next
+start-up was clean, every value arriving -- so the adapter itself gets stuck,
+and a replug resets it. (27,926,000 came back again on the clean start, so
+it is what the rig had stored, not damage.)
+*Possible recovery in software:* when the line comes back after being held
+low during the boot burst, reboot the rig once more to get the burst again
+-- ties in with the item below.
+
 **Ask the rig for values that have not arrived.** *Half done.*
 
 `_read_all_values()` is GONE -- 101 lines that blocked, counted to 26, timed
@@ -606,6 +766,35 @@ connection above.
 ---
 
 <a name="much-later"></a>
+### Waiting on SDRangel -- workarounds to remove when fixed
+
+Checked against 7.27.2-1315-gc43757c88, the latest build as of 2026-09-27.
+After each SDRangel update, run the check; when it passes, remove the
+workaround.
+
+- WDSP RECEIVER'S PASSBAND IS WRITE-ONLY over REST
+  (sdrangel_wdsp_cutoff_report.txt; notes: "WDSP receiver: the passband is
+  write-only"). *Check, app closed:* PATCH `{"rfBandwidth":-3000}` alone to
+  the WDSP channel, then GET -- fixed when it reads back -3000 and
+  SDRangel's window shows LSB. Also drag the far cut in the window and GET
+  -- fixed when the GET follows. *Then remove:* empty
+  `rest_sdr.STALE_PASSBAND_CHANNELS` (one line). That restores the
+  read-back check, following SDRangel's own filter knobs, and separate
+  PATCHes without the passband riding along. Run the USB/LSB/CW switches
+  again afterwards.
+- SSB DEMODULATOR'S dnrScheme IGNORED over REST
+  (sdrangel_dnrScheme_report.txt). *Check:* PATCH `{"dnrScheme":2}`, GET
+  -- fixed when it reads 2. *Then remove:* the scheme's `read_only` in
+  `rest_sdr.CHANNEL_DSP["SSBDemod"]`, so the NR pop-up's scheme knob turns.
+- WDSP RECEIVER'S REPORT CRASHES SDRangel (notes; not yet reported --
+  report text still to write). *Check:* ONLY with nothing unsaved in
+  SDRangel -- GET .../channel/1/report on the WDSP channel. Fixed when it
+  answers. *Then:* remove "WDSPRx" from `rest_sdr.REPORT_UNSAFE`, and the
+  S-meter no longer needs a Channel Power channel under WDSP.
+- NR DIALOG LEAVES THE SSB DEMODULATOR'S WINDOW IGNORING CLICKS
+  (sdrangel_nr_dialog_click_report.txt). Nothing in the app to remove;
+  listed so the report is followed up.
+
 ### Much later
 
 **Fork the theme builder** so a theme can be edited without hand-editing
