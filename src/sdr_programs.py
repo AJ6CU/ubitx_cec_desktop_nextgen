@@ -64,6 +64,9 @@ DECODER = "decoder"
 CAPABILITIES = {FREQUENCY, MODE, FILTER, SIGNAL, VOLUME, SQUELCH, MUTE, AGC, NR,
                 NOTCH, NB, CW_PEAK, SQUELCH_SWITCH, RF_GAIN, BANDWIDTH, DECODER}
 
+# What a signal reading can be measured in -- see Profile.signal_unit.
+SIGNAL_UNITS = ("dBFS", "S9dB")
+
 # A "CW" from an SDR with no sideband of its own: the application has to
 # choose one -- see SDR_Link._from_sdr_mode. Written "cw" in the file.
 CW_EITHER = object()
@@ -101,6 +104,26 @@ class Profile:
         self.self_describing = bool(entry.get("self_describing", False))
         self.known_missing = frozenset(entry.get("known_missing", ()))
         self.known_present = frozenset(entry.get("known_present", ()))
+        # FIX: how long, in seconds, the program may go on reporting its OLD
+        # frequency, mode, level or mute after accepting a change -- SDRoxide
+        # replies "RPRT 0" at once and applies the change a moment later. For
+        # that long, a read-back that differs from what was set is taken as
+        # stale, not as the operator turning the SDR. 0: no such lag.
+        self.settle_seconds = float(entry.get("settle_seconds", 0) or 0)
+        # FIX: a program that takes a filter width only WITH a change of
+        # mode (SDRoxide's rigctl server, 2026-09-28): a new width in the same
+        # mode is sent by way of another mode -- see RigctlSDR._send_mode.
+        self.width_needs_mode_change = bool(entry.get("width_needs_mode_change", False))
+        # FIX: what the signal reading is measured in. "dBFS" (the default):
+        # below the loudest signal the SDR can digitise -- Gqrx, SDRangel;
+        # where S9 falls is a guess (SDR_Link.S9_DBFS). "S9dB": Hamlib's own
+        # meaning of STRENGTH, decibels above (or below) S9 -- SDRoxide,
+        # rigctld -- already calibrated, S9 being -73 dBm on HF.
+        self.signal_unit = entry.get("signal_unit", "dBFS")
+        if self.signal_unit not in SIGNAL_UNITS:
+            print(f"[sdr] {self.name}: signal_unit {self.signal_unit!r} is not one of "
+                  f"{', '.join(SIGNAL_UNITS)} -- taken as dBFS")
+            self.signal_unit = "dBFS"
 
         self.volume_range = tuple(entry["volume_range"]) if entry.get("volume_range") else None
         self.squelch_range = tuple(entry["squelch_range"]) if entry.get("squelch_range") else None

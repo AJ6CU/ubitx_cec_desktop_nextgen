@@ -88,12 +88,35 @@
         }
     },
 
+    "sdroxide": {
+        "name": "SDRoxide",
+        "app_name": "SDRoxide",
+        "launch_as_application": true,
+        "protocol": "rigctl",
+        "port": 4532,
+        "modes": {"LSB": "LSB", "USB": "USB", "CWL": "CW", "CWU": "CW"},
+        "ambiguous_modes": {"CW": "cw"},
+        "self_describing": false,
+        "settle_seconds": 3.0,
+        "width_needs_mode_change": true,
+        "signal_unit": "S9dB",
+        "volume_range": [0.0, 1.0],
+        "squelch_range": [0.0, 1.0],
+        "process_names": ["sdroxide", "sdroxide.exe", "SDRoxide"],
+        "paths": {
+            "darwin": ["/Applications/SDRoxide.app/Contents/MacOS/sdroxide"],
+            "win32": ["C:\\Program Files\\SDRoxide\\sdroxide.exe"],
+            "linux": ["sdroxide"]
+        }
+    },
+
     "rigctld": {
         "name": "rigctld (Hamlib)",
         "protocol": "rigctl",
         "port": 4532,
         "modes": {"LSB": "LSB", "USB": "USB", "CWL": "CWR", "CWU": "CW"},
         "self_describing": true,
+        "signal_unit": "S9dB",
         "volume_range": [0.0, 1.0],
         "squelch_range": [0.0, 1.0],
         "process_names": ["rigctld", "rigctld.exe"],

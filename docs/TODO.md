@@ -413,7 +413,22 @@ each tested against a running SDRangel before the next. Findings are in
    but was not wanted. Not possible over REST: a window's hide (eye) button
    -- Qt's plain hide(), recorded nowhere -- z-order, and window position or
    size. Kept here so it is not rediscovered.
-9. SDRangel set up BY the application -- LATER. (Step 8, arranging its
+9. SDRangel set up BY the application -- DROPPED for DOCUMENTATION
+   (2026-09-28, the operator's decision: too many options -- dongles,
+   channels, order -- for a wizard to get right). Write instead a step-by-
+   step setup guide: the device, the WDSP receiver FIRST, the Channel Power
+   channel, the Morse Decoder, no SSB demodulator, saved. The plan below
+   was for the wizard, kept for the guide's content.
+   Was: NEXT (planned for 2026-09-28).
+   THE PLAN, as the operator put it: a simple WIZARD that starts from an
+   empty SDRangel; asks which dongle (from the ones SDRangel can see); adds
+   the WDSP receiver FIRST (it must be the first channel -- the Morse
+   decoder's window defaults to the first channel, see the notes, "The
+   Morse decoder"), then the Channel Power channel and the Morse Decoder
+   feature, with the decoder's source set to the WDSP receiver. Maybe roll
+   up the power channel's and the decoder's windows (`rollupState` -- see
+   the notes, "SDRangel's windows"). No SSB demodulator.
+   (Step 8, arranging its
    windows, was dropped: the windows' layout is left to documentation.) Install SDRangel,
    plug in a dongle, and the application does the rest: the device set, the
    dongle in it, a WDSP receiver (or SSB demodulator) and a Channel Power
@@ -844,6 +859,75 @@ full, holding as much as its width allows.
 source chosen, decoder running; the decoder's window shows the WDSP
 receiver as source, UDP ticked, Start pressed; text in the strip. DEC off
 restoring filter, AGC and CW peak, and the decoder's UDP box as it was.
+
+### SDRoxide over rigctl -- WORKING (2026-09-28)
+
+A new entry in sdr_programs.json: its Hamlib server (Settings > Servers),
+port 4532 -- the same as SDR++, so not both at once. CONFIRMED at the
+station: tuning both ways, USB/LSB/CW, volume, mute, and the S-meter (its
+STRENGTH is Hamlib's dB over S9, now `"signal_unit": "S9dB"` and shown in
+dBm -- it matched SDRoxide's own meter). It does not choose a mode from the
+band plan when tuned.
+Found with nc: it answers `RPRT 0` at once but applies the change a moment
+later, so an immediate read-back is the OLD value -- which would have
+pulled the rig back. Fixed by `"settle_seconds": 1.5` (rigctl_sdr._stale).
+Not offered over rigctl: squelch (`l SQL` -> RPRT -11), and `l ?` / `L ?`.
+Squelch is in SDRoxide's window but not its rigctl server: `l SQL`,
+`L SQL`, `u SQL`, `U SQL` all RPRT -11 (2026-09-28) -- asked for in the
+issue draft. AGC is not reachable either (`l AGC` / `L AGC` -> RPRT -11, 2026-09-28),
+so its lamp stays greyed. FILTER BOUNCING at the station (2026-09-28): narrowed, then went back.
+Traced (UBITX_SDR_TRACE=1 prints every rigctl command and every change the
+poll reports) and tested with nc: SDRoxide's rigctl server IGNORES the
+width of an `M` naming the mode it is already in, and takes any width --
+presets or not (2000 held) -- when the mode changes. Each mode change
+takes it about a second. WORKAROUND, `"width_needs_mode_change": true`:
+a new width in the same mode goes through the other sideband (or other
+CW) and back, the mode and width it reports meanwhile ignored
+(RigctlSDR._send_mode, _hop); settle_seconds raised to 3. Tested against a
+fake that behaves so. REPORTED upstream? -- draft in
+sdroxide_passband_issue.md. *To check at the station:* each filter
+button in USB and in CW holds, with at most a short blip; the rig never
+changes mode. Remove the workaround when SDRoxide is fixed.
+FIX, same day: SDRoxide keeps NB, NR, notch (and more) PER MODE, so the hop
+loaded the other sideband's -- the notch lamp flickered and came back on or
+off. During a hop the switches, volume and mute it reports are ignored, and
+the switches as they were are sent back once it is over. Tested against a
+fake with per-mode memory. CW is one mode in SDRoxide: both CWs map to
+`CW` (ambiguous, as SDR++), and the hop from CW goes through LSB.
+POSSIBLE BUG, not reproduced (2026-09-28, SDRoxide): setting CWL on 10 m
+sometimes ended in LSB -- seemingly around filter changes, not
+consistently. SUSPECT: the filter hop. From CW it goes through LSB; if
+SDRoxide has not come back to CW with the new width within the hop's
+window (3 s), the hop is dropped and the next read -- still LSB, or LSB
+applied late -- is believed as the operator's, and the rig is switched to
+LSB. Two queued mode changes behind another command could take that long.
+*When it happens:* run with UBITX_SDR_TRACE=1 and keep the lines around
+it -- whether `M LSB <w>` / `M CW <w>` were sent just before, and whether
+`<- changed in the SDR: 'LSB'` follows. CAUSE FOUND in SDRoxide's source (2026-09-28, main 807b0fc = v1.6.8
+for the rigctl server -- nothing relevant waiting unreleased): its set_mode
+drops an `M` naming the mode it REPORTS, width and all, on purpose (WSJT-X
+re-sends its mode). Sent together, the hop's return arrived while it still
+reported CW, and was dropped -- leaving LSB. FIXED: the hop is TWO STEPS,
+the return sent only once it reports the other mode (RigctlSDR._follow_hop);
+a real mode change cancels a hop. Tested against a fake with the same rule,
+at 0.8 and 2 s per change: back every time, no retry needed. Also from the
+source: CWR is taken as CW; STRENGTH is dBm + 73 (S9dB, as set). Earlier
+fix kept as the fallback (2026-09-28): when a hop's window ends without the mode and width coming
+back, the mode wanted is sent again (twice at most, a console line each
+time) rather than what is read being believed; no mode read within a hop
+reaches the rig. Tested against a fake SDRoxide 2 s per mode change, and
+one that loses the return command: both came back to CW, LSB never
+reported. *Watch for:* "[sdr] SDRoxide not back from a filter change"
+in the console -- how often, and whether LSB still turns up on the rig.
+BUILT: the NB, NR and Notch lamps, from the rigctl transport
+(`rigctl_sdr.SWITCHES`, `u`/`U NB`, `NR`, `ANF`) -- found at connect by
+reading and sending back, so rigctld gets them too where its rig answers.
+Switches only; the pop-ups hold no knobs. Within the settle window, as
+the other settings. The notch goes off on entering CW. Tested against a
+fake server that applies changes half a second late. *To check at the
+station:* each lamp switches SDRoxide's own NB, NR and ANF, and follows
+when they are switched in SDRoxide; entering CW turns the notch off. Not reachable: its CW decoder's
+text (no output to other programs documented).
 
 ### Waiting on SDRangel -- workarounds to remove when fixed
 

@@ -59,6 +59,7 @@ where it matters the reason is shown beside it.
 | Gqrx | rigctl, port 7356 | Turn on remote control. |
 | SDR++ | rigctl, port 4532 | Turn on the rigctl server module. |
 | rigctld (Hamlib) | rigctl, port 4532 | Give the whole command line under Setup's SDR settings. |
+| SDRoxide (trial) | rigctl, port 4532 | Turn on its Hamlib (rigctl) server, in Settings ▸ Servers. NB, NR and Notch lamps switch (no adjustments over rigctl); no squelch. |
 
 Choose the program on the Setup tab. The application can start it for you,
 and closes only a program it started itself; one you started is yours and
@@ -131,7 +132,7 @@ the folder, not in those.
 | `ubitx_link.py` | The rig's protocol — the one the Nextion display used. |
 | `serial_ports.py` | Finding and opening the rig's port, serial or network. |
 | `sdr_link.py` | Keeps the SDR in step with the rig, and describes every SDR's functions the same way for the window. |
-| `rigctl_sdr.py`, `rigctl_client.py` | Driving SDR++, Gqrx and rigctld over rigctl. |
+| `rigctl_sdr.py`, `rigctl_client.py` | Driving SDR++, Gqrx, SDRoxide and rigctld over rigctl. |
 | `rest_sdr.py` | Driving SDRangel over its REST API. |
 | `sdr_programs.py` + `.json` | What each SDR program is. |
 | `sdr_controls.py` + `.json` | What each SDR program's controls are. |

@@ -52,6 +52,13 @@ The other capability names, for everything else an SDR can do:
 `volume`, `mute`, `rf_gain`, `bandwidth` (the sampled band's width). The full
 list is `CAPABILITIES` in `sdr_programs.py`; a name not on it is refused.
 
+Over RIGCTL, three of them are switches only — `nb`, `nr` and `notch`,
+through Hamlib's `u`/`U NB`, `NR` and `ANF` (`rigctl_sdr.SWITCHES`). Each is
+found at connect by reading it and sending the state back, so a program that
+answers gets the lamp with no entry needed (SDRoxide answers all three; SDR++
+none). rigctl cannot reach their adjustments, so their pop-ups hold only the
+switch. The notch goes off on entering CW, as SDRangel's does.
+
 A function outside the seven has no lamp and is not shown. Adding an eighth is
 a change to the window (`AIDS_LAMPS`) and to `SDR_Link.DSP_CAPABILITY`.
 
@@ -104,6 +111,9 @@ these are only for what it cannot find out, or gets wrong:
 | Field | What it is |
 | :--- | :--- |
 | `self_describing` | `true` if it answers rigctl's `l ?` and `L ?` with what it can read and set (Gqrx, rigctld). Otherwise each level is tried. |
+| `signal_unit` | What its signal reading (`l STRENGTH`) is in. `"dBFS"` (the default) — Gqrx, SDRangel; the S-meter guesses where S9 falls. `"S9dB"` — Hamlib's own meaning, decibels relative to S9, already calibrated: SDRoxide and rigctld. Shown as dBm (S9 = −73 dBm). Check by comparing the program's own meter with `l STRENGTH`: −72 dBm reading as `1` is S9dB. |
+| `width_needs_mode_change` | For a program that takes a filter width only WITH a change of mode (SDRoxide: `M USB 2400` while in USB keeps its old width). A new width in the same mode is then sent through the other sideband, or the other CW, and straight back; the app ignores the mode, width, switches, volume and mute it reports until it is back, then sends the switches back as they were — for a program that keeps them per mode, as SDRoxide does. Default `false`. Test: `M USB 2400` while in USB, then `m` a couple of seconds later. |
+| `settle_seconds` | For a program that answers `RPRT 0` at once but applies the change a moment later (SDRoxide: 3 — two mode changes queued take it over 1.5 s): for that long, reading back the OLD frequency, mode, level or mute is taken as stale rather than as the operator turning the SDR. Without it the app would pull the rig back to where it was. Default 0. To find out, set something and read it back straight away with `nc` — then again after a second. |
 | `known_missing` | Capabilities it is known NOT to have, so they are not tried — some servers answer wrongly rather than refusing. |
 | `known_present` | Capabilities it has but cannot be seen to have — Gqrx's filter width. |
 | `ambiguous_modes` | A mode of its own that could be either of the rig's, and what it means: `{"CW": "cw"}` is a CW with no sideband, and the rig's current CW side is kept. |

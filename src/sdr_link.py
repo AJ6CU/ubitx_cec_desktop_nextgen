@@ -1218,7 +1218,8 @@ class SDR_Link:
     def can_auto_squelch(self):
         """A needs the signal level as well as a squelch, both in dBFS."""
         return (self.has_squelch and SIGNAL in self.capabilities
-                and self.profile.squelch_unit == "dBFS")
+                and self.profile.squelch_unit == "dBFS"
+                and not self._signal_over_s9)
 
     def auto_squelch(self):
         """
@@ -1278,7 +1279,11 @@ class SDR_Link:
 
     @property
     def signal_dbfs(self):
-        """The signal in dBFS, or None where there is no real reading."""
+        """
+        The signal as the SDR gives it -- in dBFS, or over S9 where its
+        profile says so (see signal_text) -- or None where there is no real
+        reading.
+        """
         if SIGNAL not in self.capabilities:
             return None
         level = self.controller.signal
@@ -1286,20 +1291,43 @@ class SDR_Link:
             return None
         return level
 
+    # S9 in dBm on HF -- 50 microvolts into 50 ohms -- for showing a
+    # reading given relative to S9 (Hamlib's STRENGTH) as dBm.
+    S9_DBM = -73.0
+
+    @property
+    def _signal_over_s9(self):
+        """
+        True where the SDR gives the signal as decibels over S9 -- Hamlib's
+        own meaning of STRENGTH (SDRoxide, rigctld) -- rather than dBFS.
+        """
+        return getattr(self.profile, "signal_unit", "dBFS") == "S9dB"
+
     def signal_text(self):
-        """The signal as a figure with its unit -- "-73 dBFS" -- or "" without one."""
-        dbfs = self.signal_dbfs
-        return f"{dbfs:.0f} dBFS" if dbfs is not None else ""
+        """
+        The signal as a figure with its unit -- "-73 dBFS", or "-72 dBm" where
+        the SDR gives it over S9 -- or "" without one.
+        """
+        level = self.signal_dbfs
+        if level is None:
+            return ""
+        if self._signal_over_s9:
+            return f"{level + self.S9_DBM:.0f} dBm"
+        return f"{level:.0f} dBFS"
 
     def s_units(self):
         """
         The signal on the S-meter's own scale -- 0 to 9 for S0 to S9, then
         9 plus the decibels over S9, as sCTkSMeterBar draws it -- or None.
+
+        FIX: a reading already over S9 (Hamlib's STRENGTH -- SDRoxide) is used
+        as it is; it was taken as dBFS, so SDRoxide's -72 dBm (+1 over S9)
+        read as "1 dBFS", pinned far over S9.
         """
-        dbfs = self.signal_dbfs
-        if dbfs is None:
+        level = self.signal_dbfs
+        if level is None:
             return None
-        over = dbfs - self.S9_DBFS
+        over = level if self._signal_over_s9 else level - self.S9_DBFS
         if over <= 0:
             return max(0.0, 9.0 + over / self.DB_PER_S_UNIT)
         return 9.0 + over
