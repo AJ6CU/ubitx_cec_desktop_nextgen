@@ -19,12 +19,13 @@ All conversation goes through RigctlClient, which keeps each command with its
 own reply -- see rigctl_client.py for why that needs doing.
 """
 import os
+import socket
 import time
 
 import globalvars as gv
 from rigctl_client import RigctlClient, ConnectionLost
 from sdr_programs import (FREQUENCY, MODE, FILTER, SIGNAL, VOLUME, SQUELCH, MUTE,
-                          NB, NR, NOTCH)
+                          NB, NR, NOTCH, AGC, DECODER, RF_GAIN)
 
 POLL_MS = 200
 
@@ -38,6 +39,39 @@ TRACE = os.environ.get("UBITX_SDR_TRACE") == "1"
 # the switch. Found at connect by reading each and sending the state back
 # (SDRoxide answers all three; SDR++ none).
 SWITCHES = (("nb", NB, "NB"), ("nr", NR, "NR"), ("notch", NOTCH, "ANF"))
+
+# The listening aids' ADJUSTMENTS rigctl can reach, as Hamlib levels -- one
+# choice knob each. Found at connect like everything else (read, and the
+# value sent back), and each can be turned off in the program's entry by its
+# "flag" (default on) -- SDRoxide offers them only once its rigctl server
+# has the levels (see SDROXIDE_UPGRADE.md).
+#
+#   AGC: the level IS the switch as well -- 0 is off, anything else on at
+#   that speed -- so the AGC lamp and its knob both come from it. Hamlib's
+#   RIG_AGC_*: FAST 2, SLOW 3, MEDIUM 5; SUPERFAST (1) reads as Fast, USER
+#   and AUTO (4, 6) as Medium.
+#   NR: the strength only, a float 0..1 -- Low, Med, High as thirds. The NR
+#   switch is still the NR function above.
+LEVEL_KNOBS = {
+    "agc": {"level": "AGC", "knob": "speed", "caption": "AGC",
+            "labels": ("Fast", "Medium", "Slow"), "values": (2, 5, 3),
+            "flag": "rigctl_agc", "switch": True},
+    "nr": {"level": "NR", "knob": "strength", "caption": "Strength",
+           "labels": ("Low", "Med", "High"), "values": (1 / 3, 2 / 3, 1.0),
+           "flag": "rigctl_nr_strength", "switch": False},
+}
+# How each Hamlib AGC value reads, where it is not one of ours.
+AGC_READS_AS = {1: 2, 4: 5, 6: 5}
+
+
+def _nearest(values, read):
+    """The index of the value nearest a reading."""
+    return min(range(len(values)), key=lambda i: abs(values[i] - read))
+
+
+def _percent(level):
+    """FIX: a Hamlib 0..1 level as a whole percentage."""
+    return int(round(max(0.0, min(1.0, float(level))) * 100))
 
 
 def _mode_and_width(reply):
@@ -97,6 +131,13 @@ class RigctlSDR:
         self.muted = None            # its own mute, where it has one
         self.squelch = None          # its squelch threshold, in its own units
         self.dsp_on = {}             # {"nb": True, ...} -- the switches it has
+        self.dsp_settings = {}       # {"agc": {"speed": 1}} -- the knobs, as indexes
+        self._levels_found = set()   # the LEVEL_KNOBS functions it answered
+        # FIX: the front-end gain, from Hamlib's RF level (0..1), as a whole
+        # percentage of the SDR's own gain range -- rigctl says nothing of dB.
+        self.rf_gain = None
+        self.rf_gain_auto = False    # rigctl cannot tell; the SDR's AGC is its own
+        self.rf_gain_unit = "%"
 
         # Called with the new value when it changes in the SDR itself.
         self.on_frequency = None
@@ -108,6 +149,9 @@ class RigctlSDR:
         self.on_squelch = None       # its squelch changed in the SDR itself
         self.on_disconnect = None
         self.on_dsp = None           # a switch changed in the SDR itself
+        self.on_decoded = None       # decoded CW text, as it arrives
+        self.on_rf_gain = None       # FIX: the RF gain changed in the SDR itself
+        self._decoder_socket = None  # listening for it, while DEC is on
 
         # What was just set, while the SDR may still report the old value:
         # {"frequency": (value, until)} -- see Profile.settle_seconds.
@@ -237,8 +281,75 @@ class RigctlSDR:
                 caps.add(cap)
                 self.dsp_on[function] = state == "1"
 
+        # The adjustments reachable as levels -- each read, and sent back.
+        self.dsp_settings, self._levels_found = {}, set()
+        for function, knob in LEVEL_KNOBS.items():
+            if not getattr(self.profile, knob["flag"], True):
+                continue
+            if knob["switch"] and AGC in known_missing:
+                continue
+            reply = client.query(f"l {knob['level']}")
+            read = _number(reply.values[0]) if reply.ok and reply.values else None
+            if read is None or not client.command(f"L {knob['level']} {reply.values[0].strip()}").ok:
+                continue
+            self._levels_found.add(function)
+            self._take_level(function, read)
+            if knob["switch"]:
+                caps.add(AGC)
+
+        # FIX: RF gain -- Hamlib's RF level, read and sent back like the rest.
+        # SDRoxide's Gain slider, once its rigctl has the level (see
+        # SDROXIDE_UPGRADE.md); a program without it just doesn't answer.
+        # Unless turned off in the entry (rigctl_rf_gain), or the program
+        # lists its levels and RF is not among them.
+        self.rf_gain = None
+        if (self.profile.rigctl_rf_gain and RF_GAIN not in known_missing
+                and (readable is None or "RF" in readable)):
+            reply = client.query("l RF")
+            read = _number(reply.values[0]) if reply.ok and reply.values else None
+            if read is not None and client.command(f"L RF {reply.values[0].strip()}").ok:
+                caps.add(RF_GAIN)
+                self.rf_gain = _percent(read)
+
+        # A CW decoder whose text comes over UDP -- SDRoxide's "Decoded CW over
+        # UDP", once released. Nothing to ask the program: its output is
+        # switched on in its own settings, and the entry names the port.
+        if self.profile.decoder_udp_port:
+            caps.add(DECODER)
+
         self.capabilities = frozenset(caps)
         return True
+
+    def _take_level(self, function, read):
+        """
+        Records a level as read: its knob, and for AGC its switch. True if
+        either changed.
+        """
+        knob = LEVEL_KNOBS[function]
+        before = (self.dsp_on.get(function), dict(self.dsp_settings.get(function, {})))
+        if knob["switch"]:
+            value = int(round(read))
+            on = value != 0
+            if on:
+                value = AGC_READS_AS.get(value, value)
+                self.dsp_settings.setdefault(function, {})[knob["knob"]] = \
+                    _nearest(knob["values"], value)
+            else:
+                # Off: the knob keeps the speed it comes back on at.
+                self.dsp_settings.setdefault(function, {}).setdefault(knob["knob"], 1)
+            self.dsp_on[function] = on
+        else:
+            self.dsp_settings.setdefault(function, {})[knob["knob"]] = \
+                _nearest(knob["values"], read)
+        return before != (self.dsp_on.get(function), self.dsp_settings.get(function, {}))
+
+    def _level_value(self, function, index=None):
+        """The Hamlib value for a knob position -- the one held, by default."""
+        knob = LEVEL_KNOBS[function]
+        if index is None:
+            index = self.dsp_settings.get(function, {}).get(knob["knob"], 1)
+        value = knob["values"][max(0, min(len(knob["values"]) - 1, int(index)))]
+        return value if knob["switch"] else f"{value:.6f}"
 
     def disconnect(self):
         if self._poll_id is not None:
@@ -248,8 +359,10 @@ class RigctlSDR:
                 pass
             self._poll_id = None
         self._client.close()
+        self._close_decoder_socket()
         self.capabilities = frozenset()
         self.dsp_on = {}
+        self.dsp_settings, self._levels_found = {}, set()
         self._hop = None
 
     def start(self):
@@ -329,6 +442,31 @@ class RigctlSDR:
             return None
         return _number(reply.values[0]) if reply.ok and reply.values else None
 
+    # ------------------------------------------------------------------
+    # FIX: RF gain, as a percentage of the SDR's range -- Hamlib's RF level
+    # ------------------------------------------------------------------
+    def rf_gain_range(self):
+        return (0.0, 100.0)
+
+    def rf_gain_steps(self):
+        # Every 2 %: about as many knob clicks end to end as an RTL dongle's
+        # 29 steps over SDRangel. Any whole percentage can still be set.
+        return [float(pct) for pct in range(0, 101, 2)]
+
+    def snap_rf_gain(self, pct):
+        return float(max(0, min(100, round(float(pct)))))
+
+    def set_rf_gain(self, pct):
+        """Sets the RF gain, in percent of the SDR's range."""
+        if RF_GAIN not in self.capabilities:
+            return False
+        pct = int(self.snap_rf_gain(pct))
+        if self._command(f"L RF {pct / 100:.2f}"):
+            self.rf_gain = pct
+            self._set("rf_gain", pct)
+            return True
+        return False
+
     def set_mute(self, muted):
         if self._command(f"U MUTE {1 if muted else 0}"):
             self.muted = bool(muted)
@@ -337,10 +475,77 @@ class RigctlSDR:
         return False
 
     # ------------------------------------------------------------------
+    # The CW decoder's text, over UDP
+    # ------------------------------------------------------------------
+    # How many datagrams one poll reads at most, so a flood cannot stall it.
+    DECODER_READS_PER_POLL = 20
+
+    def set_decoder(self, on):
+        """
+        Starts or stops LISTENING for the decoded CW the program sends to
+        127.0.0.1:<decoder_udp_port>. Unlike SDRangel's, its decoder is not
+        switched from here: it runs whenever the program is in CW, and sends
+        once its UDP output is on in its own settings (SDRoxide: Settings >
+        Servers > Decoded CW over UDP, to 127.0.0.1 and this port).
+        """
+        if DECODER not in self.capabilities:
+            return False
+        if not on:
+            self._close_decoder_socket()
+            return True
+        if self._decoder_socket is not None:
+            return True
+        port = int(self.profile.decoder_udp_port)
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.bind(("127.0.0.1", port))
+            sock.setblocking(False)
+        except OSError as err:
+            print(f"[sdr] cannot listen for {self.profile.name}'s decoded CW on "
+                  f"127.0.0.1:{port} -- {err} (is something else using the port?)")
+            return False
+        self._decoder_socket = sock
+        print(f"[sdr] listening for {self.profile.name}'s decoded CW on 127.0.0.1:{port}")
+        return True
+
+    def _close_decoder_socket(self):
+        if self._decoder_socket is not None:
+            try:
+                self._decoder_socket.close()
+            except OSError:
+                pass
+            self._decoder_socket = None
+
+    def _read_decoder(self):
+        """Whatever decoded text has arrived since the last poll, to on_decoded."""
+        if self._decoder_socket is None:
+            return
+        text = []
+        for _ in range(self.DECODER_READS_PER_POLL):
+            try:
+                data = self._decoder_socket.recv(4096)
+            except (BlockingIOError, InterruptedError):
+                break
+            except OSError:
+                self._close_decoder_socket()
+                break
+            text.append(data.decode("utf-8", errors="replace"))
+        if text:
+            self._call(self.on_decoded, "".join(text), quiet=True)
+
+    # ------------------------------------------------------------------
     # The listening aids -- switches only
     # ------------------------------------------------------------------
     def set_dsp(self, function, on):
-        """Switches NB, NR or the notch on or off -- where the SDR has it."""
+        """Switches NB, NR, the notch or AGC on or off -- where the SDR has it."""
+        knob = LEVEL_KNOBS.get(function)
+        if knob and knob["switch"] and function in self._levels_found:
+            value = self._level_value(function) if on else 0
+            if self._command(f"L {knob['level']} {value}"):
+                self.dsp_on[function] = bool(on)
+                self._set(function, bool(on))
+                return True
+            return False
         for name_here, cap, name in SWITCHES:
             if name_here == function and cap in self.capabilities:
                 if self._command(f"U {name} {1 if on else 0}"):
@@ -349,9 +554,54 @@ class RigctlSDR:
                     return True
         return False
 
+    # The knobs -- one per function, where the SDR answers its level.
     def dsp_knob_names(self, function):
-        """None: rigctl reaches a function's switch, not its adjustments."""
-        return []
+        """Its one knob where the SDR has the level, else none -- a switch only."""
+        return [LEVEL_KNOBS[function]["knob"]] if function in self._levels_found else []
+
+    def _knob(self, function, name):
+        knob = LEVEL_KNOBS.get(function)
+        return knob if knob and function in self._levels_found and name == knob["knob"] else None
+
+    def dsp_info(self, function, name):
+        knob = self._knob(function, name)
+        if knob is None:
+            return None
+        return {"caption": knob["caption"], "kind": "choice", "low": 0,
+                "high": len(knob["labels"]) - 1, "labels": knob["labels"],
+                "short": knob["labels"], "unit": ""}
+
+    def dsp_range(self, function, name):
+        knob = self._knob(function, name)
+        return (0, len(knob["labels"]) - 1) if knob else (0, 0)
+
+    def dsp_adjustable(self, function, name):
+        return self._knob(function, name) is not None
+
+    def dsp_setting_text(self, function, name, value):
+        knob = self._knob(function, name)
+        if knob is None:
+            return str(value)
+        index = int(round(float(value)))
+        return knob["labels"][index] if 0 <= index < len(knob["labels"]) else str(value)
+
+    def set_dsp_setting(self, function, name, value):
+        """
+        Sets a knob. AGC's speed is sent only while AGC is on -- sending it
+        would turn AGC on -- and otherwise kept for when it is.
+        """
+        knob = self._knob(function, name)
+        if knob is None:
+            return False
+        index = max(0, min(len(knob["labels"]) - 1, int(round(float(value)))))
+        if knob["switch"] and not self.dsp_on.get(function):
+            self.dsp_settings.setdefault(function, {})[name] = index
+            return True
+        if self._command(f"L {knob['level']} {self._level_value(function, index)}"):
+            self.dsp_settings.setdefault(function, {})[name] = index
+            self._set(f"{function}.{name}", index)
+            return True
+        return False
 
     def _send_mode(self, sdr_mode, width):
         """
@@ -389,6 +639,8 @@ class RigctlSDR:
                 # they were are kept, and sent back once the hop is over.
                 self._hop = {"mode": sdr_mode, "width": width, "via": hop,
                              "back": False, "switches": dict(self.dsp_on),
+                             "levels": {f: dict(k) for f, k in self.dsp_settings.items()},
+                             "squelch": self.squelch if SQUELCH in self.capabilities else None,
                              "until": time.monotonic() + self._hop_window(),
                              "retries": self.HOP_RETRIES}
                 return True
@@ -436,8 +688,18 @@ class RigctlSDR:
         self._hop = None
         # Back: the switches as they were before the hop -- SDRoxide keeps
         # them per mode, so the hop loaded the other mode's.
+        # The knobs and squelch too, which it also keeps per mode. Knobs
+        # first, so AGC comes back on at its own speed.
+        for function, knobs in hop.get("levels", {}).items():
+            for name, index in knobs.items():
+                if not LEVEL_KNOBS[function]["switch"]:
+                    self.set_dsp_setting(function, name, index)
+                else:
+                    self.dsp_settings.setdefault(function, {})[name] = index
         for function, on in hop["switches"].items():
             self.set_dsp(function, on)
+        if hop.get("squelch") is not None:
+            self.set_level("SQL", hop["squelch"])
         return mode, width, False
 
     # How many times a hop that has not come back is sent its mode again
@@ -528,22 +790,34 @@ class RigctlSDR:
             if VOLUME in self.capabilities and not hopping:
                 reply = self._client.query("l AF")
                 level = _number(reply.values[0]) if reply.ok and reply.values else None
-                if (level is not None and level != self.volume
-                        and not self._stale("volume", level)):
+                # FIX: _stale before the comparison, so reading back what was
+                # set ends its settle window (as for the RF gain).
+                if (level is not None and not self._stale("volume", level)
+                        and level != self.volume):
                     self.volume = level
                     self._call(self.on_volume, level)
-            if SQUELCH in self.capabilities:
+            if SQUELCH in self.capabilities and not hopping:
                 reply = self._client.query("l SQL")
                 level = _number(reply.values[0]) if reply.ok and reply.values else None
-                if (level is not None and level != self.squelch
-                        and not self._stale("squelch", level)):
+                if (level is not None and not self._stale("squelch", level)
+                        and level != self.squelch):
                     self.squelch = level
                     self._call(self.on_squelch, level)
+            # FIX: the RF gain, so the knob follows SDRoxide's Gain slider.
+            if RF_GAIN in self.capabilities and not hopping:
+                reply = self._client.query("l RF")
+                read = _number(reply.values[0]) if reply.ok and reply.values else None
+                if read is not None:
+                    pct = _percent(read)
+                    # _stale first: reading back what was set ends its window.
+                    if not self._stale("rf_gain", pct) and pct != self.rf_gain:
+                        self.rf_gain = pct
+                        self._call(self.on_rf_gain)
             if MUTE in self.capabilities and not hopping:
                 reply = self._client.query("u MUTE")
                 state = reply.values[0].strip() if reply.ok and reply.values else None
-                if (state in ("0", "1") and (state == "1") != self.muted
-                        and not self._stale("mute", state == "1")):
+                if (state in ("0", "1") and not self._stale("mute", state == "1")
+                        and (state == "1") != self.muted):
                     self.muted = state == "1"
                     self._call(self.on_mute, self.muted)
 
@@ -561,6 +835,29 @@ class RigctlSDR:
                 if on != self.dsp_on.get(function) and not self._stale(function, on):
                     self.dsp_on[function] = on
                     self._call(self.on_dsp, function)
+
+            # The levels' knobs -- and AGC's switch -- likewise.
+            for function in self._levels_found:
+                if hopping:
+                    break
+                knob = LEVEL_KNOBS[function]
+                reply = self._client.query(f"l {knob['level']}")
+                read = _number(reply.values[0]) if reply.ok and reply.values else None
+                if read is None:
+                    continue
+                if knob["switch"] and self._stale(function, int(round(read)) != 0):
+                    continue
+                if not knob["switch"] and self._stale(
+                        f"{function}.{knob['knob']}", _nearest(knob["values"], read)):
+                    continue
+                if knob["switch"] and int(round(read)) != 0 and self._stale(
+                        f"{function}.{knob['knob']}",
+                        _nearest(knob["values"], AGC_READS_AS.get(int(round(read)), int(round(read))))):
+                    continue
+                if self._take_level(function, read):
+                    self._call(self.on_dsp, function)
+
+            self._read_decoder()
 
             if SIGNAL in self.capabilities:
                 reply = self._client.query("l STRENGTH")

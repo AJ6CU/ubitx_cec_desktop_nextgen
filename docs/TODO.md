@@ -929,6 +929,68 @@ station:* each lamp switches SDRoxide's own NB, NR and ANF, and follows
 when they are switched in SDRoxide; entering CW turns the notch off. Not reachable: its CW decoder's
 text (no output to other programs documented).
 
+### Your own sdr_programs.json merged SETTING BY SETTING -- FIXED (2026-09-29)
+
+Found at the station: `{"sdroxide": {"decoder_udp_port": 9999}}` in
+~/.ubitx_cec_desktop/sdr_programs.json was IGNORED -- the file was merged a
+whole program at a time, so the partial entry replaced SDRoxide's whole
+description and was refused for having no protocol (a console line said so).
+The earlier `width_needs_mode_change: false` override was ignored the same
+way. sdr_programs.load() now merges settings within a program the shipped
+file lists; a new program is still described in full.
+
+### Protecting the SDR on transmit -- DECIDED (2026-09-28)
+
+The SDR's antenna relay is switched by the Pico uBITX board's own
+OPTO-ISOLATED OUTPUT, from the firmware: set it, wait the relay's throw time
+(10-15 ms for a small coax relay), then the rig's T/R relays and RF; on
+key-up, RF off, back to RX, a short hold, then release. It leads the RF by
+construction and works with the computer off. Wire it so a de-energised
+relay leaves the SDR grounded or disconnected. Nothing needed in this app
+(a status lamp for the port would be optional). Considered and set aside:
+a second USB-TTL adapter's RTS/DTR driven from `model.transmitting` -- the
+rig's RX/TX message arrives after RF for overs keyed at the radio; and
+SDRoxide's T/R-switch tab, which throws only on its own transmit or a
+hardware sense wire, and is not reachable over rigctl.
+
+### Waiting on SDRoxide -- upstream PRs, and what to switch when released
+
+Five PRs prepared 2026-09-28/29 (sdroxide_prs_bundle.zip, with instructions):
+1. rigctl: a new width in the mode already running sets the filter. When
+   released: SDRoxide's entry `"width_needs_mode_change": false`, and try
+   `"settle_seconds"` lower (1.5). Test first: in USB, `M USB 2400` then
+   `m` after 2 s reads 2400.
+2. rigctl: squelch, AGC and NR strength as Hamlib levels; `U NR 1` keeps
+   the chosen engine. When released: nothing to switch -- the SQL lamp,
+   the AGC lamp with its speed knob, and NR's strength knob appear at
+   connect (built 2026-09-28, `rigctl_sdr.LEVEL_KNOBS`; `rigctl_agc` /
+   `rigctl_nr_strength` false, or "squelch" in `known_missing`, turn each
+   off). Test first: `l SQL`, `l AGC`, `l NR` answer numbers.
+3. Decoded CW over UDP, the CW panel's settled copy as plain text to
+   127.0.0.1:9999 (the form and port SDRangel's Morse decoder uses) -- for
+   our DEC strip. When released: enable it in SDRoxide (Settings > Servers),
+   then `"decoder_udp_port": 9999` in SDRoxide's entry (null until then).
+   The app side is BUILT (2026-09-28, RigctlSDR.set_decoder / _read_decoder:
+   DEC listens on that port while on). TESTED at the station 2026-09-29
+   with a PR 3 build: the strip showed exactly what SDRoxide's CW panel
+   copied (make_cw_iq.py's practice recording played with --file).
+   Not in PR 3: the SKIMMER's spots -- a DX-cluster-style telnet spot
+   output ("DX de ...", as CW Skimmer and RBN publish) would suit them;
+   left for later, after seeing how the author takes PRs 1-3.
+4. Settings > UI switches to hide SDRoxide's control strip (a STRIP chip in
+   the corner brings it back) and its CW panel -- SDRoxide as a bare
+   panadapter beside our app. Nothing in our app; untick both in SDRoxide
+   once released.
+5. rigctl: the RF gain -- the stage SDRoxide's Gain slider moves -- as
+   Hamlib's RF level, 0..1 across its range. BUILDS ON PR 2 (its branch is
+   made from PR 2's). When released: nothing to switch -- the RF GAIN knob
+   comes alive at connect, in percent of the range (built and tested
+   against a fake SDRoxide 2026-09-29, RigctlSDR.set_rf_gain; "rigctl_rf_gain":
+   false turns it off). Test first: `l RF` answers a number that follows
+   the slider. TESTED 2026-09-29: built on the Mac, 46 rigctld tests pass
+   on PR 2 + PR 5, `l RF` / `L RF` right, and the knob works in the app.
+Step by step in SDROXIDE_UPGRADE.md.
+
 ### Waiting on SDRangel -- workarounds to remove when fixed
 
 Checked against 7.27.2-1315-gc43757c88, the latest build as of 2026-09-27.

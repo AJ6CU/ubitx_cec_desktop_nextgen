@@ -10,11 +10,13 @@ beside this module, and an operator's own entries live in
 
     ~/.ubitx_cec_desktop/sdr_programs.json
 
-MERGED ENTRY BY ENTRY, not file over file. The theme file works the other way
--- the first one found wins completely -- and Theming.md explains what that
-costs: a copy made last year hides every block added since. Here, a user
-entry overrides or adds to the shipped ones, and programs added later still
-arrive.
+MERGED SETTING BY SETTING, not file over file. The theme file works the other
+way -- the first one found wins completely -- and Theming.md explains what
+that costs: a copy made last year hides every block added since. Here, a
+user entry for a program the shipped file lists changes just the settings it
+names; a user entry for a new program adds it, described in full; and
+programs and settings added later still arrive. (Until 2026-09-29 it was
+entry by entry, which silently ignored a partial entry -- see load().)
 
 ONE ENTRY PER WAY OF DRIVING A PROGRAM. A program with two interfaces gets
 two entries, same install paths, different protocols. (SDRangel had two, REST
@@ -114,6 +116,22 @@ class Profile:
         # mode (SDRoxide's rigctl server, 2026-09-28): a new width in the same
         # mode is sent by way of another mode -- see RigctlSDR._send_mode.
         self.width_needs_mode_change = bool(entry.get("width_needs_mode_change", False))
+        # Over rigctl, the AGC lamp and its speed knob from Hamlib's AGC level,
+        # and a strength knob for NR from its NR level -- each tried at connect,
+        # unless turned off here. Default on: a program without the level just
+        # does not answer, and the lamp stays as it was. See SDROXIDE_UPGRADE.md.
+        self.rigctl_agc = bool(entry.get("rigctl_agc", True))
+        self.rigctl_nr_strength = bool(entry.get("rigctl_nr_strength", True))
+        # FIX: over rigctl, the RF GAIN knob from Hamlib's RF level, as a
+        # percentage of the SDR's own gain range. Tried at connect like the
+        # others; default on.
+        self.rigctl_rf_gain = bool(entry.get("rigctl_rf_gain", True))
+        # The UDP port the program sends its decoded CW to, on this machine --
+        # the DEC lamp listens there. None: no decoder (the default). SDRoxide
+        # sends there only once its "Decoded CW over UDP" is released and
+        # switched on; see SDROXIDE_UPGRADE.md.
+        port = entry.get("decoder_udp_port")
+        self.decoder_udp_port = int(port) if port else None
         # FIX: what the signal reading is measured in. "dBFS" (the default):
         # below the loudest signal the SDR can digitise -- Gqrx, SDRangel;
         # where S9 falls is a guess (SDR_Link.S9_DBFS). "S9dB": Hamlib's own
@@ -204,8 +222,8 @@ def _check(key, entry, where):
     return True
 
 
-def _read(path, where):
-    """One file's entries, or nothing if it cannot be read."""
+def _read_raw(path, where):
+    """One file's entries as written, unchecked -- or nothing if it cannot be read."""
     if not os.path.exists(path):
         return {}
     try:
@@ -217,17 +235,34 @@ def _read(path, where):
     if not isinstance(data, dict):
         print(f"[sdr] {where} ({path}) is not a block of programs")
         return {}
-    return {key: entry for key, entry in data.items()
-            if not key.startswith("_") and _check(key, entry, where)}
+    return {key: entry for key, entry in data.items() if not key.startswith("_")}
 
 
 def load():
     """
     Every program this can drive: the shipped ones, with the operator's own
-    merged over them entry by entry.
+    merged over them.
+
+    FIX (2026-09-29): merged SETTING BY SETTING within a program the shipped
+    file already has, so the operator's file need only hold what they change
+    -- `{"sdroxide": {"decoder_udp_port": 9999}}`. It was merged a whole entry
+    at a time, so an entry like that replaced SDRoxide's entire description,
+    was refused for having no protocol, and was ignored. A program the shipped
+    file does not have still has to be described in full.
     """
-    entries = _read(SHIPPED_FILE, "the programs file")
-    entries.update(_read(USER_FILE, "your programs file"))
+    shipped = _read_raw(SHIPPED_FILE, "the programs file")
+    yours = _read_raw(USER_FILE, "your programs file")
+    entries = {}
+    for key in list(shipped) + [k for k in yours if k not in shipped]:
+        entry, where = shipped.get(key), "the programs file"
+        if key in yours:
+            where = "your programs file"
+            if isinstance(entry, dict) and isinstance(yours[key], dict):
+                entry = {**entry, **yours[key]}
+            else:
+                entry = yours[key]
+        if _check(key, entry, where):
+            entries[key] = entry
     return {key: Profile(key, entry) for key, entry in entries.items()}
 
 

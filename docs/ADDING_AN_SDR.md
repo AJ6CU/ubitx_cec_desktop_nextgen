@@ -56,8 +56,10 @@ Over RIGCTL, three of them are switches only — `nb`, `nr` and `notch`,
 through Hamlib's `u`/`U NB`, `NR` and `ANF` (`rigctl_sdr.SWITCHES`). Each is
 found at connect by reading it and sending the state back, so a program that
 answers gets the lamp with no entry needed (SDRoxide answers all three; SDR++
-none). rigctl cannot reach their adjustments, so their pop-ups hold only the
-switch. The notch goes off on entering CW, as SDRangel's does.
+none). Their adjustments are reached only where Hamlib has a LEVEL for them:
+AGC (the `AGC` level is both its switch and its speed) and NR's strength
+(the `NR` level), as choice knobs (`rigctl_sdr.LEVEL_KNOBS`); each can be
+turned off in the program's entry (`rigctl_agc`, `rigctl_nr_strength`). The notch goes off on entering CW, as SDRangel's does. The RF GAIN knob comes from Hamlib's `RF` level the same way (`rigctl_rf_gain`).
 
 A function outside the seven has no lamp and is not shown. Adding an eighth is
 a change to the window (`AIDS_LAMPS`) and to `SDR_Link.DSP_CAPABILITY`.
@@ -113,6 +115,10 @@ these are only for what it cannot find out, or gets wrong:
 | `self_describing` | `true` if it answers rigctl's `l ?` and `L ?` with what it can read and set (Gqrx, rigctld). Otherwise each level is tried. |
 | `signal_unit` | What its signal reading (`l STRENGTH`) is in. `"dBFS"` (the default) — Gqrx, SDRangel; the S-meter guesses where S9 falls. `"S9dB"` — Hamlib's own meaning, decibels relative to S9, already calibrated: SDRoxide and rigctld. Shown as dBm (S9 = −73 dBm). Check by comparing the program's own meter with `l STRENGTH`: −72 dBm reading as `1` is S9dB. |
 | `width_needs_mode_change` | For a program that takes a filter width only WITH a change of mode (SDRoxide: `M USB 2400` while in USB keeps its old width). A new width in the same mode is then sent through the other sideband, or the other CW, and straight back; the app ignores the mode, width, switches, volume and mute it reports until it is back, then sends the switches back as they were — for a program that keeps them per mode, as SDRoxide does. Default `false`. Test: `M USB 2400` while in USB, then `m` a couple of seconds later. |
+| `rigctl_agc` | Over rigctl, the AGC lamp and a Fast/Medium/Slow knob from Hamlib's `AGC` level (0 is off). Tried at connect; a program without the level just doesn't answer. `false` turns it off. Default `true`. |
+| `rigctl_nr_strength` | Over rigctl, a Low/Med/High strength knob on the NR lamp from Hamlib's `NR` level (⅓, ⅔, 1). Tried at connect. `false` turns it off. Default `true`. |
+| `rigctl_rf_gain` | Over rigctl, the RF GAIN knob from Hamlib's `RF` level, shown as 0–100 % of the SDR's own gain range (rigctl says nothing of dB), 2 % a click. Tried at connect, skipped if the program lists its levels and `RF` isn't among them. `false` turns it off; so does `"rf_gain"` in `known_missing`. Default `true`. |
+| `decoder_udp_port` | Over rigctl, a CW decoder whose text arrives as UDP datagrams on `127.0.0.1` at this port: the DEC lamp listens there while it's on. `null` (the default) means no decoder. The program's own output has to be switched on in the program itself (SDRoxide: Settings ▸ Servers ▸ Decoded CW over UDP). |
 | `settle_seconds` | For a program that answers `RPRT 0` at once but applies the change a moment later (SDRoxide: 3 — two mode changes queued take it over 1.5 s): for that long, reading back the OLD frequency, mode, level or mute is taken as stale rather than as the operator turning the SDR. Without it the app would pull the rig back to where it was. Default 0. To find out, set something and read it back straight away with `nc` — then again after a second. |
 | `known_missing` | Capabilities it is known NOT to have, so they are not tried — some servers answer wrongly rather than refusing. |
 | `known_present` | Capabilities it has but cannot be seen to have — Gqrx's filter width. |
@@ -324,9 +330,11 @@ updated. Put them in the application's folder:
 ```
 
 Same shape as the shipped files, holding only what you add or change. They
-are merged over the shipped ones — `sdr_programs.json` entry by entry,
-`sdr_controls.json` function by function — so an entry of yours replaces that
-one entry, and everything added to the shipped files later still reaches you.
+are merged over the shipped ones — `sdr_programs.json` setting by setting
+within a program it already lists (so `{"sdroxide": {"decoder_udp_port": 9999}}`
+is a whole file), a new program of yours described in full, and
+`sdr_controls.json` function by function — and everything added to the shipped
+files later still reaches you.
 
 For example, to widen the WDSP receiver's AGC top range and nothing else:
 

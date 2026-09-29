@@ -5,15 +5,17 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="ffee8cb6-f9f7-4a7a-aac5-5c8718d71e6d" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/docs/bug_reports/sdroxide_passband_issue.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/docs/SDROXIDE_UPGRADE.md" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/docs/ADDING_AN_SDR.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/ADDING_AN_SDR.md" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/docs/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/README.md" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/docs/TODO.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/TODO.md" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/rigctl_sdr.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/rigctl_sdr.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sdr_launcher.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/sdr_launcher.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/sdr_link.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/sdr_link.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/sdr_programs.json" beforeDir="false" afterPath="$PROJECT_DIR$/src/sdr_programs.json" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/sdr_programs.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/sdr_programs.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/ubitx_cec_desktop.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/ubitx_cec_desktop.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -42,6 +44,7 @@
   <component name="PropertiesComponent">{
   &quot;keyToString&quot;: {
     &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
+    &quot;Python.make_cw_iq.executor&quot;: &quot;Run&quot;,
     &quot;Python.radio_model.executor&quot;: &quot;Run&quot;,
     &quot;Python.scratch.executor&quot;: &quot;Run&quot;,
     &quot;Python.test.executor&quot;: &quot;Run&quot;,
@@ -52,15 +55,15 @@
     &quot;RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252&quot;: &quot;true&quot;,
     &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
     &quot;git-widget-placeholder&quot;: &quot;main&quot;,
-    &quot;last_opened_file_path&quot;: &quot;/Users/mhatch/Documents/GitHub/ubitx_cec_desktop_nextgen/docs/bug_reports&quot;
+    &quot;last_opened_file_path&quot;: &quot;/Users/mhatch/Documents/GitHub/ubitx_cec_desktop_nextgen/src&quot;
   }
 }</component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
-      <recent name="$PROJECT_DIR$/docs/bug_reports" />
-      <recent name="$PROJECT_DIR$/docs" />
       <recent name="$PROJECT_DIR$/src" />
+      <recent name="$PROJECT_DIR$/docs" />
       <recent name="$APPLICATION_CONFIG_DIR$/scratches" />
+      <recent name="$PROJECT_DIR$/docs/bug_reports" />
       <recent name="$PROJECT_DIR$/unit_tests" />
     </key>
     <key name="MoveFile.RECENT_KEYS">

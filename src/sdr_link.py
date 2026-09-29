@@ -1101,7 +1101,8 @@ class SDR_Link:
     # -- RF gain -------------------------------------------------------------
     #
     # The SDR hardware's front-end gain, where the transport knows how to set
-    # it (SDRangel with an RTL dongle). Ridden while listening -- CW operators
+    # it (SDRangel with an RTL dongle; over rigctl, a program with Hamlib's RF
+    # level -- SDRoxide once released -- in percent of its range, not dB). Ridden while listening -- CW operators
     # turn it down to drop the noise under a weak signal -- so it is sent once
     # the slider settles, as volume and squelch are.
 
@@ -1111,7 +1112,7 @@ class SDR_Link:
 
     @property
     def rf_gain(self):
-        """The RF gain in dB, or None."""
+        """The RF gain -- in dB, or percent over rigctl -- or None."""
         return self.controller.rf_gain if self.has_rf_gain else None
 
     @property
@@ -1128,10 +1129,17 @@ class SDR_Link:
         return self.controller.rf_gain_steps() if self.has_rf_gain else []
 
     def rf_gain_text(self, db):
-        """A gain as it will be set -- at the hardware's nearest step: "32.8 dB"."""
+        """
+        A gain as it will be set -- at the hardware's nearest step: "32.8 dB",
+        or over rigctl, which knows no dB, a share of the range: "60 %".
+        """
         if not self.has_rf_gain:
             return ""
-        return f"{self.controller.snap_rf_gain(db):.1f} dB"
+        value = self.controller.snap_rf_gain(db)
+        # FIX: the transport says what its gain is counted in -- dB unless it says.
+        if getattr(self.controller, "rf_gain_unit", "dB") == "%":
+            return f"{value:.0f} %"
+        return f"{value:.1f} dB"
 
     def rf_gain_blocked(self):
         """Why the RF gain cannot be set just now -- or None if it can."""

@@ -59,7 +59,7 @@ where it matters the reason is shown beside it.
 | Gqrx | rigctl, port 7356 | Turn on remote control. |
 | SDR++ | rigctl, port 4532 | Turn on the rigctl server module. |
 | rigctld (Hamlib) | rigctl, port 4532 | Give the whole command line under Setup's SDR settings. |
-| SDRoxide (trial) | rigctl, port 4532 | Turn on its Hamlib (rigctl) server, in Settings ▸ Servers. NB, NR and Notch lamps switch (no adjustments over rigctl); no squelch. |
+| SDRoxide (trial) | rigctl, port 4532 | Turn on its Hamlib (rigctl) server, in Settings ▸ Servers. NB, NR and Notch lamps switch; squelch, AGC, NR strength, RF gain and DEC arrive with SDRoxide's pending fixes — see `SDROXIDE_UPGRADE.md`. |
 
 Choose the program on the Setup tab. The application can start it for you,
 and closes only a program it started itself; one you started is yours and
@@ -145,6 +145,7 @@ the folder, not in those.
 | `ARCHITECTURE.md` | The layering, the rules, and why things are the way they are. Read first. |
 | `ADDING_AN_SDR.md` | How to add an SDR program, an SDRangel demodulator or device, or a new protocol — and the fields of `sdr_programs.json` and `sdr_controls.json`. |
 | `TODO.md` | Outstanding work and what to check at the station. |
+| `SDROXIDE_UPGRADE.md` | SDRoxide's workarounds, the switch for each, and what to change as its rigctl fixes are released. |
 | `SDRANGEL_REST_NOTES.md` | What was found out about SDRangel's REST API, with the captures. |
 
 ### The one rule

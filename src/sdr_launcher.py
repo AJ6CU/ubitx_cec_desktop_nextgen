@@ -153,7 +153,7 @@ class Started:
         """
         system = _system()
         try:
-            if system == "darwin" and self.profile.app_name:
+            if system == "darwin" and self.profile.app_name and self._is_application():
                 # NOT SILENCED. Asking one application to quit another needs
                 # Automation permission on macOS, and the first attempt puts
                 # up a prompt: refused or unanswered, osascript fails with
@@ -192,6 +192,23 @@ class Started:
             print(f"[sdr] could not ask {self.profile.name} to quit: {err}")
             return False
         return False
+
+    def _is_application(self):
+        """
+        FIX: whether macOS sees what was started as the APPLICATION app_name
+        names -- so asking that application to quit reaches it. Yes if it was
+        opened as one, or started from inside an .app bundle. No for a bare
+        binary started from the SDR Path setting, such as a build in
+        ~/sdroxide/target/release: the quit went to the INSTALLED copy
+        instead, reached nothing, and the app waited out the whole timeout
+        before closing it. Such a program is closed the way it is on Linux
+        (insist, in stop) -- unless never_force_quit, when it is left running.
+        """
+        if self.popen is None:
+            return True
+        args = self.popen.args
+        command = args[0] if isinstance(args, (list, tuple)) and args else args
+        return ".app/" in str(command)
 
     def wait(self, timeout):
         """Whether it has gone within the time."""

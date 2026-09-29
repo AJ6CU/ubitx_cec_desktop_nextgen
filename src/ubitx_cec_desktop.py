@@ -204,7 +204,8 @@ SMALL_KNOB_COLUMN = 60
 RANGE_KNOB_LABEL_FONT = ("Arial", 8)
 
 # RF gain's knob, on its own beside the listening aids: large, since it is
-# ridden. A RANGE knob in whole dB -- see _rf_gain_set.
+# ridden. A RANGE knob in whole dB -- or, over rigctl, whole percent of the
+# SDR's range -- see _rf_gain_set.
 RF_GAIN_KNOB_DIAMETER = 72
 RF_GAIN_KNOB_COLUMN = 130
 
@@ -1649,8 +1650,8 @@ class UbitxCecDesktop(sCTk):
 
     def _rf_gain_set(self, value):
         """
-        The RF gain knob moved -- a RANGE knob in whole dB, so its pointer
-        shows the gain. The hardware takes gain only in its own steps, so the
+        The RF gain knob moved -- a RANGE knob in whole dB (over rigctl, whole
+        percent of the SDR's range), so its pointer shows the gain. The hardware takes gain only in its own steps, so the
         SDR link reads the move as a direction and says which step it reaches
         (SDR_Link.rf_gain_toward); the pointer is put there. Shown at once and
         sent when the knob settles.
@@ -1678,7 +1679,7 @@ class UbitxCecDesktop(sCTk):
         """The RF gain knob: live, or greyed with the SDR link's reason beneath."""
         if self.sdr.has_rf_gain:
             # The span in whole dB, to the top step rounded up -- 0 to 50
-            # for a top step of 49.6.
+            # for a top step of 49.6. Over rigctl, 0 to 100 %.
             bottom, top = self.sdr.rf_gain_range()
             self.rf_gain_knob.set_span(int(bottom), int(-(-top // 1)))
             if self.sdr.rf_gain is not None:
@@ -2047,7 +2048,9 @@ class UbitxCecDesktop(sCTk):
         self.rf_gain_knob = SmallKnob(rf_area, "RF gain", span=(0, 50),
                                       on_set=self._rf_gain_set,
                                       diameter=RF_GAIN_KNOB_DIAMETER,
-                                      column=RF_GAIN_KNOB_COLUMN, widest_label="50")
+                                      # FIX: "100", for a rigctl SDR's 0-100 % -- the
+                                      # same size as the volume knob beside it.
+                                      column=RF_GAIN_KNOB_COLUMN, widest_label="100")
         self.rf_gain_knob.pack()
         # Packed only while it has something to say -- see _set_rf_gain_note.
         # An empty label still takes a line's height beneath the knob.
