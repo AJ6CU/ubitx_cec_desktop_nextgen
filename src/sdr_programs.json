@@ -40,7 +40,7 @@
         "start": "\\start",
         "stop": "\\stop",
         "self_describing": false,
-        "known_missing": ["signal", "volume", "squelch", "mute"],
+        "known_missing": ["signal", "volume", "squelch", "mute", "rit", "split"],
         "process_names": ["sdrpp", "sdrpp.exe", "sdr++"],
         "paths": {
             "darwin": ["/Applications/SDR++.app/Contents/MacOS/sdrpp"],
@@ -63,6 +63,7 @@
         "stop": "U DSP 0",
         "self_describing": true,
         "known_present": ["filter"],
+        "known_missing": ["split"],
         "volume_range": [-80.0, 50.0],
         "squelch_range": [-150.0, 0.0],
         "squelch_unit": "dBFS",

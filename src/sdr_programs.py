@@ -63,8 +63,15 @@ BANDWIDTH = "bandwidth"
 # A CW decoder whose text reaches the application -- SDRangel's Morse
 # Decoder feature, over UDP.
 DECODER = "decoder"
+
+# RIT
+RIT = "rit"
+
+# SPLIT
+SPLIT = "split"
+
 CAPABILITIES = {FREQUENCY, MODE, FILTER, SIGNAL, VOLUME, SQUELCH, MUTE, AGC, NR,
-                NOTCH, NB, CW_PEAK, SQUELCH_SWITCH, RF_GAIN, BANDWIDTH, DECODER}
+                NOTCH, NB, CW_PEAK, SQUELCH_SWITCH, RF_GAIN, BANDWIDTH, DECODER, RIT, SPLIT}
 
 # What a signal reading can be measured in -- see Profile.signal_unit.
 SIGNAL_UNITS = ("dBFS", "S9dB")

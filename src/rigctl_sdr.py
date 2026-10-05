@@ -25,7 +25,7 @@ import time
 import globalvars as gv
 from rigctl_client import RigctlClient, ConnectionLost
 from sdr_programs import (FREQUENCY, MODE, FILTER, SIGNAL, VOLUME, SQUELCH, MUTE,
-                          NB, NR, NOTCH, AGC, DECODER, RF_GAIN)
+                          NB, NR, NOTCH, AGC, DECODER, RF_GAIN, RIT, SPLIT)
 
 POLL_MS = 200
 
@@ -104,6 +104,25 @@ def _mode_and_width(reply):
     width = _number(values[1]) if len(values) > 1 else None
     return mode, (int(width) if width else None)
 
+def _split_and_vfo(reply):
+    """
+    The "s" reply is 0 (off) ar 1 on) and VFO for TX
+
+    sdroxide reports 2 lines
+
+
+    Returns:
+        (status, vfo) -- either may be None.
+    """
+    if not reply or not reply.ok or not reply.values:
+        return None, None
+    values = list(reply.values)
+    if len(values) == 1 and " " in values[0].strip():
+        values = values[0].split()
+    status = bool(int(values[0]))
+    vfo = values[1]
+    return status, vfo
+
 
 def _number(text):
     """A float from a server's reply, or None."""
@@ -152,6 +171,12 @@ class RigctlSDR:
         self.on_decoded = None       # decoded CW text, as it arrives
         self.on_rf_gain = None       # FIX: the RF gain changed in the SDR itself
         self._decoder_socket = None  # listening for it, while DEC is on
+
+        self.rit = None
+        self.rit_value = None
+
+        self.split = None
+        self.split_vfo = None
 
         # What was just set, while the SDR may still report the old value:
         # {"frequency": (value, until)} -- see Profile.settle_seconds.
@@ -296,6 +321,22 @@ class RigctlSDR:
             self._take_level(function, read)
             if knob["switch"]:
                 caps.add(AGC)
+
+        # Discover RIT
+        if "rit" not in known_missing:
+            reply = client.query("j")
+            if reply.ok and (reply.values and _number(reply.values[0]) is not None):
+                self.rit = True if int(reply.values[0]) >= 1 else False
+                self.rit_value = int(reply.values[0])
+                caps.add(RIT)
+
+        # Discover SPLIT
+        if "split" not in known_missing:
+            split_status, split_vfo = _split_and_vfo(self._client.query("s", lines=2))
+            if split_status is not None:
+                self.split = split_status
+                self.split_vfo = split_vfo
+                caps.add(SPLIT)
 
         # FIX: RF gain -- Hamlib's RF level, read and sent back like the rest.
         # SDRoxide's Gain slider, once its rigctl has the level (see

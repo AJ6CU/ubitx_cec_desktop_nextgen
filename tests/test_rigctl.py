@@ -20,7 +20,7 @@ connection before answering at all.
 """
 import sys
 
-sys.path.insert(0, ".")
+sys.path.insert(0, "../src")
 from rigctl_client import RigctlClient, ConnectionLost
 
 

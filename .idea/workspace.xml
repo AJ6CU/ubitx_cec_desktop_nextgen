@@ -5,17 +5,9 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="ffee8cb6-f9f7-4a7a-aac5-5c8718d71e6d" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/docs/SDROXIDE_UPGRADE.md" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/docs/ADDING_AN_SDR.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/ADDING_AN_SDR.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/docs/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/README.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/docs/TODO.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/TODO.md" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/rigctl_sdr.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/rigctl_sdr.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/sdr_launcher.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/sdr_launcher.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/sdr_link.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/sdr_link.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/sdr_programs.json" beforeDir="false" afterPath="$PROJECT_DIR$/src/sdr_programs.json" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/sdr_programs.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/sdr_programs.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/ubitx_cec_desktop.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/ubitx_cec_desktop.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />

@@ -30,6 +30,7 @@ SIGNAL = "signal"        # signal strength, for the S-meter and the scanner
 VOLUME = "volume"        # its own audio level
 SQUELCH = "squelch"
 MUTE = "mute"
+SPLIT = "split"
 
 # A "CW" from an SDR with no sideband of its own: the application has to
 # choose one -- see SDR_Link._from_sdr_mode.
@@ -71,6 +72,7 @@ class Profile:
                 "SQL", which the slider shows in the program's own units --
                 dBFS for Gqrx, so the setting reads as Gqrx shows it.
         """
+        print("profiles called")
         self.key = key
         self.name = name
         self.default_port = default_port
@@ -94,7 +96,7 @@ SDRPP = Profile(
     start="\\start", stop="\\stop",
     # Confirmed against a running SDR++: "l ?" and "l STRENGTH" are refused.
     # Its rigctl server has no audio level, squelch or mute either.
-    known_missing=(SIGNAL, VOLUME, SQUELCH, MUTE),
+    known_missing=(SIGNAL, VOLUME, SQUELCH, MUTE, SPLIT),
     self_describing=False,
 )
 
@@ -109,6 +111,7 @@ GQRX = Profile(
     # Documented: M takes a filter width ("M USB 2400"). Not probed -- see
     # known_present.
     known_present=(FILTER,),
+    known_missing=(SPLIT),
     self_describing=True,
     volume_range=(-80.0, 50.0),
     # Believed to match Gqrx's own squelch control; to be confirmed by
