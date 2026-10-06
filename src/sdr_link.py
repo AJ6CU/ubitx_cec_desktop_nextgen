@@ -1,21 +1,21 @@
 #!/usr/bin/python3
 """
-SDR_Link -- keeps SDR++ in step with the rig, in both directions.
+SDR_Link -- keeps SDR in step with the rig, in both directions.
 
 A second transport, sitting beside uBITX_Link. It talks to SDR++ through
-RigctlSDR over rigctl -- SDR++, Gqrx or a rigctld, chosen by the "SDR
+RigctlSDR over rigctl -- SDR++, Gqrx, sdrOxide, or a rigctld, chosen by the "SDR
 Software" setting -- and connects it to the same RadioModel the
 interface reads.
 
-    rig  --reports-->  RadioModel  --follow()-->  SDR++
-    rig  <--commands-- uBITX_Link  <--callbacks-- SDR++
+    rig  --reports-->  RadioModel  --follow()-->  SDR
+    rig  <--commands-- uBITX_Link  <--callbacks-- SDR
 
 TWO DIRECTIONS
 
   The rig leads. When the model's receive frequency or mode changes, follow()
-  sends it to SDR++, so the waterfall shows what you are listening to.
+  sends it to the SDR, so the waterfall shows what you are listening to.
 
-  SDR++ can lead too. Click a signal in the waterfall, or turn SDR++'s own
+  The SDR can lead too. Click a signal in the waterfall, or turn the SDR's own
   dial, and the controller's poll notices and calls back here -- and that goes
   to the RIG, as a command, like any other control. The model changes only
   when the rig confirms, which is the rule everywhere else in this
@@ -23,10 +23,10 @@ TWO DIRECTIONS
 
 IT FOLLOWS THE RECEIVE ROLE, NOT THE RAW REPORT
 
-The code this replaces sent SDR++ whatever frequency the rig reported as
+The code this replaces sent SDR whatever frequency the rig reported as
 primary (`vc_`). That goes wrong in split: to set the transmit frequency the
 rig is briefly made to swap VFOs, so for a moment the primary VFO IS the
-transmit one -- and SDR++ was retuned to the transmit frequency in the middle
+transmit one -- and SDR was retuned to the transmit frequency in the middle
 of every split tuning step. Following role_frequency("rx") avoids it: the
 roles are frozen for the length of that swap, and the model's notifications
 are held, so follow() is not even called until it is over.
@@ -34,7 +34,7 @@ are held, so follow() is not even called until it is over.
 NEITHER SIDE ECHOES THE OTHER
 
 Each direction remembers what it last passed on. A change that arrives from
-SDR++ is recorded as already sent, so when the rig confirms it and the model
+SDR is recorded as already sent, so when the rig confirms it and the model
 changes, follow() does not send it straight back. The controller has its own
 share of this -- see its set_frequency_hz and set_mode.
 """
@@ -186,6 +186,8 @@ class SDR_Link:
         self.controller.on_frequency = self._from_sdr_frequency
         self.controller.on_mode = self._from_sdr_mode
         self.controller.on_filter = self._from_sdr_filter
+        self.controller.on_rit = self._from_sdr_rit
+        self.controller.on_split = self._from_sdr_split
         self.controller.on_volume = lambda level: self._audio_changed()
         self.controller.on_mute = lambda muted: self._audio_changed()
         self.controller.on_dsp = lambda function: self._audio_changed()
@@ -239,6 +241,8 @@ class SDR_Link:
         self.controller.on_frequency = self._from_sdr_frequency
         self.controller.on_mode = self._from_sdr_mode
         self.controller.on_filter = self._from_sdr_filter
+        self.controller.on_rit = self._from_sdr_rit
+        self.controller.on_split = self._from_sdr_split
         self.controller.on_volume = lambda level: self._audio_changed()
         self.controller.on_mute = lambda muted: self._audio_changed()
         self.controller.on_dsp = lambda function: self._audio_changed()
@@ -585,7 +589,6 @@ class SDR_Link:
             self.controller.set_mode(sdr_mode, width)
             if FILTER in self.capabilities:
                 self._set_model_filter(self.controller.filter_width)
-
     # ------------------------------------------------------------------
     # SDR++ to rig
     # ------------------------------------------------------------------
@@ -655,6 +658,12 @@ class SDR_Link:
     def _from_sdr_filter(self, width_hz):
         """The filter was widened or narrowed in SDR++ itself."""
         self._set_model_filter(width_hz)
+    # MJH
+    def _from_sdr_rit(self, newrit):
+        print("rit enabled from sdr", newrit)
+
+    def _from_sdr_split(self):
+        print("split enabled from sdr")
 
     # ------------------------------------------------------------------
     # Audio

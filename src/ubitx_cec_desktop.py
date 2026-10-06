@@ -66,7 +66,7 @@ from radio_model import RadioModel, LABEL_SLOTS, CHANNEL_SLOTS
 from sdr_link import SDR_Link
 from scanner import Scanner
 import sdr_programs
-import sdr_controls
+# import sdr_controls
 from app_paths import config_path, shown as shown_path
 from sdr_programs import profile_for, choices as sdr_choices
 from ubitx_link import uBITX_Link

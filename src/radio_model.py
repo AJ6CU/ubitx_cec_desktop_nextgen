@@ -118,6 +118,12 @@ class RadioModel:
         # on top -- so tuning receive with RIT on wrote the unchanged VFO
         # back to the rig and nothing moved. Storing the base and DERIVING
         # the offset matches what the hardware is actually doing.
+        #
+        # However, rigctl has it that the RX frequency is fixed, and the RIT command specifies the offset
+        # So the sdr's that have RIT commands must map to the opposite. An apparent change in frequency of
+        # 1Hz means that the RIT command J (rit_base_hz - frequency).  This is handled in the rigctl_sdr
+        # class
+        #
         self.rit_base_hz = 0
 
         self.locked = False

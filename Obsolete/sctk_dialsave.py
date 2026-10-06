@@ -9,7 +9,7 @@ import sys
 import math
 import time
 import customtkinter as ctk
-from . import themeable_widget as _tw
+from src import themeable_widget as _tw
 from .themeable_widget import ThemeableWidget, parse_list_property
 class sCTKDialBase(ctk.CTkFrame, ThemeableWidget):
     """Abstract Base Class for theme-adaptive mechanical rotary encoder widgets."""

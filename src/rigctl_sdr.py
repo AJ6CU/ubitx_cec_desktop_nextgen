@@ -145,6 +145,10 @@ class RigctlSDR:
         self.frequency = None
         self.mode = None
         self.filter_width = None
+
+        self.rit = None             # 0 = no Rit offset, otherwise +/- RIT offset
+        self.split = None           # True if available
+        self.split_vfo = None       # Either VFOA or VFOB for TX Frequency
         self.signal = None           # dBFS, where the SDR reports it
         self.volume = None           # its own audio level, in its own units
         self.muted = None            # its own mute, where it has one
@@ -162,6 +166,8 @@ class RigctlSDR:
         self.on_frequency = None
         self.on_mode = None
         self.on_filter = None
+        self.on_rit = None
+        self.on_split = None
         self.on_signal = None
         self.on_volume = None        # the level changed in the SDR itself
         self.on_mute = None          # its mute changed in the SDR itself
@@ -172,11 +178,6 @@ class RigctlSDR:
         self.on_rf_gain = None       # FIX: the RF gain changed in the SDR itself
         self._decoder_socket = None  # listening for it, while DEC is on
 
-        self.rit = None
-        self.rit_value = None
-
-        self.split = None
-        self.split_vfo = None
 
         # What was just set, while the SDR may still report the old value:
         # {"frequency": (value, until)} -- see Profile.settle_seconds.
@@ -326,8 +327,7 @@ class RigctlSDR:
         if "rit" not in known_missing:
             reply = client.query("j")
             if reply.ok and (reply.values and _number(reply.values[0]) is not None):
-                self.rit = True if int(reply.values[0]) >= 1 else False
-                self.rit_value = int(reply.values[0])
+                self.rit = int(reply.values[0]) if int(reply.values[0]) != 0 else 0
                 caps.add(RIT)
 
         # Discover SPLIT
@@ -845,6 +845,23 @@ class RigctlSDR:
                     self.squelch = level
                     self._call(self.on_squelch, level)
             # FIX: the RF gain, so the knob follows SDRoxide's Gain slider.
+            # MJH
+            if RIT in self.capabilities and not hopping:
+                reply = self._client.query("j")
+                state = reply.values[0].strip() if reply.ok and reply.values else None
+                if int(state) != self.rit:
+                    print(state, type(state))
+                    if int(state) != 0:
+                        print ("rit on")
+                    else:
+                        print("rit off")
+                    self.rit = int(state)
+                    self._call(self.on_rit, self.rit)
+
+            if SPLIT in self.capabilities and not hopping:
+                pass
+
+
             if RF_GAIN in self.capabilities and not hopping:
                 reply = self._client.query("l RF")
                 read = _number(reply.values[0]) if reply.ok and reply.values else None

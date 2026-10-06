@@ -1,6 +1,7 @@
 #!/usr/bin/python3
 """
-What each SDR program's controls are, read from a file -- sdr_controls.json.
+For any REST based SDR program, the controls are, read from a file -- sdr_controls.json.
+This is ignored for SDR with serial connections that use the RIGCTL protocol.
 
 WHY A FILE, as for sdr_programs.json: the knobs behind the Operate tab's
 lamps -- which settings a demodulator has, their ranges, their labels, their
