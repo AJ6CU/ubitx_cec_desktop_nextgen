@@ -1286,21 +1286,15 @@ class uBITX_Link:
             now_on = str(value).strip() == "1"
             self._model.rit = now_on
             if now_on and not was_on:
+                self._model.set_rit_status(True)
                 # Captured AT SWITCH-ON from the real receive frequency: this
                 # is where transmit stays while receive is tuned away from
                 # it. The rig's vr_ report is NOT used for this -- see there.
                 self._model.rit_base_hz = self._model.frequency(
                     self._model.rx_vfo)
             elif was_on and not now_on:
+                self._model.set_rit_status(False)
                 self._radio_link._leave_rit()
-            # if (self.rit_Button_On):
-            #     self.rit_Button_On = False
-            #     self.rit_Button.configure(style='Button1bRaised.TButton')
-            #     self.theVFO_Object.setRITmode("OFF")
-            # else:
-            #     self.rit_Button_On = True
-            #     self.rit_Button.configure(style='GreenButton1bPressed.TButton')
-            #     self.theVFO_Object.setRITmode("ON")
 
         def vf_UX_ATT_Level(self, buffer):
             value = int(self._extract_value(buffer, 10, len(buffer) - 3))

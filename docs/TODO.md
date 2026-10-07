@@ -989,6 +989,7 @@ Five PRs prepared 2026-09-28/29 (sdroxide_prs_bundle.zip, with instructions):
    false turns it off). Test first: `l RF` answers a number that follows
    the slider. TESTED 2026-09-29: built on the Mac, 46 rigctld tests pass
    on PR 2 + PR 5, `l RF` / `L RF` right, and the knob works in the app.
+6. If the location of the SDR is ever defined in the SDR settings, there is no way to completely erase it without hand editing the settings file.
 Step by step in SDROXIDE_UPGRADE.md.
 
 ### Waiting on SDRangel -- workarounds to remove when fixed

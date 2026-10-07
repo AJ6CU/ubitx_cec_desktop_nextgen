@@ -364,6 +364,47 @@ sequence, where the resume issues the redraw.
 Nothing in that list calls `changed()`. If you find yourself wanting to, ask
 what is changing the model that is not a report.
 
+####Steps from Personal Experience
+First, understand that sdr_controls.py and sdr_controls.json are only relevant
+to REST type API's.  For RIGCTL based APIs, these two files can be ignored. The
+rest of this section deals with experience adding RIT and SPLIT, both supported
+only by SDROxide, to the system.
+
+1. Test whether the commands work and how they work by starting the SDR and accessing it via   ```nc 127.0.0.1 [port]```
+2. Depending on what you find, you might need to set some of the SDR's to unknown because they partially respond. 
+   For example SDR++ always returns "0 VFOA" to the "s" command and an error to "S". These settings are in 
+   sdr_programs.json. And you may need to add a ```"known_missing": ["split"],``` to prevent errors in these SDR 
+   programs.
+3. In rigctl_sdr.py, you need to add a section to the discover method of RigctlSDR class. RIT is a simple example 
+   with mode being more complex. Depending on what the return command looks like you may need to add a parser 
+   function like _split_and_vfo.
+4. In the __init__ of RigctlSDR, you need to add any variables you need to track the state and level. For example, a 
+   non zero RIT, means that RIT is on. So you only need to add ```self.rit = None```
+5. The import: ```from sdr_programs import (FREQUENCY, MODE, FILTER, SIGNAL, VOLUME, SQUELCH, MUTE,
+                          NB, NR, NOTCH, AGC, DECODER, RF_GAIN, RIT, SPLIT)``` needs to have the value added. note 
+   the use of all CAPS here.
+6. In sdr_programs.py, you need to assign the constant added above to its string value. For example, for rit, I added: ```# RIT
+RIT = "rit"```
+7. In the _poll method of RigctlSDR, you need to monitor whether the value has changed and if so, then you schedule the 
+   callback. Again RIT is a good example.  
+
+```   if RIT in self.capabilities and not hopping:
+        reply = self._client.query("j")
+        state = reply.values[0].strip() if reply.ok and reply.values else None
+        self.rit = int(state)
+        self._call(self.on_rit, self.rit)```
+8. The actual callback, ```on_rit``` needs to be initialized to None in the __init__ of RigctlSDR. For example, for 
+rit I defined ```self.on_rit = None```.
+
+9. The actual callback is assigned in sdr_link.py in two places:  ```reload_profile``` and ```connect``` methods of 
+SDR_Link.  The statement is the same, again for example, RIT: ```self.controller.on_rit = self._from_sdr_rit```
+
+10. Now in SDR_Link, define what happens when _from_sdr_foo is invoked. If you call included a parameter (like RIT 
+above in the self._call method, make sure you add that parameter to the definiiton of _from_sdr_foo.
+
+11. _from_sdr_foo you need to MJH
+        
+        
 #### Two traps worth naming
 
 **Two `MODES` lists.** The firmware's is `("DFT","ERR","LSB","USB","CWL","CWU")`

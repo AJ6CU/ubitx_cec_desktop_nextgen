@@ -659,8 +659,9 @@ class SDR_Link:
         """The filter was widened or narrowed in SDR++ itself."""
         self._set_model_filter(width_hz)
     # MJH
-    def _from_sdr_rit(self, newrit):
-        print("rit enabled from sdr", newrit)
+    def _from_sdr_rit(self, hz):
+        self._set_model_rit(hz)
+        print("rit enabled from sdr", hz)
 
     def _from_sdr_split(self):
         print("split enabled from sdr")
@@ -1403,3 +1404,21 @@ class SDR_Link:
         if width_hz != self._model.filter_hz:
             self._model.filter_hz = width_hz
             self._model.changed()
+
+    def _set_model_rit(self,hz):
+        if self._model.rit:
+            if self._model.rit_offset == hz:
+                return
+            elif offset == 0:
+                self._model.rit = False
+                self._model.rit_base_hz = 0
+            else:
+                self._model.rit_offset = hz
+        else:
+            if hz == 0:
+                return
+            else:
+                self._model.rit = True
+                self._model.rit_base_hz = self.frequency(self, self.role_vfo("rx"))
+                # MJH
+        self._model.changed()

@@ -847,6 +847,10 @@ class RigctlSDR:
             # FIX: the RF gain, so the knob follows SDRoxide's Gain slider.
             # MJH
             if RIT in self.capabilities and not hopping:
+                #
+                #   This needs to be modified to look for a turn on or off and then
+                #   do the right things for cleanup
+                #
                 reply = self._client.query("j")
                 state = reply.values[0].strip() if reply.ok and reply.values else None
                 if int(state) != self.rit:

@@ -121,7 +121,7 @@ class RadioModel:
         #
         # However, rigctl has it that the RX frequency is fixed, and the RIT command specifies the offset
         # So the sdr's that have RIT commands must map to the opposite. An apparent change in frequency of
-        # 1Hz means that the RIT command J (rit_base_hz - frequency).  This is handled in the rigctl_sdr
+        # 1Hz means that the RIT command J (frequency +/- 1).  This is handled in the rigctl_sdr
         # class
         #
         self.rit_base_hz = 0
@@ -331,6 +331,22 @@ class RadioModel:
     def rx_vfo(self):
         """The VFO that receives. Always the active one."""
         return self._role_active
+    #
+    #   Manages the status of RIT. 
+    #
+    def set_rit_status(self, turn_on):
+        if turn_on and self.rit:            #   ignore duplicate turn_on request
+            return
+        elif not turn_on and not self.rit:  #   ignore duplicate turn off request,
+            return
+        elif turn_on:                       #   new request to turn on
+            self.rit = Turn
+            self.rit_base_hz = self.frequency("rx")
+            self.rit_offset = 0
+        else:                               #   new request to turn off
+            self.rit = False
+            self.rit_base_hz = 0
+            self.rit_offset = 0
 
     @property
     def rit_offset(self):
@@ -343,6 +359,15 @@ class RadioModel:
         if not self.rit or not self.rit_base_hz:
             return 0
         return self.frequency(self.rx_vfo) - self.rit_base_hz
+    #
+    #   The setter was added to accomodate RIGCTL that retrieve the RIT offset via the "j" command.
+    #   Previously, this was not necessary as the model was set up to accomodate the CEC firmware
+    #   where the VFO reported wsa always the rx frequency which included the offset embeeded within it
+    #
+    @rit_offset.setter
+    def rit_offset(self, hz):
+        self.set_frequency(self, self.role_vfo("rx"), self.rit_base_hz + hz)
+
 
     def role_vfo(self, role):
         """
