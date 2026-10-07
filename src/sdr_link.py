@@ -551,7 +551,7 @@ class SDR_Link:
             if band is not None:
                 self.controller.set_frequency(hz, band=band)
             else:
-                self.controller.set_frequency(hz)
+                self.controller.set_frequency(hz - self._model.rit_offset)
 
         rig_mode = self._model.mode_of(self._model.rx_vfo)
         if self._rig_mode_asked is not None:
@@ -660,8 +660,12 @@ class SDR_Link:
         self._set_model_filter(width_hz)
     # MJH
     def _from_sdr_rit(self, hz):
+        if hz == 0:
+            print("turning off rit")
+        else:
+            print("turning on rit with offset =", hz)
         self._set_model_rit(hz)
-        print("rit enabled from sdr", hz)
+
 
     def _from_sdr_split(self):
         print("split enabled from sdr")
@@ -1409,16 +1413,18 @@ class SDR_Link:
         if self._model.rit:
             if self._model.rit_offset == hz:
                 return
-            elif offset == 0:
+            elif hz == 0:
                 self._model.rit = False
                 self._model.rit_base_hz = 0
             else:
-                self._model.rit_offset = hz
+                self._rig.set_role_frequency("rx",self._model.rit_base_hz + hz)
+                # self._model.set_frequency("rx", self._model.role_frequency("rx") + hz)
         else:
-            if hz == 0:
-                return
-            else:
-                self._model.rit = True
-                self._model.rit_base_hz = self.frequency(self, self.role_vfo("rx"))
+            # if hz == 0:
+            #     return
+            # else:
+            print("turning on rit")
+            self._model.rit = True
+            self._model.rit_base_hz = self._model.role_frequency("rx")
                 # MJH
         self._model.changed()

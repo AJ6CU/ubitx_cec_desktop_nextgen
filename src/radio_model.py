@@ -332,7 +332,7 @@ class RadioModel:
         """The VFO that receives. Always the active one."""
         return self._role_active
     #
-    #   Manages the status of RIT. 
+    #   Manages the status of RIT.
     #
     def set_rit_status(self, turn_on):
         if turn_on and self.rit:            #   ignore duplicate turn_on request

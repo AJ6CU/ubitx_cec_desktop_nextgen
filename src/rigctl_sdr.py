@@ -146,9 +146,9 @@ class RigctlSDR:
         self.mode = None
         self.filter_width = None
 
-        self.rit = None             # 0 = no Rit offset, otherwise +/- RIT offset
-        self.split = None           # True if available
-        self.split_vfo = None       # Either VFOA or VFOB for TX Frequency
+        self.rit_offset = None       # 0 no Rit offset seen, otherwise +/- total RIT offset
+        self.split = None            # True if available
+        self.split_vfo = None        # Either VFOA or VFOB for TX Frequency
         self.signal = None           # dBFS, where the SDR reports it
         self.volume = None           # its own audio level, in its own units
         self.muted = None            # its own mute, where it has one
@@ -235,6 +235,7 @@ class RigctlSDR:
         reply = client.query("f")
         if not (reply.ok and reply.values and _number(reply.values[0]) is not None):
             return False
+        # MJH minus offset?
         self.frequency = int(_number(reply.values[0]))
         caps.add(FREQUENCY)
 
@@ -327,7 +328,8 @@ class RigctlSDR:
         if "rit" not in known_missing:
             reply = client.query("j")
             if reply.ok and (reply.values and _number(reply.values[0]) is not None):
-                self.rit = int(reply.values[0]) if int(reply.values[0]) != 0 else 0
+                self.rit_offset = int(reply.values[0]) if int(reply.values[0]) != 0 else 0
+                #MJH Need to make callback here or just always set to 0
                 caps.add(RIT)
 
         # Discover SPLIT
@@ -420,7 +422,8 @@ class RigctlSDR:
     def set_frequency(self, hz):
         if self._command(f"F {int(hz)}"):
             self.frequency = int(hz)
-            self._set("frequency", self.frequency)
+            #MJH
+            self._set("frequency", self.frequency-self.rit_offset)
             return True
         return False
 
@@ -811,7 +814,8 @@ class RigctlSDR:
             if (hz is not None and int(hz) != self.frequency
                     and not self._stale("frequency", int(hz))):
                 self.frequency = int(hz)
-                self._call(self.on_frequency, self.frequency)
+                # MJH
+                self._call(self.on_frequency, self.frequency - self.rit_offset)
 
             mode, width = _mode_and_width(self._client.query("m", lines=2))
             hopping = self._hop is not None
@@ -848,19 +852,22 @@ class RigctlSDR:
             # MJH
             if RIT in self.capabilities and not hopping:
                 #
-                #   This needs to be modified to look for a turn on or off and then
-                #   do the right things for cleanup
+                #   The only signal that that RIT is on is when "j" returns a non-zero value
+                #   It turns back off when the offset is 0.
+                #   Problem is that when RIT is turned on by UX, there is no offset until the
+                #   tuning dial is turned. SO we need to ignore a zero offset until we see the
+                #   at least one non-zero offset.
                 #
                 reply = self._client.query("j")
-                state = reply.values[0].strip() if reply.ok and reply.values else None
-                if int(state) != self.rit:
-                    print(state, type(state))
-                    if int(state) != 0:
-                        print ("rit on")
+                offset = int(reply.values[0].strip() if reply.ok and reply.values else "0")
+                if offset != self.rit_offset:
+                    if offset == 0:     # Since self.rit_offset is non-zero, a 0 offset means to turn off RIT
+                        self.rit_offset = 0
+                        print ("offset returning to 0, turn off RIT")
                     else:
-                        print("rit off")
-                    self.rit = int(state)
-                    self._call(self.on_rit, self.rit)
+                        self.rit_offset = offset
+                        print("new offset=", self.rit_offset)
+                    self._call(self.on_rit, self.rit_offset)
 
             if SPLIT in self.capabilities and not hopping:
                 pass
