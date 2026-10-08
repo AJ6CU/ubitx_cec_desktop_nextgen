@@ -1410,21 +1410,18 @@ class SDR_Link:
             self._model.changed()
 
     def _set_model_rit(self,hz):
+
         if self._model.rit:
             if self._model.rit_offset == hz:
                 return
             elif hz == 0:
-                self._model.rit = False
-                self._model.rit_base_hz = 0
+                self._rig.set_role_frequency("rx", self._model.rit_base_hz)
+                self._model.set_rit_on(False)
             else:
-                self._rig.set_role_frequency("rx",self._model.rit_base_hz + hz)
-                # self._model.set_frequency("rx", self._model.role_frequency("rx") + hz)
+                self._rig.set_role_frequency("rx", self._model.rit_base_hz + hz)
         else:
-            # if hz == 0:
-            #     return
-            # else:
             print("turning on rit")
-            self._model.rit = True
-            self._model.rit_base_hz = self._model.role_frequency("rx")
+            self._model.set_rit_on(True)
+            self._rig.set_role_frequency("rx", self._model.rit_base_hz + hz)
                 # MJH
         self._model.changed()

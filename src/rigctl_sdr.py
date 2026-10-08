@@ -422,7 +422,6 @@ class RigctlSDR:
     def set_frequency(self, hz):
         if self._command(f"F {int(hz)}"):
             self.frequency = int(hz)
-            #MJH
             self._set("frequency", self.frequency-self.rit_offset)
             return True
         return False

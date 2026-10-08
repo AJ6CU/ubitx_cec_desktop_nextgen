@@ -334,19 +334,17 @@ class RadioModel:
     #
     #   Manages the status of RIT.
     #
-    def set_rit_status(self, turn_on):
+    def set_rit_on(self, turn_on):
         if turn_on and self.rit:            #   ignore duplicate turn_on request
             return
         elif not turn_on and not self.rit:  #   ignore duplicate turn off request,
             return
         elif turn_on:                       #   new request to turn on
-            self.rit = Turn
-            self.rit_base_hz = self.frequency("rx")
-            self.rit_offset = 0
+            self.rit = True
+            self.rit_base_hz = self.frequency(self.rx_vfo)
         else:                               #   new request to turn off
             self.rit = False
             self.rit_base_hz = 0
-            self.rit_offset = 0
 
     @property
     def rit_offset(self):
@@ -364,9 +362,9 @@ class RadioModel:
     #   Previously, this was not necessary as the model was set up to accomodate the CEC firmware
     #   where the VFO reported wsa always the rx frequency which included the offset embeeded within it
     #
-    @rit_offset.setter
-    def rit_offset(self, hz):
-        self.set_frequency(self, self.role_vfo("rx"), self.rit_base_hz + hz)
+    # @rit_offset.setter
+    # def rit_offset(self, hz):
+    #     self.set_frequency(self, self.role_vfo("rx"), self.rit_base_hz + hz)
 
 
     def role_vfo(self, role):
