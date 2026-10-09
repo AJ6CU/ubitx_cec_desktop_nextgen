@@ -146,6 +146,7 @@ class RigctlSDR:
         self.mode = None
         self.filter_width = None
 
+        self.rit = None              # Current setting for RIT. False is off, True is on
         self.rit_offset = None       # 0 no Rit offset seen, otherwise +/- total RIT offset
         self.split = None            # True if available
         self.split_vfo = None        # Either VFOA or VFOB for TX Frequency
@@ -167,6 +168,8 @@ class RigctlSDR:
         self.on_mode = None
         self.on_filter = None
         self.on_rit = None
+        self.rit_state = None
+        self.model_rit_offset = None
         self.on_split = None
         self.on_signal = None
         self.on_volume = None        # the level changed in the SDR itself
@@ -328,7 +331,10 @@ class RigctlSDR:
         if "rit" not in known_missing:
             reply = client.query("j")
             if reply.ok and (reply.values and _number(reply.values[0]) is not None):
+                # Found Rit, now need to track initial offset and status
                 self.rit_offset = int(reply.values[0]) if int(reply.values[0]) != 0 else 0
+                self.rit = True if self.rit_offset != 0 else False
+
                 #MJH Need to make callback here or just always set to 0
                 caps.add(RIT)
 
@@ -857,16 +863,31 @@ class RigctlSDR:
                 #   tuning dial is turned. SO we need to ignore a zero offset until we see the
                 #   at least one non-zero offset.
                 #
+                rit_now_on = self._call(self.rit_state)
+                print("rit now on:", rit_now_on, "internal rit track =", self.rit)
+                if self.rit and not rit_now_on:
+                    print("Rit turned off at ux, clearing it")
+                    self._client.query("J 0")
+                    self.rit = False
+
                 reply = self._client.query("j")
                 offset = int(reply.values[0].strip() if reply.ok and reply.values else "0")
+
+                # problem no signal of vfo change going to sdr since it was never needed
+
+
                 if offset != self.rit_offset:
-                    if offset == 0:     # Since self.rit_offset is non-zero, a 0 offset means to turn off RIT
-                        self.rit_offset = 0
-                        print ("offset returning to 0, turn off RIT")
-                    else:
-                        self.rit_offset = offset
-                        print("new offset=", self.rit_offset)
-                    self._call(self.on_rit, self.rit_offset)
+                    print("from polling:", self.rit_offset)
+
+                    self.rit_offset = self._call(self.on_rit, offset)
+                    if self.rit_offset == 0:
+                        self._client.query("J 0")
+                else:
+                    offset = self._call(self.model_rit_offset)
+                    self.rit_offset = self._call(self.on_rit, offset)
+
+                    self._client.query("J " + str(self.rit_offset))
+
 
             if SPLIT in self.capabilities and not hopping:
                 pass
@@ -948,6 +969,8 @@ class RigctlSDR:
             print(f"[sdr] <- changed in the SDR: {args[0]!r}")
         if callable(callback):
             try:
-                callback(*args)
+                f = callback(*args)
+                if f is not None:
+                    return f
             except Exception as err:
                 print(f"[sdr] a callback failed: {err}")

@@ -336,8 +336,10 @@ class RadioModel:
     #
     def set_rit_on(self, turn_on):
         if turn_on and self.rit:            #   ignore duplicate turn_on request
+            print("thinks both on")
             return
         elif not turn_on and not self.rit:  #   ignore duplicate turn off request,
+            print("thinks turn off and rit on")
             return
         elif turn_on:                       #   new request to turn on
             self.rit = True
