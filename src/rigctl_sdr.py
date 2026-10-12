@@ -168,7 +168,10 @@ class RigctlSDR:
         self.on_mode = None
         self.on_filter = None
         self.on_rit = None
-        self.rit_state = None
+        self.off_rit = None
+        self.model_update_rit_offset = None
+        self.model_turn_off_rit_request = None
+        self.model_rit_state= None
         self.model_rit_offset = None
         self.on_split = None
         self.on_signal = None
@@ -428,7 +431,7 @@ class RigctlSDR:
     def set_frequency(self, hz):
         if self._command(f"F {int(hz)}"):
             self.frequency = int(hz)
-            self._set("frequency", self.frequency-self.rit_offset)
+            self._set("frequency", self.frequency - self.rit_offset)
             return True
         return False
 
@@ -863,30 +866,89 @@ class RigctlSDR:
                 #   tuning dial is turned. SO we need to ignore a zero offset until we see the
                 #   at least one non-zero offset.
                 #
-                rit_now_on = self._call(self.rit_state)
-                print("rit now on:", rit_now_on, "internal rit track =", self.rit)
-                if self.rit and not rit_now_on:
-                    print("Rit turned off at ux, clearing it")
+                #   There are 4 states that we could be in:
+                #   1. Both UX and SDR Rit on - just need to figure out who has the most recent data.  If the
+                #   Flag "rit_turn_off_SDR" accessed via Call to self.model_turn_off_rit_request (that lives ins sdr_link)
+                #   is True
+                #   2. UX on and SDR RIT off - Either UX was just turned on, ot SDR turned off. The model
+                #   Flag "rit_turn_off_SDR" accessed via Call to self.model_turn_off_rit_request (that lives ins sdr_link)
+                #   will tell you which
+                #   3. UX off and SDR RIT on - UX could be leading or RIT could be leasing. Teh "rit_turn_off_SDR if
+                #   True tells you that local SDR RIT is out of date.
+                #   4. Both turned off - nothing to do in this case
+                #
+                #
+                #   Get current state of model and reported offset from SDR.
+                #
+                rit_now_on = self._call(self.model_rit_state)
+                rit_mode_change_from_ux = self._call(self.model_turn_off_rit_request)
+
+                if rit_now_on and not self.rit:   # state where model implies UX just turned on RIT
+                    print("ux rit on, internal rit off")
+                    self.rit = True
+                    self.rit_offset = 0
                     self._client.query("J 0")
-                    self.rit = False
-
-                reply = self._client.query("j")
-                offset = int(reply.values[0].strip() if reply.ok and reply.values else "0")
-
-                # problem no signal of vfo change going to sdr since it was never needed
 
 
-                if offset != self.rit_offset:
-                    print("from polling:", self.rit_offset)
+                elif rit_now_on and self.rit:       #   Both are on, but SDR could be ahead of model
+                                                    #   Or model ahead of SDR. We can determine whether
+                                                    #   SDR was changed last by comparing it to save value
+                                                    #   A zero implies that the SDR turned off RIT.
+                    reply = self._client.query("j")
+                    sdr_offset = int(reply.values[0].strip() if reply.ok and reply.values else "0")
 
-                    self.rit_offset = self._call(self.on_rit, offset)
-                    if self.rit_offset == 0:
+                    if sdr_offset == 0:  # turn it off
+                        print("turning it off because offset is 0")
+                        # if self._call(self.model_rit_offset) == 0:  # SDR lags Model, clear any SDR RIT memory
+                        self.rit = False
+                        self.rit_offset = 0
+                        self._client.query(
+                            "J 0")  # this clears Rit in SDR and turns it off.
+                        self._call(self.off_rit)
+                    elif self.rit_offset !=  sdr_offset:  #something out of synch....
+                        print("thinks that sdr has updated")
+                        # SDR has updated RIT.
+                        self._call(self.model_update_rit_offset(sdr_offset))
+                        self.rit_offset = sdr_offset
+                        print("found rit vs disagrees wtih sdr rit")
+                    else:   #if sdr_offset == self.rit_offset:   # UX has updated RIT
+                        print("found that sdr is old, updating to model")
+                        self.rit_offset = self._call(self.model_rit_offset)
+                        self._client.query("J " + str(self._call(self.model_rit_offset)))
+
+
+
+                elif not rit_now_on and self.rit:
+                    print("just found model rit off")
+                    #   This means Model thinks RIT is off and SDR thinks it is on.
+                    #   Must turn on RIT and preload the offset
+                    if rit_mode_change_from_ux:
+                        print(" thinking mode change from ux")
+                        self.rit = False
+                        self.rit_offset = 0
                         self._client.query("J 0")
-                else:
-                    offset = self._call(self.model_rit_offset)
-                    self.rit_offset = self._call(self.on_rit, offset)
+                    else:
+                        self.rit = True
+                        print("mode change not from ux")
+                        reply = self._client.query("j")
+                        sdr_offset = int(reply.values[0].strip() if reply.ok and reply.values else "0")
+                        self.rit_offset = sdr_offset
+                        if sdr_offset != 0:
+                            self.rit_offset = sdr_offset
+                            print("loading seed 2",self.rit_offset )
 
-                    self._client.query("J " + str(self.rit_offset))
+                            self._call(self.on_rit, sdr_offset)
+
+                else:
+                    self.rit = True
+                    print("mode change not from ux")
+                    reply = self._client.query("j")
+                    sdr_offset = int(reply.values[0].strip() if reply.ok and reply.values else "0")
+                    if sdr_offset != 0:
+                        self.rit_offset = sdr_offset
+                        print("loading seed 3", self.rit_offset)
+
+                        self._call(self.on_rit, sdr_offset)
 
 
             if SPLIT in self.capabilities and not hopping:

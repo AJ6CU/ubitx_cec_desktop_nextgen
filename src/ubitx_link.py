@@ -1287,22 +1287,18 @@ class uBITX_Link:
             print("in toggle, was_on=", was_on, "now on =", now_on)
             self._model.rit = now_on
             if now_on and not was_on:
-                self._model.set_rit_on(True)
-                # Captured AT SWITCH-ON from the real receive frequency: this
-                # is where transmit stays while receive is tuned away from
-                # it. The rig's vr_ report is NOT used for this -- see there.
+                # self._model.set_rit_on(True)
+                # # Captured AT SWITCH-ON from the real receive frequency: this
+                # # is where transmit stays while receive is tuned away from
+                # # it. The rig's vr_ report is NOT used for this -- see there.
                 print("turning on RIT, base = ", self._model.rit_base_hz, "rx=", self._model.frequency(self._model.rx_vfo))
-                # self._model.rit_base_hz = self._model.frequency(self._model.rx_vfo)
+                self._model.rit_base_hz = self._model.frequency(self._model.rx_vfo)
+                a = self._model.rit_sdr_oneshot_seed
+                print("one shot =", a)
+                self._model.set_role_frequency("rx", self._model.rit_base_hz + a)
             elif was_on and not now_on:
                 print("turning off rit and leaving")
                 self._radio_link._leave_rit()
-                self._model.set_rit_on(False)
-            elif was_on and now_on:
-                print("both true")
-                return
-            else:
-                print("both false")
-                # self._radio_link._leave_rit()
 
 
         def vf_UX_ATT_Level(self, buffer):
@@ -1921,9 +1917,12 @@ class uBITX_Link:
         turning split on, which the firmware reports as cr_ 0 just before
         cs_ 1.
         """
+        print("leave_rit")
         base = self._model.rit_base_hz
         self._model.rit_base_hz = 0
         self._model.rit = False
+        self._model.rit_sdr_oneshot_seed = 0
+        self._model.rit_sdr_turn_off = True
         if base and base != self._model.frequency(self._model.rx_vfo):
             # Receive is the primary VFO, so an ordinary write lands on it.
             self._request_frequency(base)   # FIX: paced -- see _request_frequency
