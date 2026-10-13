@@ -333,22 +333,6 @@ class RadioModel:
     def rx_vfo(self):
         """The VFO that receives. Always the active one."""
         return self._role_active
-    #
-    #   Manages the status of RIT.
-    #
-    def set_rit_on(self, turn_on):
-        if turn_on and self.rit:            #   ignore duplicate turn_on request
-            print("thinks both on")
-            return
-        elif not turn_on and not self.rit:  #   ignore duplicate turn off request,
-            print("thinks turn off and rit on")
-            return
-        elif turn_on:                       #   new request to turn on
-            self.rit = True
-            self.rit_base_hz = self.frequency(self.rx_vfo)
-        else:                               #   new request to turn off
-            self.rit = False
-            self.rit_base_hz = 0
 
     @property
     def rit_offset(self):
@@ -387,7 +371,6 @@ class RadioModel:
     #
     @rit_sdr_oneshot_seed.setter
     def rit_sdr_oneshot_seed(self, hz):
-        print("setting one shot seed", hz)
         self.rit_sdr_seed = hz
 
     @property
@@ -404,8 +387,7 @@ class RadioModel:
     #   and it shouldn't re-enable it.
     #
     @rit_turn_off_SDR.setter
-    def rit_sdr_turn_off(self, Flag):
-        print("setting rit sdr turnoff flag=", Flag)
+    def rit_turn_off_SDR(self, Flag):
         self.rit_turn_off_sdr_flag = Flag
 
 
@@ -471,7 +453,6 @@ class RadioModel:
 
         which is vfo ("a" or "b").  If which is "p", then the active vfo is updated
         """
-        print("model set_frequency", which, hz)
         hz = int(hz)
         if which == "a" or (which == "p" and self.active =="a"):
             self.vfo_a = hz

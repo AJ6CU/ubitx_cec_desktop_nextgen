@@ -1284,20 +1284,11 @@ class uBITX_Link:
             # anywhere.
             was_on = self._model.rit
             now_on = str(value).strip() == "1"
-            print("in toggle, was_on=", was_on, "now on =", now_on)
             self._model.rit = now_on
             if now_on and not was_on:
-                # self._model.set_rit_on(True)
-                # # Captured AT SWITCH-ON from the real receive frequency: this
-                # # is where transmit stays while receive is tuned away from
-                # # it. The rig's vr_ report is NOT used for this -- see there.
-                print("turning on RIT, base = ", self._model.rit_base_hz, "rx=", self._model.frequency(self._model.rx_vfo))
                 self._model.rit_base_hz = self._model.frequency(self._model.rx_vfo)
-                a = self._model.rit_sdr_oneshot_seed
-                print("one shot =", a)
-                self._model.set_role_frequency("rx", self._model.rit_base_hz + a)
+                self._model.set_role_frequency("rx", self._model.rit_base_hz + self._model.rit_sdr_oneshot_seed)
             elif was_on and not now_on:
-                print("turning off rit and leaving")
                 self._radio_link._leave_rit()
 
 
@@ -1922,7 +1913,7 @@ class uBITX_Link:
         self._model.rit_base_hz = 0
         self._model.rit = False
         self._model.rit_sdr_oneshot_seed = 0
-        self._model.rit_sdr_turn_off = True
+        self._model.rit_turn_off_SDR = True
         if base and base != self._model.frequency(self._model.rx_vfo):
             # Receive is the primary VFO, so an ordinary write lands on it.
             self._request_frequency(base)   # FIX: paced -- see _request_frequency
@@ -2305,7 +2296,6 @@ class uBITX_Link:
         Neither write is acknowledged and nothing waits for them. The toggle
         that follows is, which is what the sequence is really protecting.
         """
-        print("link 1913", hz)
         self.set_frequency(hz)
 
         if self._tx_write_mode is not None:
@@ -2557,7 +2547,6 @@ class uBITX_Link:
             self._begin_borrowed_write(hz)
 
     def set_frequency(self, value):
-        print("Set_New_Frequency",value)
         fourBytes = self.Freq_Encode(value)
         command = [self.toRadioCommandDict["TS_CMD_FREQ"], fourBytes[0], fourBytes[1], fourBytes[2], fourBytes[3]]
         self.sendCommandToMCU(bytes(command))
@@ -2568,7 +2557,6 @@ class uBITX_Link:
     #   Radio will separately send back the mode to the UX
     #
     def set_mode(self, mode):
-        print("Set_Mode")
         encode_mode = MODES.index(mode)
         command = [self.toRadioCommandDict["TS_CMD_MODE"], encode_mode, 0, 0, 0]
         self.sendCommandToMCU(bytes(command))
@@ -2579,42 +2567,34 @@ class uBITX_Link:
     #   and mode for the displayed VOF
     #
     def Change_Band(self, direction):
-        print("Change_Band")
         command = [self.toRadioCommandDict["TS_CMD_BAND"], direction, 0, 0, 0]
         self.sendCommandToMCU(bytes(command))
 
     def Tuning_Rate(self, value: bytes):
-        print("Tuning_Rate")
         command = [self.toRadioCommandDict["TS_CMD_TUNESTEP"], value, 0, 0, 0]
         self.sendCommandToMCU(bytes(command))
 
     def toggle_vfo(self):
-        print("Toggle_VFO")
         command = [self.toRadioCommandDict["TS_CMD_VFO"], 0, 0, 0, 0]
         self.sendCommandToMCU(bytes(command))
 
     def Toggle_Lock(self):
-        print("Toggle_Lock")
         command = [self.toRadioCommandDict["TS_CMD_LOCK"], 0, 0, 0, 0]
         self.sendCommandToMCU(bytes(command))
 
     def Toggle_Speaker(self):
-        print("Toggle_Speaker")
         command = [self.toRadioCommandDict["TS_CMD_SDR"], 0, 0, 0, 0]
         self.sendCommandToMCU(bytes(command))
 
     def Toggle_Stop(self):
-        print("Toggle_Stop")
         command = [self.toRadioCommandDict["TS_CMD_TXSTOP"], 0, 0, 0, 0]
         self.sendCommandToMCU(bytes(command))
 
     def Toggle_Split(self):
-        print("Toggle_Split")
         command = [self.toRadioCommandDict["TS_CMD_SPLIT"], 0, 0, 0, 0]
         self.sendCommandToMCU(bytes(command))
 
     def Toggle_RIT(self):
-        print("Toggle_RIT")
         command = [self.toRadioCommandDict["TS_CMD_RIT"], 0, 0, 0, 0]
         self.sendCommandToMCU(bytes(command))
 

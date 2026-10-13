@@ -188,7 +188,7 @@ class SDR_Link:
         self.controller.on_filter = self._from_sdr_filter
         self.controller.on_rit = self._from_sdr_turn_on_rit
         self.controller.off_rit = self._from_sdr_turn_off_rit
-        self.controller.model_turn_off_rit_request = self._from_model_turn_off_rit
+        self.controller.model_turn_SDR_rit_off = self._from_model_turn_SDR_rit_off
         self.controller.model_update_rit_offset = self._from_sdr_update_model_offset
         self.controller.model_rit_state = self._from_model_rit_state
         self.controller.model_rit_offset = self._from_model_to_sdr_rit_offset
@@ -248,7 +248,7 @@ class SDR_Link:
         self.controller.on_filter = self._from_sdr_filter
         self.controller.on_rit = self._from_sdr_turn_on_rit
         self.controller.off_rit = self._from_sdr_turn_off_rit
-        self.controller.model_turn_off_rit_request = self._from_model_turn_off_rit
+        self.controller.model_turn_SDR_rit_off = self._from_model_turn_SDR_rit_off
         self.controller.model_rit_state= self._from_model_rit_state
         self.controller.model_rit_offset = self._from_model_to_sdr_rit_offset
         self.controller.model_update_rit_offset = self._from_sdr_update_model_offset
@@ -670,19 +670,20 @@ class SDR_Link:
         self._set_model_filter(width_hz)
     # MJH
     def _from_sdr_turn_on_rit(self, hz):
-        print("seed hz =", hz)
         self._model.rit_sdr_seed = hz
-        print("toggling RIT False 1")
+        self._model.changed()
         self._rig.Toggle_RIT()
 
 
     def _from_sdr_turn_off_rit(self):
         self._model.rit_sdr_seed = 0
-        print("toggling RIT False 2")
+        self._model.changed()
         self._rig.Toggle_RIT()
-
-    def _from_model_turn_off_rit(self):
+    #
+    #   This one has not toggle because 
+    def _from_model_turn_SDR_rit_off(self):
         self._model.rit_sdr_seed = 0
+        self._model.changed()
         return self._model.rit_turn_off_SDR
 
     def _from_model_rit_state(self):
@@ -691,7 +692,6 @@ class SDR_Link:
 
 
     def _from_sdr_update_model_offset (self, hz):
-        print("updating model offset, hz=", hz)
         self._model.set_role_frequency("rx", self._model.rit_base_hz + hz)
         self._model.changed()
 
@@ -1441,36 +1441,3 @@ class SDR_Link:
             self._model.filter_hz = width_hz
             self._model.changed()
 
-    def _set_model_rit(self, hz):
-        #
-        #   At entry, we no that the current offset is not what the sdr has
-        #
-
-        if self._model.rit:     #no work needed if
-            if self._model.rit_offset == hz:    # if model and offset are the same, no changes
-                                                # this path should never be taken as the guard
-                                                # in rigctl.sdr makes sure they are different.
-                return hz
-
-            elif hz == 0:           # A zero indicates we are turning off rit
-                print("***MJH1***, base=", self._model.rit_base_hz)
-                self._rig.set_role_frequency("rx", self._model.rit_base_hz)
-                self._model.set_rit_on(False)
-                print("toggling RIT False 3")
-                self._rig.Toggle_RIT()
-                self._model.changed()
-                return 0
-            else:                   #Rit is changing, update model frequency
-                self._model.set_rit_on(True)
-                print("***MJH2***, base=", self._model.rit_base_hz)
-                self._rig.set_role_frequency("rx", self._model.rit_base_hz + hz)
-                self._model.changed()
-                return hz
-        else:
-            print("turning on rit")
-            self._model.set_rit_on(True)
-            self._rig.set_role_frequency("rx", self._model.rit_base_hz + hz)
-            print("toggling RIT False 4")
-            self._rig.Toggle_RIT()
-            self._model.changed()
-            return hz
