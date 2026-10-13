@@ -1250,7 +1250,7 @@ class uBITX_Link:
         #
         def vr_UX_Update_RIT_Freq(self, buffer):
             value = self._extract_value(buffer, 10, len(buffer) - 3)
-            print("vr_UX_Update_RIT_Freq: ", value)
+            # print("vr_UX_Update_RIT_Freq(base freq): ", value)
             # IGNORED, deliberately.
             #
             # It looks like the rig's record of the RIT base, and for a while
@@ -1269,7 +1269,6 @@ class uBITX_Link:
 
         def cr_UX_RIT_Toggle(self, buffer):
             value = self._extract_value(buffer, 10, len(buffer) - 3)
-            print("cr_UX_RIT_Toggle: ", value)
             # THE VALUE IS THE STATE -- 1 on, 0 off -- so it is read, not
             # toggled. Confirmed on the rig: turning split on while RIT is
             # on produces
@@ -1381,7 +1380,6 @@ class uBITX_Link:
             hz = self._radio_link._frequency_report("p", value)
             if hz is not None:
                 self._model.set_frequency("p", hz)
-            print("vc_UX_Set_Primary_VFO_Frequency: ", value)
 
             # NOT fed to the transmit sequence any more. Nothing waits for
             # a write to be acknowledged -- see _advance_tx_write -- so this
@@ -1432,7 +1430,7 @@ class uBITX_Link:
             hz = self._radio_link._frequency_report("a", value)
             if hz is not None:
                 self._model.set_frequency("a", hz)
-            print("va_UX_Set_VFO_A_Frequency: ", value)
+            # print("va_UX_Set_VFO_A_Frequency: ", value)
             # if (self.channelsWindow != None) and (self.channelsWindow.scanRunning):
             #     # print("***Ignoring va command as we're scanning***")
             #     return  # ignore the VFO A command during scanning as it can be out of order
@@ -1761,7 +1759,6 @@ class uBITX_Link:
         # self.sendCommandToMCU(bytes(command))
 
     def Freq_Encode(self, freq):
-        print("freq_Encode")
 
         encodedBytes = bytearray()
         intFreq = int(freq)
@@ -1884,12 +1881,9 @@ class uBITX_Link:
         # goes in the VFO, and the two differ by the CW sidetone on transmit.
         # role_to_vfo_hz is the inverse of role_frequency -- without it a
         # 1 kHz step moved 400 Hz while the tone was 600.
-        print("set_role_frequency", role, hz)
         hz = self._model.role_to_vfo_hz(role, hz)
-        print("new hz =", hz, "rit offset", self._model.rit_offset)
 
         if role == "rx" or not self._model.split:
-            print("link 1780", role, self._model.split)
             self._request_frequency(hz)     # FIX: paced -- see _request_frequency
             return
 
@@ -1908,7 +1902,6 @@ class uBITX_Link:
         turning split on, which the firmware reports as cr_ 0 just before
         cs_ 1.
         """
-        print("leave_rit")
         base = self._model.rit_base_hz
         self._model.rit_base_hz = 0
         self._model.rit = False

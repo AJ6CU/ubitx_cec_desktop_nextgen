@@ -680,7 +680,7 @@ class SDR_Link:
         self._model.changed()
         self._rig.Toggle_RIT()
     #
-    #   This one has not toggle because 
+    #   This one has not toggle because
     def _from_model_turn_SDR_rit_off(self):
         self._model.rit_sdr_seed = 0
         self._model.changed()
