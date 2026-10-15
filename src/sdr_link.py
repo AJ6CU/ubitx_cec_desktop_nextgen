@@ -186,8 +186,9 @@ class SDR_Link:
         self.controller.on_frequency = self._from_sdr_frequency
         self.controller.on_mode = self._from_sdr_mode
         self.controller.on_filter = self._from_sdr_filter
-        self.controller.on_rit = self._from_sdr_turn_on_rit
-        self.controller.off_rit = self._from_sdr_turn_off_rit
+        # self.controller.on_rit = self._from_sdr_turn_on_rit
+        # self.controller.off_rit = self._from_sdr_turn_off_rit
+        self.controller.rit_state_changed = self._from_sdr_rit_state_changed
         self.controller.model_turn_SDR_rit_off = self._from_model_turn_SDR_rit_off
         self.controller.model_update_rit_offset = self._from_sdr_update_model_offset
         self.controller.model_rit_state = self._from_model_rit_state
@@ -246,8 +247,9 @@ class SDR_Link:
         self.controller.on_frequency = self._from_sdr_frequency
         self.controller.on_mode = self._from_sdr_mode
         self.controller.on_filter = self._from_sdr_filter
-        self.controller.on_rit = self._from_sdr_turn_on_rit
-        self.controller.off_rit = self._from_sdr_turn_off_rit
+        # self.controller.on_rit = self._from_sdr_turn_on_rit
+        # self.controller.off_rit = self._from_sdr_turn_off_rit
+        self.controller.rit_state_changed = self._from_sdr_rit_state_changed
         self.controller.model_turn_SDR_rit_off = self._from_model_turn_SDR_rit_off
         self.controller.model_rit_state= self._from_model_rit_state
         self.controller.model_rit_offset = self._from_model_to_sdr_rit_offset
@@ -668,35 +670,57 @@ class SDR_Link:
     def _from_sdr_filter(self, width_hz):
         """The filter was widened or narrowed in SDR++ itself."""
         self._set_model_filter(width_hz)
-    # MJH
-    def _from_sdr_turn_on_rit(self, hz):
-        self._model.rit_sdr_seed = hz
-        self._model.changed()
-        self._rig.Toggle_RIT()
 
-
-    def _from_sdr_turn_off_rit(self):
-        self._model.rit_sdr_seed = 0
-        self._model.changed()
-        self._rig.Toggle_RIT()
     #
-    #   This one has not toggle because
-    def _from_model_turn_SDR_rit_off(self):
-        self._model.rit_sdr_seed = 0
-        self._model.changed()
-        return self._model.rit_turn_off_SDR
+    #   Following methods are used to connect the functionality in rigctl
+    #   with both the UX and the Model. This is necessary because rigctl does not have
+    #   direct access to either the UX/Rig or the Model.
+    #
 
+    #
+    #   Returns what the Model believes the current state of the RIG is in
+    #
     def _from_model_rit_state(self):
         return self._model.rit
 
+    #
+    #   Returns what the Model believes the current offset of the RIT from the base frequency
+    #
+    def _from_model_to_sdr_rit_offset(self):
+        return self._model.rit_offset
 
+    #
+    #   If the UX has left RIT, then the model records that the SDR needs to leave
+    #   RIT too. This routine just returns the result of that Flag. True means turn off
+    #   SDR RIT too.
+    #
+    def _from_model_turn_SDR_rit_off(self):
+        return self._model.rit_turn_off_SDR
+
+
+    #
+    #   This is called when the "j" query of the RIT detects a change
+    #   A 0 means RIT is off while a non-zero HZ seeds RIT with the current j value
+    #   It is also called when the Model reports that the UX has turned off the RIT
+    #   and that the SDR needs to follow. In that case, there is no need to toggleRIT
+    #   since the UX has already done so.
+    #
+    def _from_sdr_rit_state_changed(self, hz, toggleRIT):
+        self._model.rit_sdr_seed = hz
+        # self._model.changed()   # Looks like unnecessary
+        if toggleRIT:
+            self._rig.Toggle_RIT()
+
+    #
+    #   When the SDR updates the RIT, it updates the frequency offset returned by the
+    #   "j" query and then tells the model that things have changed. This results in the
+    #   UX detecting the change in the next poll sequence and redrawing its display
+    #
 
     def _from_sdr_update_model_offset (self, hz):
         self._model.set_role_frequency("rx", self._model.rit_base_hz + hz)
-        self._model.changed()
+        # self._model.changed()  # Looks like unnecessary
 
-    def _from_model_to_sdr_rit_offset(self):
-        return self._model.rit_offset
 
 
     def _from_sdr_split(self):
