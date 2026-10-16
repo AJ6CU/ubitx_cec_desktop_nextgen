@@ -1250,7 +1250,17 @@ class uBITX_Link:
         #
         def vr_UX_Update_RIT_Freq(self, buffer):
             value = self._extract_value(buffer, 10, len(buffer) - 3)
-            # print("vr_UX_Update_RIT_Freq(base freq): ", value)
+            print("vr_UX_Update_RIT_Freq(base freq): ", value)
+            # report = self._radio_link._frequency_report("r", value)
+            # hz = report if report is not None else value
+            # print("hz returned in rit", hz)
+            # if hz is not None:
+            #     self._model.set_frequency("p", hz)
+            # else:
+            #     self._model.set_frequency("p", value)
+
+
+
             # IGNORED, deliberately.
             #
             # It looks like the rig's record of the RIT base, and for a while
@@ -1269,6 +1279,7 @@ class uBITX_Link:
 
         def cr_UX_RIT_Toggle(self, buffer):
             value = self._extract_value(buffer, 10, len(buffer) - 3)
+            print("cr_UX_RIT_Toggle: ", value)
             # THE VALUE IS THE STATE -- 1 on, 0 off -- so it is read, not
             # toggled. Confirmed on the rig: turning split on while RIT is
             # on produces
@@ -1286,7 +1297,10 @@ class uBITX_Link:
             self._model.rit = now_on
             if now_on and not was_on:
                 self._model.rit_base_hz = self._model.frequency(self._model.rx_vfo)
-                self._model.set_role_frequency("rx", self._model.rit_base_hz + self._model.rit_sdr_oneshot_seed)
+                s = self._model.rit_sdr_oneshot_seed
+                print("seeding rit from sdr, base = ", self._model.rit_base_hz, "new vfo=",self._model.rit_base_hz + s)
+                self._model.set_role_frequency("rx", self._model.rit_base_hz + s)
+                print("model rx =", self._model.role_frequency("rx"))
             elif was_on and not now_on:
                 self._radio_link._leave_rit()
 
@@ -1378,7 +1392,9 @@ class uBITX_Link:
             # FIX: an impossible frequency is refused, not recorded -- see
             # _frequency_report. int() on a mangled value used to raise here.
             hz = self._radio_link._frequency_report("p", value)
+            print("set primary return, frequency, ", value, "hz returned", hz)
             if hz is not None:
+                print("setting model frequency from vc_UX_Set_Primary_VFO_Frequency",hz)
                 self._model.set_frequency("p", hz)
 
             # NOT fed to the transmit sequence any more. Nothing waits for
@@ -1427,7 +1443,9 @@ class uBITX_Link:
             value = self._extract_value(buffer, 10, len(buffer) - 3)
             # FIX: an impossible frequency is refused, not recorded -- see
             # _frequency_report. int() on a mangled value used to raise here.
+            print('set vfo a', value)
             hz = self._radio_link._frequency_report("a", value)
+            print("hz returned", hz)
             if hz is not None:
                 self._model.set_frequency("a", hz)
             # print("va_UX_Set_VFO_A_Frequency: ", value)
@@ -1473,7 +1491,9 @@ class uBITX_Link:
             value = self._extract_value(buffer, 10, len(buffer) - 3)
             # FIX: an impossible frequency is refused, not recorded -- see
             # _frequency_report. int() on a mangled value used to raise here.
+            print('set vfo b', value)
             hz = self._radio_link._frequency_report("b", value)
+            print("hz returned", hz)
             if hz is not None:
                 self._model.set_frequency("b", hz)
             print("vb_UX_Set_VFO_B_Frequency: ", value)
@@ -1902,6 +1922,7 @@ class uBITX_Link:
         turning split on, which the firmware reports as cr_ 0 just before
         cs_ 1.
         """
+        print("leaving rit")
         base = self._model.rit_base_hz
         self._model.rit_base_hz = 0
         self._model.rit = False
@@ -2289,6 +2310,7 @@ class uBITX_Link:
         Neither write is acknowledged and nothing waits for them. The toggle
         that follows is, which is what the sequence is really protecting.
         """
+        print("set frequency from _write_then_return")
         self.set_frequency(hz)
 
         if self._tx_write_mode is not None:
@@ -2381,6 +2403,8 @@ class uBITX_Link:
         self._freq_intent = int(hz)
         if self._freq_sent is None and self._freq_follow_timer is None:
             self._send_frequency_intent()
+        else:
+            print("not sending intent", self._freq_sent, self._freq_follow_timer is None)
 
     def _send_frequency_intent(self):
         """Sends the current intent, unless a split borrow has the slot."""
@@ -2540,6 +2564,7 @@ class uBITX_Link:
             self._begin_borrowed_write(hz)
 
     def set_frequency(self, value):
+        print("[rig] setting frequency", value)
         fourBytes = self.Freq_Encode(value)
         command = [self.toRadioCommandDict["TS_CMD_FREQ"], fourBytes[0], fourBytes[1], fourBytes[2], fourBytes[3]]
         self.sendCommandToMCU(bytes(command))
@@ -2588,6 +2613,7 @@ class uBITX_Link:
         self.sendCommandToMCU(bytes(command))
 
     def Toggle_RIT(self):
+        print("turning on RIT")
         command = [self.toRadioCommandDict["TS_CMD_RIT"], 0, 0, 0, 0]
         self.sendCommandToMCU(bytes(command))
 

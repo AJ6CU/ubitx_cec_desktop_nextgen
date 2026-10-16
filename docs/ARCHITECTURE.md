@@ -389,15 +389,25 @@ RIT = "rit"```
    callback. Again RIT is a good example.  
 
 ```   if RIT in self.capabilities and not hopping:
-        reply = self._client.query("j")
-        state = reply.values[0].strip() if reply.ok and reply.values else None
-        self.rit = int(state)
-        self._call(self.on_rit, self.rit)```
-8. The actual callback, ```on_rit``` needs to be initialized to None in the __init__ of RigctlSDR. For example, for 
-rit I defined ```self.on_rit = None```.
+        rit_now_on = self._call(self.model_rit_state)
+                if not rit_now_on and self._call(self.model_turn_SDR_rit_off):
+                    local_rit_state_changed(last_rit_changer="UX", state=False, offset=0)
+                    self._call(self.model_rit_state_changed, 0, False)  # A zero turns RIT off
+
+                    self._client.query("J 0")```
+        
+8. The actual callback, ```self.model_rit_state``` and ```self.model_rit_state_changed``` need to be initialized to None in the __init__ of RigctlSDR. 
+For example, for 
+rit I defined ```self.model_rit_state= None``` and ``` self.model_rit_state_changed = None```.
 
 9. The actual callback is assigned in sdr_link.py in two places:  ```reload_profile``` and ```connect``` methods of 
-SDR_Link.  The statement is the same, again for example, RIT: ```self.controller.on_rit = self._from_sdr_rit```
+SDR_Link.  The statement is the same, again for example, RIT: ```self.controller.model_rit_state = self.
+_from_model_rit_state``` and ```self.controller.model_rit_state_changed = self._from_sdr_rit_state_changed```
+
+10. Then you need to implement the actual methods ```def _from_model_rit_state``` and ```def _from_sdr_rit_state_changed```
+
+11. Despite what the above instructions suggested, I did need to add ```self._model.changed()``` to the method that 
+update the frequency due to a RIT change in the 
 
 10. Now in SDR_Link, define what happens when _from_sdr_foo is invoked. If you call included a parameter (like RIT 
 above in the self._call method, make sure you add that parameter to the definiiton of _from_sdr_foo.

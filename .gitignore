@@ -2,3 +2,5 @@
 *.pyc
 *.pyc
 *.pyc
+src/__pycache__/ubitx_link.cpython-313.pyc
+*.pyc

@@ -360,6 +360,7 @@ class RadioModel:
         Set when the SDR turns on RIT. Zeroed on use. Needed because SDR turns on RIT
         by setting a non-zero value
         """
+        print("returning seed =", self.rit_sdr_seed)
         returnValue = self.rit_sdr_seed
         self.rit_sdr_seed = 0
         return returnValue
@@ -371,6 +372,7 @@ class RadioModel:
     #
     @rit_sdr_oneshot_seed.setter
     def rit_sdr_oneshot_seed(self, hz):
+        print("setting seed =", self.rit_sdr_seed)
         self.rit_sdr_seed = hz
 
     @property
