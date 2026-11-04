@@ -32,12 +32,6 @@ POLL_MS = 200
 # UBITX_SDR_TRACE=1 in the environment: every command sent, and every change
 # the poll reports as made in the SDR, printed -- for finding who moved what.
 TRACE = os.environ.get("UBITX_SDR_TRACE") == "1"
-# FIX: how long the poll waits for the rig to confirm a RIT toggle it asked
-# for. Without a limit, a toggle the rig never confirms -- refused in split,
-# or its report lost -- left RIT sync waiting for ever. The rig answers in
-# well under a second; this is generous so a busy serial line is not mistaken
-# for a refusal.
-RIT_TOGGLE_TIMEOUT_SECONDS = 3.0
 
 # The listening aids rigctl can switch: the window's name for each, its
 # capability, and Hamlib's function name for `u` / `U`. On or off only --
@@ -176,9 +170,6 @@ class RigctlSDR:
         # rigctld) -- and for SDRoxide too, if its "j" did not answer.
         self.rit = False             # Current setting for RIT. False is off, True is on
         self.rit_offset = 0          # 0 no Rit offset seen, otherwise +/- total RIT offset
-        self.rit_toggle_in_process = None
-        self.last_rit_mode_change = None
-        self._rit_toggle_since = 0.0     # FIX: when the toggle wait began
         self.split = None            # True if available
         self.split_vfo = None        # Either VFOA or VFOB for TX Frequency
         self.signal = None           # dBFS, where the SDR reports it
@@ -198,11 +189,10 @@ class RigctlSDR:
         self.on_frequency = None
         self.on_mode = None
         self.on_filter = None
-        self.model_rit_state_changed = None
-        self.model_update_rit_offset = None
-        self.model_turn_SDR_rit_off = None
-        self.model_rit_state= None
-        self.model_rit_offset = None
+        # FIX: the RIT offset changed in the SDR itself ("j"), in Hz; 0 is
+        # RIT off. Replaces the five model_* hooks: the transport reports what
+        # the SDR did and is told what to set, and never reads the model.
+        self.on_rit = None
         self.on_split = None
         self.on_signal = None
         self.on_volume = None        # the level changed in the SDR itself
@@ -271,7 +261,8 @@ class RigctlSDR:
         reply = client.query("f")
         if not (reply.ok and reply.values and _number(reply.values[0]) is not None):
             return False
-        # MJH minus offset?
+        # The SDR's own frequency -- under RIT, the base. No offset to take
+        # away: "f" never includes it (SDRoxide's "j" is reported apart).
         self.frequency = int(_number(reply.values[0]))
         caps.add(FREQUENCY)
 
@@ -365,13 +356,12 @@ class RigctlSDR:
             reply = client.query("j")
             offset = _number(reply.values[0]) if reply.ok and reply.values else None
             if offset is not None:
-                # Found Rit, now need to track initial offset and status
                 # FIX: the number _number read, not int() of the raw text
                 # again -- that raised on a decimal reply ("120.000000").
+                # Recorded, not reported: on connecting the rig leads, and
+                # SDR_Link.follow() sends the SDR the rig's offset.
                 self.rit_offset = int(offset)
                 self.rit = self.rit_offset != 0
-
-                #MJH Need to make callback here or just always set to 0
                 caps.add(RIT)
 
         # Discover SPLIT
@@ -449,7 +439,6 @@ class RigctlSDR:
         # FIX: RIT forgotten with the connection, so the next SDR -- which
         # may have no RIT at all -- does not inherit an offset.
         self.rit, self.rit_offset = False, 0
-        self.rit_toggle_in_process = self.last_rit_mode_change = None
         self.dsp_on = {}
         self.dsp_settings, self._levels_found = {}, set()
         self._hop = None
@@ -473,6 +462,22 @@ class RigctlSDR:
             # difference meant every read-back looked stale and a tune made
             # in the SDR was ignored for the whole settle window.
             self._set("frequency", self.frequency)
+            return True
+        return False
+
+    def set_rit(self, hz):
+        """
+        Sets the SDR's RIT offset, in Hz -- 0 is RIT off. SDRoxide's "J".
+
+        Recorded like any other setting, so the poll does not report it back
+        as a change made in the SDR.
+        """
+        if RIT not in self.capabilities:
+            return False
+        if self._command(f"J {int(hz)}"):
+            self.rit_offset = int(hz)
+            self.rit = self.rit_offset != 0
+            self._set("rit", self.rit_offset)
             return True
         return False
 
@@ -819,30 +824,6 @@ class RigctlSDR:
             if self.set_dsp("notch", False):
                 self._call(self.on_dsp, "notch", quiet=True)
 
-    def _begin_rit_toggle(self, direction):
-        """Waits for the rig to confirm RIT going "ON" or "OFF" -- for a while."""
-        self.rit_toggle_in_process = direction
-        self._rit_toggle_since = time.monotonic()
-
-    def _rit_toggle_timed_out(self, rig_on):
-        """
-        The rig never confirmed a RIT toggle. Puts the SDR where the rig is.
-
-        Rig RIT off: the SDR's offset is cleared (J 0), so it does not ask
-        again. Rig RIT on: the SDR is given the rig's offset.
-        """
-        print(f"[sdr] the rig did not confirm RIT {self.rit_toggle_in_process.lower()}"
-              f" -- following the rig (RIT {'on' if rig_on else 'off'})")
-        self.rit_toggle_in_process = None
-        if rig_on:
-            offset = int(self._call(self.model_rit_offset, quiet=True) or 0)
-            self._command(f"J {offset}")
-            self.rit, self.rit_offset = True, offset
-        else:
-            self._command("J 0")
-            self.rit, self.rit_offset = False, 0
-        self.last_rit_mode_change = "UX"
-
     def _set(self, name, value):
         """Records a value just set, for the settle window -- where there is one."""
         if self.profile.settle_seconds > 0:
@@ -877,17 +858,6 @@ class RigctlSDR:
     # Polling
     # ------------------------------------------------------------------
     def _poll(self):
-        #
-        #   Convenience functions for common operations within a polling section
-        #
-
-        #   RIT
-        def local_rit_state_changed (last_rit_changer, state, offset):
-            self.last_rit_mode_change = last_rit_changer
-            self.rit = state
-            self.rit_offset = offset
-
-
         """Reads what the SDR is doing, and reports what changed."""
         self._poll_id = None
         if not self.is_connected:
@@ -895,25 +865,32 @@ class RigctlSDR:
         try:
             reply = self._client.query("f")
             hz = _number(reply.values[0]) if reply.ok and reply.values else None
-            if (hz is not None and int(hz) != self.frequency
-                    and not self._stale("frequency", int(hz))):
+            # FIX: _stale FIRST, as for volume and the RF gain. Compared
+            # first, reading back what was set never reached _stale, so its
+            # window never ended early -- and a change made in the SDR within
+            # settle_seconds of anything sent was taken for the old value and
+            # ignored until the window ran out. Mode, width, RIT and the DSP
+            # switches below had the same order.
+            if (hz is not None and not self._stale("frequency", int(hz))
+                    and int(hz) != self.frequency):
                 self.frequency = int(hz)
-                # FIX: PLUS. Under RIT SDRoxide's "f" is the base and "j" the
-                # offset, so it receives on f + j -- and the rig's receive
-                # frequency (radio_model: the VFO under RIT) is that sum.
-                # Minus put the rig two offsets away from the SDR.
-                self._call(self.on_frequency, self.frequency + self.rit_offset)
+                # FIX: the SDR's own frequency, "f", with no offset. A change
+                # of it is a QSY -- a click on the spectrum, its dial -- and a
+                # QSY clears RIT (SDR_Link._from_sdr_frequency), so where the
+                # operator went is f itself. The offset was subtracted here
+                # before, which put the rig two offsets away from the SDR.
+                self._call(self.on_frequency, self.frequency)
 
             mode, width = _mode_and_width(self._client.query("m", lines=2))
             hopping = self._hop is not None
             if hopping:
                 mode, width, hopping = self._follow_hop(mode, width)
-            if mode and mode != self.mode and not self._stale("mode", mode):
+            if mode and not self._stale("mode", mode) and mode != self.mode:
                 self.mode = mode
                 self._call(self.on_mode, mode)
                 self._notch_off_in_cw(mode)
-            if (width and width != self.filter_width
-                    and not self._stale("width", width)):
+            if (width and not self._stale("width", width)
+                    and width != self.filter_width):
                 self.filter_width = width
                 self._call(self.on_filter, self.filter_width)
 
@@ -936,151 +913,19 @@ class RigctlSDR:
                     self.squelch = level
                     self._call(self.on_squelch, level)
             # FIX: the RF gain, so the knob follows SDRoxide's Gain slider.
-            # MJH
+            # FIX: RIT, reported like the other settings -- what the SDR's
+            # "j" says, when it changes in the SDR itself. 0 is RIT off: that
+            # is how SDRoxide shows it. What happens next is the link's
+            # business: it asks the RIG, and the SDR is told the rig's answer.
+            # This replaces a four-state machine that read the model and
+            # toggled the rig from inside the poll.
             if RIT in self.capabilities and not hopping:
-                #
-                #   The only signal that that RIT is on is when "j" returns a non-zero value
-                #   It turns back off when the offset is 0.
-                #   Problem is that when RIT is turned on by UX, there is no offset until the
-                #   tuning dial is turned. SO we need to ignore a zero offset until we see the
-                #   at least one non-zero offset.
-                #
-                #   There are 4 states that we could be in:
-                #   1. Both UX and SDR Rit on - just need to figure out who has the most recent data.  If the
-                #   Flag "rit_turn_off_SDR" accessed via Call to self.model_turn_SDR_rit_off (that lives ins sdr_link)
-                #   is True
-                #   2. UX on and SDR RIT off - Either UX was just turned on, ot SDR turned off. The model
-                #   Flag "rit_turn_off_SDR" accessed via Call to self.model_turn_SDR_rit_off (that lives ins sdr_link)
-                #   will tell you which
-                #   3. UX off and SDR RIT on - UX could be leading or RIT could be leasing. Teh "rit_turn_off_SDR if
-                #   True tells you that local SDR RIT is out of date.
-                #   4. Both turned off - nothing to do in this case
-                #
-
-                #
-                #   Get current state of model and reported offset from SDR.
-                #
-                rit_now_on = self._call(self.model_rit_state)
-                #
-                #   Need to wait for any toggling in process to complete
-                #
-                # FIX: the wait ends. A toggle not confirmed in time means the
-                # rig did not take it, and the RIG decides: the SDR is put to
-                # the rig's state instead of the toggle being sent again --
-                # retrying a toggle the rig refuses would loop for ever.
-                if (self.rit_toggle_in_process is not None
-                        and time.monotonic() - self._rit_toggle_since
-                        > RIT_TOGGLE_TIMEOUT_SECONDS):
-                    self._rit_toggle_timed_out(rit_now_on)
-                elif self.rit_toggle_in_process == "ON":
-                    print("Thinks RIT is in process of being turned ON")
-                    if rit_now_on:
-                        self.rit_toggle_in_process = None
-                        print("**Now on toggle complete**")
-                    else:
-                        print("failed to find Rit ON toggle complete")
-                elif self.rit_toggle_in_process == "OFF":
-                    print("Thinks RIT is in process of being turned OFF")
-                    if not rit_now_on:
-                        self.rit_toggle_in_process = None
-                        print("**Now off toggle complete**")
-                    else:
-                        print("failed to find Rit OFF toggle complete")
-
-                if self.rit_toggle_in_process is None:
-
-                    if not rit_now_on and self._call(self.model_turn_SDR_rit_off):
-                        print("J0 1 - ux off, and flag to turn sdr off is true")
-                        local_rit_state_changed(last_rit_changer="UX", state=False, offset=0)
-                        self._call(self.model_rit_state_changed, 0, False)  # A zero turns RIT off
-
-                        self._command("J 0")  # FIX: a command, not a query
-
-                    elif rit_now_on and not self.rit:   # state where model implies UX just turned on RIT
-                        local_rit_state_changed(last_rit_changer="UX", state=True, offset=0)
-                        # No Model change as UX has already updated model
-
-
-                    elif rit_now_on and self.rit:       #   Both are on, but SDR could be ahead of model
-                                                        #   Or model ahead of SDR. We can determine whether
-                                                        #   SDR was changed last by comparing it to save value
-                                                        #   A zero implies that the SDR turned off RIT.
-                        reply = self._client.query("j")
-                        sdr_offset = _offset_hz(reply)
-
-                        if sdr_offset is None:
-                            pass    # FIX: unreadable -- try again next poll
-                        elif self.last_rit_mode_change == "SDR" and sdr_offset == 0:  # turn it off
-                            print("J0 2, Lsst rit mode change was SDR, and offset=0, turn off rit")
-                            local_rit_state_changed(last_rit_changer="SDR", state=False, offset=0)
-                            self._call(self.model_rit_state_changed, 0, True)    # A zero turns RIT off
-                            self._begin_rit_toggle("OFF")
-
-                            self._command("J 0")  # FIX: a command. Clears RIT in the SDR and turns it off.
-                            # self._call(self.off_rit)
-
-                        elif self.rit_offset !=  sdr_offset:  # something out of synch....
-                            local_rit_state_changed(last_rit_changer="SDR", state=True, offset=sdr_offset)
-                            # print("loop1")
-                            self._call(self.model_update_rit_offset,sdr_offset)
-
-                            # self._call(self.model_update_rit_offset(sdr_offset))
-                        else:   #if sdr_offset == self.rit_offset:   # UX has updated RIT
-
-                            model_offset = self._call(self.model_rit_offset)
-
-                            # print("sdr offset", sdr_offset, "self.rit_offset", self.rit_offset, "model_offset", model_offset)
-                            if model_offset != self.rit_offset and model_offset != 0:
-                                local_rit_state_changed(last_rit_changer="UX", state=True, offset=model_offset)
-                                # no change in model state, just need to update the frequency displayed.
-                                # print("loop2")
-                                self._call(self.model_update_rit_offset,model_offset)
-
-                                self._command(f"J {int(model_offset)}")  # FIX: a command, not a query
-                            else:
-                                pass    # no change made as all offsets are equal
-                                # self.last_rit_mode_change = "UX"
-                                # print("loop3", self.last_rit_mode_change)
-                                # local_rit_state_changed(last_rit_changer="UX", state=True, offset=model_offset)
-                                # local_rit_state_changed(last_rit_changer="UX", state=True, offset=self.rit_offset)
-                                # No need to update model here as UX made change and we just need to reflect it
-
-
-                    elif not rit_now_on and self.rit:
-                        print("turning on rit from sdr - UX off and sdr on")
-                        #   This is the case where the Model thinks RIT is off and SDR thinks it is on.
-                        #   Must turn on RIT and preload the offset
-                        #
-
-                        # self.last_rit_mode_change = "SDR"
-                        reply = self._client.query("j")
-                        # FIX: an unreadable reply seeds no offset rather than
-                        # None -- RIT is still turned on, as this branch decided.
-                        self.rit_offset = _offset_hz(reply) or 0
-                        local_rit_state_changed(last_rit_changer="SDR", state=True, offset=self.rit_offset)
-                        self._call(self.model_rit_state_changed, self.rit_offset, True)  # if 0, turns it off, otherwise seeds
-                                                                                    # with offset RIT with result of "j"
-                        self._begin_rit_toggle("ON")
-                        # self._call(self.on_rit, self.rit_offset)
-
-                    else:   # rit_now_on and self.rit are BOTH OFF. So if a non-Zero J value from the SDR
-                            # implies that the SDR wants to turn on the RIT
-
-
-
-                        reply = self._client.query("j")
-                        sdr_offset = _offset_hz(reply)
-                        if sdr_offset != 0:
-                            print("think both ux and sdr are off, but found j =", sdr_offset)
-                            local_rit_state_changed(last_rit_changer="SDR", state=True, offset=sdr_offset)
-                            self._call(self.model_rit_state_changed, sdr_offset, True)   # if 0, turns it off, otherwise seeds
-                                                                                    # with offset RIT with result of "j"
-                            self._begin_rit_toggle("ON")
-                            # self._call(self.on_rit, sdr_offset)
-                        else:
-                            # print("all off and j=0")
-                            pass            # no state change
-
+                offset = _offset_hz(self._client.query("j"))
+                if (offset is not None and not self._stale("rit", offset)
+                        and offset != self.rit_offset):
+                    self.rit_offset = offset
+                    self.rit = offset != 0
+                    self._call(self.on_rit, offset)
 
             if SPLIT in self.capabilities and not hopping:
                 pass
@@ -1114,7 +959,7 @@ class RigctlSDR:
                 if state not in ("0", "1"):
                     continue
                 on = state == "1"
-                if on != self.dsp_on.get(function) and not self._stale(function, on):
+                if not self._stale(function, on) and on != self.dsp_on.get(function):
                     self.dsp_on[function] = on
                     self._call(self.on_dsp, function)
 

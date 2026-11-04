@@ -47,7 +47,13 @@ from rigctl_sdr import RigctlSDR
 from rest_sdr import RestSDR
 from sdr_programs import (profile_for, CW_EITHER, FILTER, VOLUME, MUTE, SQUELCH, SIGNAL,
                           AGC, NR, NOTCH, NB, CW_PEAK, SQUELCH_SWITCH, RF_GAIN,
-                          BANDWIDTH, DECODER)
+                          BANDWIDTH, DECODER, RIT)
+
+# FIX: how long a RIT change asked of the rig because the SDR changed waits
+# for the rig to confirm it. Past this the rig is taken as having said no, and
+# the SDR is put back to the rig's RIT -- the rig leads. The rig answers in well
+# under a second; this only stops a lost report from leaving the two apart.
+RIT_CONFIRM_SECONDS = 3.0
 
 # A mode asked of the rig because the SDR changed is PENDING until the rig
 # reports it. Meanwhile the rig's older mode is not pushed back to the SDR:
@@ -91,6 +97,14 @@ class SDR_Link:
         self._sent_mode = None
         self._rig_mode_asked = None     # see RIG_MODE_PENDING_SECONDS
         self._rig_mode_asked_at = 0.0
+        # FIX: RIT. The offset last given the SDR, and a change the SDR asked
+        # of the rig that the rig has not confirmed yet -- see _from_sdr_rit.
+        self._sent_rit = None
+        self._rit_asked = None
+        self._rit_rx_asked = None
+        # FIX: a QSY made in the SDR with RIT on, waiting for the rig to
+        # leave RIT -- see _from_sdr_frequency.
+        self._qsy = None
 
         # Called with True or False when the connection comes or goes, so
         # the interface can say so. Set by the owner.
@@ -186,13 +200,7 @@ class SDR_Link:
         self.controller.on_frequency = self._from_sdr_frequency
         self.controller.on_mode = self._from_sdr_mode
         self.controller.on_filter = self._from_sdr_filter
-        # self.controller.on_rit = self._from_sdr_turn_on_rit
-        # self.controller.off_rit = self._from_sdr_turn_off_rit
-        self.controller.model_rit_state_changed = self._from_sdr_rit_state_changed
-        self.controller.model_turn_SDR_rit_off = self._from_model_turn_SDR_rit_off
-        self.controller.model_update_rit_offset = self._from_sdr_update_model_offset
-        self.controller.model_rit_state = self._from_model_rit_state
-        self.controller.model_rit_offset = self._from_model_to_sdr_rit_offset
+        self.controller.on_rit = self._from_sdr_rit   # FIX: one hook, not five
         self.controller.on_split = self._from_sdr_split
         self.controller.on_volume = lambda level: self._audio_changed()
         self.controller.on_mute = lambda muted: self._audio_changed()
@@ -204,6 +212,10 @@ class SDR_Link:
         self.controller.on_disconnect = self._lost
         self._sent_hz = None            # FIX: was _sent_frequency, which nothing reads
         self._sent_mode = None
+        self._sent_rit = None
+        self._rit_asked = None
+        self._rit_rx_asked = None
+        self._qsy = None
         self._rig_mode_asked = None     # see RIG_MODE_PENDING_SECONDS
         self._rig_mode_asked_at = 0.0
         print(f"[sdr] now set up for {self.profile.name}")
@@ -247,13 +259,7 @@ class SDR_Link:
         self.controller.on_frequency = self._from_sdr_frequency
         self.controller.on_mode = self._from_sdr_mode
         self.controller.on_filter = self._from_sdr_filter
-        # self.controller.on_rit = self._from_sdr_turn_on_rit
-        # self.controller.off_rit = self._from_sdr_turn_off_rit
-        self.controller.model_rit_state_changed = self._from_sdr_rit_state_changed
-        self.controller.model_turn_SDR_rit_off = self._from_model_turn_SDR_rit_off
-        self.controller.model_rit_state= self._from_model_rit_state
-        self.controller.model_rit_offset = self._from_model_to_sdr_rit_offset
-        self.controller.model_update_rit_offset = self._from_sdr_update_model_offset
+        self.controller.on_rit = self._from_sdr_rit   # FIX: one hook, not five
         self.controller.on_split = self._from_sdr_split
         self.controller.on_volume = lambda level: self._audio_changed()
         self.controller.on_mute = lambda muted: self._audio_changed()
@@ -278,6 +284,10 @@ class SDR_Link:
         # in full rather than compared against a previous connection.
         self._sent_hz = None
         self._sent_mode = None
+        self._sent_rit = None
+        self._rit_asked = None
+        self._rit_rx_asked = None
+        self._qsy = None
         self._rig_mode_asked = None     # see RIG_MODE_PENDING_SECONDS
         self._rig_mode_asked_at = 0.0
         self.follow()
@@ -556,7 +566,12 @@ class SDR_Link:
             return
 
         hz = self._model.role_frequency("rx")
-        if hz and hz != self._sent_hz:
+        if self._qsy_waiting():
+            # FIX: a QSY from the SDR is under way. Until the rig is there,
+            # the model holds where the rig WAS -- and sending that would put
+            # the SDR back where the operator just left.
+            pass
+        elif hz and hz != self._sent_hz:
             self._sent_hz = hz
             # After a band change, the new band FRAMED -- see frame_band.
             band = self._framing_for(hz)
@@ -566,6 +581,8 @@ class SDR_Link:
                 self.controller.set_frequency(hz - self._model.rit_offset, band=band)
             else:
                 self.controller.set_frequency(hz - self._model.rit_offset)
+
+        self._follow_rit()
 
         rig_mode = self._model.mode_of(self._model.rx_vfo)
         if self._rig_mode_asked is not None:
@@ -614,10 +631,56 @@ class SDR_Link:
         that when the rig confirms it and follow() runs, it is not sent back.
         """
         hz = int(hz)
+        if self._qsy is not None:
+            # Moved again while RIT is being cleared: the latest place wins.
+            self._qsy = (hz, monotonic(), False)
+            self._sent_hz = hz
+            return
         if hz == self._sent_hz:
             return
         self._sent_hz = hz
+        if self._model.rit:
+            # FIX: A QSY CLEARS RIT. RIT is for the station being worked --
+            # one that has drifted, or is a little off -- so moving somewhere
+            # else means a different station, and the offset no longer
+            # applies. Keeping it is not possible in one step anyway: the rig
+            # has no command to move the frequency RIT holds.
+            #
+            # IN ORDER, because the rig's leaving RIT sends receive back to the
+            # base (uBITX_Link._leave_rit): RIT off first, and only once the
+            # rig has said so, the new frequency -- see _qsy_waiting.
+            self._qsy = (hz, monotonic(), False)
+            self._rig.Toggle_RIT()
+            return
         self._rig.set_role_frequency("rx", hz)
+
+    def _qsy_waiting(self):
+        """
+        Moves a QSY on by one step if the rig is ready; True while it lasts.
+
+        Steps: the rig leaves RIT; the new frequency is asked for; the rig
+        reports it. Past RIT_CONFIRM_SECONDS from the last step it is given
+        up, and the rig leads -- the SDR is sent where the rig is.
+        """
+        if self._qsy is None:
+            return False
+        target, at, asked = self._qsy
+        m = self._model
+        if monotonic() - at > RIT_CONFIRM_SECONDS:
+            print(f"[sdr] the rig did not reach {target} -- following the rig")
+            self._qsy = None
+            self._sent_hz = None
+            return False
+        if m.rit:
+            return True                       # still leaving RIT
+        if not asked:
+            self._qsy = (target, monotonic(), True)
+            self._rig.set_role_frequency("rx", target)
+            return True
+        if m.role_frequency("rx") == target:
+            self._qsy = None                  # there; _sent_hz is already target
+            return False
+        return True
 
     def _from_sdr_mode(self, sdr_mode):
         """
@@ -673,66 +736,99 @@ class SDR_Link:
         """The filter was widened or narrowed in SDR++ itself."""
         self._set_model_filter(width_hz)
 
+    # ------------------------------------------------------------------
+    # RIT -- the rig leads
     #
-    #   Following methods are used to connect the functionality in rigctl
-    #   with both the UX and the Model. This is necessary because rigctl does not have
-    #   direct access to either the UX/Rig or the Model.
+    # FIX: replaces five hooks through which the transport read the model,
+    # wrote it, and toggled the rig from inside its poll, with two flags on the
+    # model (a seed and a turn-off) carrying messages between them.
     #
+    # Now it goes like everything else. The SDR is told the rig's RIT:
+    # follow() sends the base as its frequency (F) and the offset as its RIT
+    # (J), 0 when RIT is off. A change made in the SDR is ASKED of the rig --
+    # RIT switched on or off, the receive frequency moved -- and the model
+    # changes only when the rig reports it did.
+    #
+    # In SDRoxide an offset of 0 IS RIT off; there is no separate switch. So
+    # with the rig's RIT on and tuned back to exactly zero, the SDR shows RIT
+    # off -- and stays in step, because receive and transmit are the same
+    # frequency either way.
+    # ------------------------------------------------------------------
+    def _follow_rit(self):
+        """Gives the SDR the rig's RIT offset, if it has changed."""
+        if RIT not in self.capabilities:
+            return
+        m = self._model
+        asked = self._rit_asked
+        if asked is not None:
+            offset, at, want_on = asked
+            if monotonic() - at > RIT_CONFIRM_SECONDS:
+                # The rig never confirmed. It leads: the SDR is put back to
+                # the rig's RIT, below -- _sent_rit forgotten so it is sent.
+                print(f"[sdr] the rig did not confirm RIT "
+                      f"{'on' if want_on else 'off'} -- following the rig")
+                self._rit_asked = None
+                self._sent_rit = None
+            elif want_on and m.rit and m.rit_base_hz:
+                if m.rit_offset == offset:
+                    self._rit_asked = None        # done: the rig is there
+                    self._sent_rit = offset       # and the SDR already is
+                    return
+                # RIT is on now; the receive frequency is the second half --
+                # asked ONCE: follow() runs on every change to the model,
+                # meters included, and the rig needs the request only once.
+                if self._rit_rx_asked != m.rit_base_hz + offset:
+                    self._ask_rig_rx(m.rit_base_hz + offset)
+                return
+            elif not want_on and not m.rit:
+                self._rit_asked = None            # done: RIT is off
+                self._sent_rit = 0
+                return
+            else:
+                # Still waiting for the rig. The model is the rig's OLD
+                # state, so it is not pushed at the SDR meanwhile.
+                return
 
-    #
-    #   Returns what the Model believes the current state of the RIG is in
-    #
-    def _from_model_rit_state(self):
-        return self._model.rit
+        offset = m.rit_offset
+        if offset != self._sent_rit:
+            self._sent_rit = offset
+            self.controller.set_rit(offset)
 
-    #
-    #   Returns what the Model believes the current offset of the RIT from the base frequency
-    #
-    def _from_model_to_sdr_rit_offset(self):
-        return self._model.rit_offset
+    def _from_sdr_rit(self, offset):
+        """
+        The RIT offset changed in the SDR itself. Asked of the rig.
 
-    #
-    #   If the UX has left RIT, then the model records that the SDR needs to leave
-    #   RIT too. This routine just returns the result of that Flag. True means turn off
-    #   SDR RIT too.
-    #
-    def _from_model_turn_SDR_rit_off(self):
-        return self._model.rit_turn_off_SDR
-
-
-    #
-    #   This is called when the "j" query of the RIT detects a change
-    #   A 0 means RIT is off while a non-zero HZ seeds RIT with the current j value
-    #   It is also called when the Model reports that the UX has turned off the RIT
-    #   and that the SDR needs to follow. In that case, there is no need to toggleRIT
-    #   since the UX has already done so.
-    #
-    def _from_sdr_rit_state_changed(self, hz, toggleRIT):
-        print("_from_sdr_rit_state_changed", hz, toggleRIT)
-        if toggleRIT:
+        Non-zero: RIT on (switched on first if it is off) at base + offset.
+        Zero: RIT off. The rig is toggled only when the state it will be in
+        -- after any toggle already asked for -- is not the one wanted, so a
+        quick on-then-off in the SDR does not leave the rig inverted.
+        """
+        offset = int(offset)
+        want_on = offset != 0
+        m = self._model
+        asked = self._rit_asked
+        pending = asked is not None and monotonic() - asked[1] <= RIT_CONFIRM_SECONDS
+        expected_on = asked[2] if pending else m.rit
+        self._rit_asked = (offset, monotonic(), want_on)
+        self._rit_rx_asked = None
+        if want_on != expected_on:
             self._rig.Toggle_RIT()
-        self._model.rit_sdr_seed = hz
-        self._model.changed()   # Looks like unnecessary
+        elif want_on and m.rit and m.rit_base_hz:
+            self._ask_rig_rx(m.rit_base_hz + offset)
 
+    def _ask_rig_rx(self, hz):
+        """
+        Asks the rig for the receive frequency a RIT offset set in the SDR
+        means -- once per offset. NOT recorded in _sent_hz: follow() sets that
+        from the model on every call, so until the rig reported, the two
+        took turns and the rig was asked again on every follow.
+        """
+        self._rit_rx_asked = hz
+        self._rig.set_role_frequency("rx", hz)
 
-    #
-    #   When the SDR updates the RIT, it updates the frequency offset returned by the
-    #   "j" query and then tells the model that things have changed. This results in the
-    #   UX detecting the change in the next poll sequence and redrawing its display
-    #
-#
-    #
-    #
-    def _from_sdr_update_model_offset (self, hz):
-        print("[sdr_update_model_offset]", hz)
-        self._model.set_role_frequency("rx", self._model.rit_base_hz + hz)
-        self._rig.set_role_frequency("rx", self._model.rit_base_hz + hz)
-        self._model.changed()
-
-
-
-    def _from_sdr_split(self):
-        print("split enabled from sdr")
+    def _from_sdr_split(self, *args):
+        # Not acted on yet: the rig leads split as it leads RIT.
+        pass
 
     # ------------------------------------------------------------------
     # Audio

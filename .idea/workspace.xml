@@ -5,19 +5,12 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="ffee8cb6-f9f7-4a7a-aac5-5c8718d71e6d" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/docs/Ritreview.md" afterDir="false" />
       <change afterPath="$PROJECT_DIR$/src/test_rit.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/test_rit_loop.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/misc.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/misc.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/ubitx_cec_desktop_nextgen.iml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/ubitx_cec_desktop_nextgen.iml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/test_rit_step2.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/docs/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/README.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/docs/SDROXIDE_UPGRADE.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/SDROXIDE_UPGRADE.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/docs/TODO.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/TODO.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/radio_model.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/radio_model.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/rigctl_sdr.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/rigctl_sdr.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/sdr_link.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/sdr_link.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/sdr_programs.json" beforeDir="false" afterPath="$PROJECT_DIR$/src/sdr_programs.json" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/ubitx_cec_desktop.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/ubitx_cec_desktop.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/ubitx_link.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/ubitx_link.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -44,25 +37,26 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent">{
-  &quot;keyToString&quot;: {
-    &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
-    &quot;Python.make_cw_iq.executor&quot;: &quot;Run&quot;,
-    &quot;Python.radio_model.executor&quot;: &quot;Run&quot;,
-    &quot;Python.scratch.executor&quot;: &quot;Run&quot;,
-    &quot;Python.test.executor&quot;: &quot;Run&quot;,
-    &quot;Python.test_rigctl.executor&quot;: &quot;Run&quot;,
-    &quot;Python.test_rit.executor&quot;: &quot;Run&quot;,
-    &quot;Python.test_rit_loop.executor&quot;: &quot;Run&quot;,
-    &quot;Python.test_serial_ports.executor&quot;: &quot;Run&quot;,
-    &quot;Python.ubitx_cec_desktop.executor&quot;: &quot;Run&quot;,
-    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
-    &quot;git-widget-placeholder&quot;: &quot;main&quot;,
-    &quot;last_opened_file_path&quot;: &quot;/Users/markjhatch/Documents/GitHub/ubitx_cec_desktop_nextgen/src&quot;
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "ModuleVcsDetector.initialDetectionPerformed": "true",
+    "Python.make_cw_iq.executor": "Run",
+    "Python.radio_model.executor": "Run",
+    "Python.scratch.executor": "Run",
+    "Python.test.executor": "Run",
+    "Python.test_rigctl.executor": "Run",
+    "Python.test_rit.executor": "Run",
+    "Python.test_rit_loop.executor": "Run",
+    "Python.test_serial_ports.executor": "Run",
+    "Python.ubitx_cec_desktop.executor": "Run",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
+    "RunOnceActivity.git.unshallow": "true",
+    "git-widget-placeholder": "main",
+    "last_opened_file_path": "/Users/markjhatch/Documents/GitHub/ubitx_cec_desktop_nextgen/src",
+    "settings.editor.selected.configurable": "configurable.group.python.group.settings"
   }
-}</component>
+}]]></component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
       <recent name="$PROJECT_DIR$/src" />
@@ -72,6 +66,7 @@
       <recent name="$PROJECT_DIR$/unit_tests" />
     </key>
     <key name="MoveFile.RECENT_KEYS">
+      <recent name="$PROJECT_DIR$/tests/rit_test" />
       <recent name="$PROJECT_DIR$/docs/bug_reports" />
     </key>
   </component>

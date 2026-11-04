@@ -1251,16 +1251,6 @@ class uBITX_Link:
         def vr_UX_Update_RIT_Freq(self, buffer):
             value = self._extract_value(buffer, 10, len(buffer) - 3)
             print("vr_UX_Update_RIT_Freq(base freq): ", value)
-            # report = self._radio_link._frequency_report("r", value)
-            # hz = report if report is not None else value
-            # print("hz returned in rit", hz)
-            # if hz is not None:
-            #     self._model.set_frequency("p", hz)
-            # else:
-            #     self._model.set_frequency("p", value)
-
-
-
             # IGNORED, deliberately.
             #
             # It looks like the rig's record of the RIT base, and for a while
@@ -1297,15 +1287,9 @@ class uBITX_Link:
             self._model.rit = now_on
             if now_on and not was_on:
                 self._model.rit_base_hz = self._model.frequency(self._model.rx_vfo)
-                s = self._model.rit_sdr_oneshot_seed
-                print("seeding rit from sdr, base = ", self._model.rit_base_hz, "new vfo=",self._model.rit_base_hz + s)
-                # FIX: ask the RIG for the seeded receive frequency, not the
-                # model. Writing the model alone showed base + offset while
-                # the rig, whose VFO had not moved, still received on the
-                # base. The rig's report of the new frequency moves the model,
-                # as for any other tune.
-                if s:
-                    self._radio_link._request_frequency(self._model.rit_base_hz + s)
+                # FIX: no seed. A RIT switched on from the SDR is followed by
+                # the SDR link asking for base + its offset, once this report
+                # has captured the base -- see SDR_Link._follow_rit.
             elif was_on and not now_on:
                 self._radio_link._leave_rit()
 
@@ -1927,12 +1911,12 @@ class uBITX_Link:
         turning split on, which the firmware reports as cr_ 0 just before
         cs_ 1.
         """
-        print("leaving rit")
+        print("[rig] leaving RIT -- receive back to the base")
         base = self._model.rit_base_hz
         self._model.rit_base_hz = 0
         self._model.rit = False
-        self._model.rit_sdr_oneshot_seed = 0
-        self._model.rit_turn_off_SDR = True
+        # FIX: no flag for the SDR. The offset is now 0 in the model, and the
+        # SDR link's follow() gives the SDR that, as it gives it everything.
         if base and base != self._model.frequency(self._model.rx_vfo):
             # Receive is the primary VFO, so an ordinary write lands on it.
             self._request_frequency(base)   # FIX: paced -- see _request_frequency
@@ -2618,7 +2602,7 @@ class uBITX_Link:
         self.sendCommandToMCU(bytes(command))
 
     def Toggle_RIT(self):
-        print("turning on RIT")
+        print("[rig] toggling RIT")    # FIX: was "turning on RIT" -- it toggles
         command = [self.toRadioCommandDict["TS_CMD_RIT"], 0, 0, 0, 0]
         self.sendCommandToMCU(bytes(command))
 

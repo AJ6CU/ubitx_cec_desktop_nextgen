@@ -119,14 +119,12 @@ class RadioModel:
         # back to the rig and nothing moved. Storing the base and DERIVING
         # the offset matches what the hardware is actually doing.
         #
-        # However, rigctl has it that the RX frequency is fixed, and the RIT command specifies the offset
-        # So the sdr's that have RIT commands must map to the opposite. An apparent change in frequency of
-        # 1Hz means that the RIT command J (frequency +/- 1).  This is handled in the rigctl_sdr
-        # class
+        # rigctl has it the other way round: the frequency ("f") stays put
+        # and RIT is an offset ("j"). So an SDR is sent the base as its
+        # frequency and rit_offset as its RIT -- SDR_Link._follow_rit -- and
+        # receives on the sum, which is this VFO.
         #
         self.rit_base_hz = 0
-        self.rit_sdr_seed = 0
-        self.rit_turn_off_sdr_flag = False
 
         self.locked = False
         self.muted = False
@@ -345,53 +343,6 @@ class RadioModel:
         if not self.rit or not self.rit_base_hz:
             return 0
         return self.frequency(self.rx_vfo) - self.rit_base_hz
-    #
-    #   The setter was added to accomodate RIGCTL that retrieve the RIT offset via the "j" command.
-    #   Previously, this was not necessary as the model was set up to accomodate the CEC firmware
-    #   where the VFO reported wsa always the rx frequency which included the offset embeeded within it
-    #
-    # @rit_offset.setter
-    # def rit_offset(self, hz):
-    #     self.set_frequency(self, self.role_vfo("rx"), self.rit_base_hz + hz)
-
-    @property
-    def rit_sdr_oneshot_seed(self):
-        """
-        Set when the SDR turns on RIT. Zeroed on use. Needed because SDR turns on RIT
-        by setting a non-zero value
-        """
-        print("returning seed =", self.rit_sdr_seed)
-        returnValue = self.rit_sdr_seed
-        self.rit_sdr_seed = 0
-        return returnValue
-
-    #
-    #   The setter was added to accomodate RIGCTL that retrieve the RIT offset via the "j" command.
-    #   Previously, this was not necessary as the model was set up to accomodate the CEC firmware
-    #   where the VFO reported wsa always the rx frequency which included the offset embeeded within it
-    #
-    @rit_sdr_oneshot_seed.setter
-    def rit_sdr_oneshot_seed(self, hz):
-        print("setting seed =", self.rit_sdr_seed)
-        self.rit_sdr_seed = hz
-
-    @property
-    def rit_turn_off_SDR(self):
-        """
-        Set when the UX/Rig turns off RIT.  This is used to norify the SDR to turn off RIT too.
-        """
-        returnValue = self.rit_turn_off_sdr_flag
-        self.rit_turn_off_sdr_flag = False
-        return returnValue
-
-    #
-    #   The setter was added to let the UX/Rig signal the SDR that it turned off RIT
-    #   and it shouldn't re-enable it.
-    #
-    @rit_turn_off_SDR.setter
-    def rit_turn_off_SDR(self, Flag):
-        self.rit_turn_off_sdr_flag = Flag
-
 
     def role_vfo(self, role):
         """
