@@ -1299,8 +1299,13 @@ class uBITX_Link:
                 self._model.rit_base_hz = self._model.frequency(self._model.rx_vfo)
                 s = self._model.rit_sdr_oneshot_seed
                 print("seeding rit from sdr, base = ", self._model.rit_base_hz, "new vfo=",self._model.rit_base_hz + s)
-                self._model.set_role_frequency("rx", self._model.rit_base_hz + s)
-                print("model rx =", self._model.role_frequency("rx"))
+                # FIX: ask the RIG for the seeded receive frequency, not the
+                # model. Writing the model alone showed base + offset while
+                # the rig, whose VFO had not moved, still received on the
+                # base. The rig's report of the new frequency moves the model,
+                # as for any other tune.
+                if s:
+                    self._radio_link._request_frequency(self._model.rit_base_hz + s)
             elif was_on and not now_on:
                 self._radio_link._leave_rit()
 

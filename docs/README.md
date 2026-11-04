@@ -32,9 +32,10 @@ has nothing to talk to.
   * the listening-aid lamps (AGC, NR, Notch, SQL, NB, CW, DEC). Click a lamp
     to switch its function; the ▾ beside it opens that function's controls,
     in the SDR's own terms. A pop-up can be pinned so it stays open. DEC
-    decodes CW (with SDRangel's Morse Decoder) into a strip along the bottom
-    of the tab, setting the filter, AGC and CW peak for decoding while it is
-    on and putting them back after.
+    shows the SDR's CW decoder's copy (SDRangel's Morse Decoder, or SDRoxide's
+    decoded CW over UDP) in a strip along the bottom of the tab, setting the
+    filter, AGC and CW peak for decoding while it is on and putting them back
+    after.
   * the filter;
   * band, mode, and the SDR's bandwidth (how much of the band its waterfall
     shows);
@@ -59,7 +60,8 @@ where it matters the reason is shown beside it.
 | Gqrx | rigctl, port 7356 | Turn on remote control. |
 | SDR++ | rigctl, port 4532 | Turn on the rigctl server module. |
 | rigctld (Hamlib) | rigctl, port 4532 | Give the whole command line under Setup's SDR settings. |
-| SDRoxide (trial) | rigctl, port 4532 | Turn on its Hamlib (rigctl) server, in Settings ▸ Servers. NB, NR and Notch lamps switch; squelch, AGC, NR strength, RF gain and DEC arrive with SDRoxide's pending fixes — see `SDROXIDE_UPGRADE.md`. |
+| SDRoxide | rigctl, port 4532 | v1.6.11 or later. Turn on its Hamlib (rigctl) server in Settings ▸ Servers, and for DEC its Decoded CW over UDP (port 9999). NB, NR, Notch, SQL, AGC, NR strength, RF gain and DEC all work. An older version needs the workarounds back — see `SDROXIDE_UPGRADE.md`. |
+| SDRoxide Brown | rigctl, port 4532 | madmedicnl's fork of SDRoxide. Turn on its Hamlib (rigctl) server in Settings ▸ Servers. As released, the filter goes through a mode switch-and-back and there is no DEC; squelch, AGC, NR strength, RF gain and the decoded CW output (port 9998) arrive with our PRs to it — see `SDROXIDE_UPGRADE.md`. On the Mac its app has the same name as SDRoxide's, so start it with the SDR path setting (see `TODO.md`). |
 
 Choose the program on the Setup tab. The application can start it for you,
 and closes only a program it started itself; one you started is yours and
@@ -145,7 +147,7 @@ the folder, not in those.
 | `ARCHITECTURE.md` | The layering, the rules, and why things are the way they are. Read first. |
 | `ADDING_AN_SDR.md` | How to add an SDR program, an SDRangel demodulator or device, or a new protocol — and the fields of `sdr_programs.json` and `sdr_controls.json`. |
 | `TODO.md` | Outstanding work and what to check at the station. |
-| `SDROXIDE_UPGRADE.md` | SDRoxide's workarounds, the switch for each, and what to change as its rigctl fixes are released. |
+| `SDROXIDE_UPGRADE.md` | SDRoxide's and SDRoxide Brown's workarounds, the switch for each, and what to change as their fixes are released. |
 | `SDRANGEL_REST_NOTES.md` | What was found out about SDRangel's REST API, with the captures. |
 
 ### The one rule

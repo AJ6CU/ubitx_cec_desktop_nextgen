@@ -561,7 +561,9 @@ class SDR_Link:
             # After a band change, the new band FRAMED -- see frame_band.
             band = self._framing_for(hz)
             if band is not None:
-                self.controller.set_frequency(hz, band=band)
+                # FIX: less the RIT offset here too -- the SDR is sent the base
+                # either way. (0 for anything without RIT.)
+                self.controller.set_frequency(hz - self._model.rit_offset, band=band)
             else:
                 self.controller.set_frequency(hz - self._model.rit_offset)
 
@@ -1342,6 +1344,10 @@ class SDR_Link:
         if self.has_squelch and pending is not None:
             # To a thousandth: a rigctld's squelch runs 0 to 1.
             self.controller.set_level("SQL", round(pending, 3))
+            # FIX: tell the window, so the SQL lamp lights (or goes out) as
+            # the threshold is set from its knob -- A and R already did; the
+            # knob's path did not, and the lamp waited for some other redraw.
+            self._audio_changed()
 
     # -- signal strength ------------------------------------------------------
     # WHERE S9 IS, in dBFS. Not derivable: dBFS is "below the loudest signal

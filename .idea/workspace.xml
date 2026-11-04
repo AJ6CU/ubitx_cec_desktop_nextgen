@@ -5,9 +5,20 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="ffee8cb6-f9f7-4a7a-aac5-5c8718d71e6d" name="Changes" comment="">
+      <change afterPath="$PROJECT_DIR$/docs/Ritreview.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/test_rit.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/test_rit_loop.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/misc.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/misc.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/ubitx_cec_desktop_nextgen.iml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/ubitx_cec_desktop_nextgen.iml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/docs/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/README.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/docs/SDROXIDE_UPGRADE.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/SDROXIDE_UPGRADE.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/docs/TODO.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/TODO.md" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/rigctl_sdr.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/rigctl_sdr.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/sdr_programs.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/sdr_programs.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sdr_link.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/sdr_link.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sdr_programs.json" beforeDir="false" afterPath="$PROJECT_DIR$/src/sdr_programs.json" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/ubitx_cec_desktop.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/ubitx_cec_desktop.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/ubitx_link.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/ubitx_link.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -41,13 +52,15 @@
     &quot;Python.scratch.executor&quot;: &quot;Run&quot;,
     &quot;Python.test.executor&quot;: &quot;Run&quot;,
     &quot;Python.test_rigctl.executor&quot;: &quot;Run&quot;,
+    &quot;Python.test_rit.executor&quot;: &quot;Run&quot;,
+    &quot;Python.test_rit_loop.executor&quot;: &quot;Run&quot;,
     &quot;Python.test_serial_ports.executor&quot;: &quot;Run&quot;,
     &quot;Python.ubitx_cec_desktop.executor&quot;: &quot;Run&quot;,
     &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
     &quot;RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252&quot;: &quot;true&quot;,
     &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
     &quot;git-widget-placeholder&quot;: &quot;main&quot;,
-    &quot;last_opened_file_path&quot;: &quot;/Users/mhatch/Documents/GitHub/ubitx_cec_desktop_nextgen/src&quot;
+    &quot;last_opened_file_path&quot;: &quot;/Users/markjhatch/Documents/GitHub/ubitx_cec_desktop_nextgen/src&quot;
   }
 }</component>
   <component name="RecentsManager">
@@ -72,7 +85,7 @@
         <env name="PYTHONUNBUFFERED" value="1" />
       </envs>
       <option name="SDK_HOME" value="" />
-      <option name="SDK_NAME" value="Python 3.13 (ubitx_cec_desktop_nextgen)" />
+      <option name="SDK_NAME" value="Python 3.14" />
       <option name="WORKING_DIRECTORY" value="" />
       <option name="IS_MODULE_SDK" value="false" />
       <option name="ADD_CONTENT_ROOTS" value="true" />
@@ -90,7 +103,7 @@
   <component name="SharedIndexes">
     <attachedChunks>
       <set>
-        <option value="bundled-python-sdk-164cda30dcd9-0af03a5fa574-com.jetbrains.pycharm.pro.sharedIndexes.bundled-PY-252.26830.99" />
+        <option value="bundled-python-sdk-4e2b1448bda8-9a97661f3031-com.jetbrains.pycharm.pro.sharedIndexes.bundled-PY-252.27397.106" />
       </set>
     </attachedChunks>
   </component>

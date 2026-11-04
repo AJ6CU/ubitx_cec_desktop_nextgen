@@ -92,30 +92,56 @@
     },
 
     "sdroxide": {
-        "name": "SDRoxide",
-        "app_name": "SDRoxide",
-        "launch_as_application": true,
-        "protocol": "rigctl",
-        "port": 4532,
-        "modes": {"LSB": "LSB", "USB": "USB", "CWL": "CW", "CWU": "CW"},
-        "ambiguous_modes": {"CW": "cw"},
-        "self_describing": false,
-        "settle_seconds": 3.0,
-        "width_needs_mode_change": true,
-        "rigctl_agc": true,
-        "rigctl_nr_strength": true,
-        "rigctl_rf_gain": true,
-        "decoder_udp_port": null,
-        "signal_unit": "S9dB",
-        "volume_range": [0.0, 1.0],
-        "squelch_range": [0.0, 1.0],
-        "process_names": ["sdroxide", "sdroxide.exe", "SDRoxide"],
-        "paths": {
-            "darwin": ["/Applications/SDRoxide.app/Contents/MacOS/sdroxide"],
-            "win32": ["C:\\Program Files\\SDRoxide\\sdroxide.exe"],
-            "linux": ["sdroxide"]
-        }
-    },
+      "name": "SDRoxide",
+      "app_name": "SDRoxide",
+      "launch_as_application": true,
+      "protocol": "rigctl",
+      "port": 4532,
+      "modes": {"LSB": "LSB", "USB": "USB", "CWL": "CW", "CWU": "CW"},
+      "ambiguous_modes": {"CW": "cw"},
+      "self_describing": false,
+      "settle_seconds": 1.5,
+      "width_needs_mode_change": false,
+      "rigctl_agc": true,
+      "rigctl_nr_strength": true,
+      "rigctl_rf_gain": true,
+      "decoder_udp_port": 9999,
+      "signal_unit": "S9dB",
+      "volume_range": [0.0, 1.0],
+      "squelch_range": [0.0, 1.0],
+      "process_names": ["sdroxide", "sdroxide.exe", "SDRoxide"],
+      "paths": {
+          "darwin": ["/Applications/SDRoxide.app/Contents/MacOS/sdroxide"],
+          "win32": ["C:\\Program Files\\SDRoxide\\sdroxide.exe"],
+          "linux": ["sdroxide"]
+      }
+},
+
+"sdroxide-brown": {
+    "name": "SDRoxide Brown",
+    "app_name": "sdroxide",
+    "launch_as_application": false,
+    "protocol": "rigctl",
+    "port": 4532,
+    "modes": {"LSB": "LSB", "USB": "USB", "CWL": "CW", "CWU": "CW"},
+    "ambiguous_modes": {"CW": "cw"},
+    "self_describing": false,
+    "settle_seconds": 3.0,
+    "width_needs_mode_change": true,
+    "rigctl_agc": true,
+    "rigctl_nr_strength": true,
+    "rigctl_rf_gain": true,
+    "decoder_udp_port": 9998,
+    "signal_unit": "S9dB",
+    "volume_range": [0.0, 1.0],
+    "squelch_range": [0.0, 1.0],
+    "process_names": ["sdroxide", "sdroxide.exe"],
+    "paths": {
+        "darwin": ["/Applications/sdroxide.app/Contents/MacOS/sdroxide"],
+        "win32": ["C:\\Program Files\\sdroxide-brown\\sdroxide.exe"],
+        "linux": ["sdroxide"]
+    }
+},
 
     "rigctld": {
         "name": "rigctld (Hamlib)",

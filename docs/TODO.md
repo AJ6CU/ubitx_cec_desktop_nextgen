@@ -953,7 +953,24 @@ rig's RX/TX message arrives after RF for overs keyed at the radio; and
 SDRoxide's T/R-switch tab, which throws only on its own transmit or a
 hardware sense wire, and is not reachable over rigctl.
 
-### Waiting on SDRoxide -- upstream PRs, and what to switch when released
+### Waiting on SDRoxide -- upstream PRs: 1, 2, 3 and 5 MERGED, released in v1.6.11
+
+**Status 2026-11-04:** PRs 1, 2, 3 and 5 were merged by the author and are in
+release v1.6.11 (2026-11-01) -- checked in that release's source. PR 4 (hide
+the control strip and the CW panel, and the window minimum that follows them)
+was not merged; to be rethought (see 4 below). Switched in the app, in the
+shipped `"sdroxide"` entry, for v1.6.11 and later -- DONE 2026-11-04:
+- `"width_needs_mode_change": false` and `"settle_seconds": 1.5` (PR 1);
+- `"decoder_udp_port": 9999` (PR 3);
+- nothing for PRs 2 and 5: found at connect.
+The mode switch-and-back code (`RigctlSDR._send_mode` / `_follow_hop`) stays:
+the `"sdroxide-brown"` entry still needs it until brown merges its PR 1.
+The upstream PR branches are deleted from the clone and the fork, except
+PR 4's `panadapter-view`, kept for the rethink.
+An SDRoxide older than v1.6.11 needs the old values back in the user's own
+`~/.ubitx_cec_desktop/sdr_programs.json`.
+The original list, kept for what each one does:
+
 
 Five PRs prepared 2026-09-28/29 (sdroxide_prs_bundle.zip, with instructions):
 1. rigctl: a new width in the mode already running sets the filter. When
@@ -981,6 +998,12 @@ Five PRs prepared 2026-09-28/29 (sdroxide_prs_bundle.zip, with instructions):
    the corner brings it back) and its CW panel -- SDRoxide as a bare
    panadapter beside our app. Nothing in our app; untick both in SDRoxide
    once released.
+   NOT MERGED -- RETHINK. Built and tried 2026-09-29: the switches work, but
+   the window's minimum (800 x 500, fixed in gui_main.rs) did not shrink, so
+   a follow-up made it follow the strip and panel; and below 600 x 440
+   SDRoxide's Auto layout goes to its phone layout, which drops the spectrum
+   trace (Layout = Desktop keeps it). Worth asking the author how a "bare
+   panadapter" should fit his layout tiers before redoing it.
 5. rigctl: the RF gain -- the stage SDRoxide's Gain slider moves -- as
    Hamlib's RF level, 0..1 across its range. BUILDS ON PR 2 (its branch is
    made from PR 2's). When released: nothing to switch -- the RF GAIN knob
@@ -991,6 +1014,74 @@ Five PRs prepared 2026-09-28/29 (sdroxide_prs_bundle.zip, with instructions):
    on PR 2 + PR 5, `l RF` / `L RF` right, and the knob works in the app.
 6. If the location of the SDR is ever defined in the SDR settings, there is no way to completely erase it without hand editing the settings file.
 Step by step in SDROXIDE_UPGRADE.md.
+
+### Waiting on SDRoxide Brown -- PRs submitted 2026-11-04
+
+Four PRs to madmedicnl/sdroxide-brown, from branches `brown-…` on our fork
+AJ6CU/sdroxide (GitHub allows one fork per fork family, so the upstream
+fork serves both). Patches, texts and steps: sdroxide/brown/ in the project
+(BROWN_PR_INSTRUCTIONS.md). Rebased onto brown's main 2609ddd4 on 2026-11-04.
+PR numbers: fill in.
+1. `brown-same-mode-passband` (#___): a new width in the mode running sets
+   the filter. When merged and released: in the shipped `"sdroxide-brown"`
+   entry, `"width_needs_mode_change": false`, `"settle_seconds": 1.5`.
+2. `brown-sql-agc` (#___): SQL, AGC and NR strength levels. When merged:
+   nothing to switch.
+3. `brown-cw-text-udp` (#___): upstream's decoded-CW output, ported; brown's
+   own "Decoded text over UDP" is JSON and never sends CW. DEFAULT PORT 9998
+   in brown, not upstream's 9999, since brown suggests 9999 for its JSON
+   feed. Protocol v264. When merged: `"decoder_udp_port": 9998` in the
+   shipped `"sdroxide-brown"` entry. Most likely to need rebasing again:
+   brown bumps the protocol version and adds translations often.
+5. `brown-rf-gain` (#___): RF level. Builds on #___ (PR 2). When merged:
+   nothing to switch.
+Until then the station runs a `local-test` build (all four merged, never
+pushed), with the three settings above in `~/.ubitx_cec_desktop/
+sdr_programs.json` under `"sdroxide-brown"`. After each merge: `git pull`
+main, delete that PR's branch, and remake local-test from main with the rest.
+
+### SDRoxide Brown as its own program -- the Mac app name is ambiguous (2026-11-03)
+
+madmedicnl/sdroxide-brown has its own `"sdroxide-brown"` entry in
+sdr_programs.json beside `"sdroxide"`. Its Windows install has a folder of
+its own (`C:\Program Files\sdroxide-brown\sdroxide.exe`), but on the Mac
+the two builds collide:
+- Brown's disk image holds `sdroxide.app`, bundle name `sdroxide`, and the
+  same bundle identifier as upstream (`com.github.dividebysandwich.sdroxide`).
+- The Mac's file system ignores case, so `/Applications/sdroxide.app` IS
+  upstream's `/Applications/SDRoxide.app`: only one can be installed there,
+  and both entries' Mac paths start whichever it is.
+- Opening "by name" (`launch_as_application`, `open -a`, and the osascript
+  quit) can reach the wrong one, so brown's entry has it OFF for now.
+- Both run as a process called `sdroxide`, so `running_process` cannot tell
+  which is already running, and "attach to the one already open" may attach
+  to the other.
+Options, not yet chosen:
+1. Ask the brown maintainer for a bundle name and identifier of its own
+   (e.g. `SDRoxide Brown.app`, `…sdroxide-brown`) -- fixes it for everyone.
+2. Document renaming the app after installing, and point the entry there.
+3. Rely on the SDR Path setting for brown (what we do today with the
+   local-test build), and leave brown's Mac path empty.
+Also: when both run, the rigctl `_` (get_info) reply may tell them apart --
+both say "sdroxide <version>", but brown's version numbers differ from
+upstream's. Checked in the source only, not yet against the two programs.
+
+### SDR settings -- found 2026-11-04
+
+1. **The CW decode port setting should be greyed for an SDR without decode
+   over UDP.** Only a program whose entry has a `decoder_udp_port` (SDRoxide,
+   SDRoxide Brown) can use it; for the others it should be shown greyed,
+   with the reason, as other unavailable controls are.
+2. **The SDR path in the advanced dialog overrides the SDR program chosen --
+   even when a different one is selected.** The "SDR Path" setting
+   (`gv.config.get_sdr_path()`, handed to `sdr_launcher.start`) is one
+   setting for every program, so a path set for one is used to start any
+   other. It should belong to the program it was set for (keyed by the
+   program in the settings), or at least be ignored for a different one.
+3. **Say when the standard location is overridden.** If a path is set, the
+   SDR settings box should say so, so users know to check the advanced
+   setting -- otherwise a program that starts from an unexpected place, or
+   will not start, has no visible cause.
 
 ### Waiting on SDRangel -- workarounds to remove when fixed
 
