@@ -104,6 +104,15 @@ all. Worth a sweep across the widget pages.
 **Four upstream reports are written and ready to file.** Plus the preview
 image issue.
 
+**Adding a button to a labelled frame fails in the Designer** (found
+2026-11-05). Putting a plain button inside sCTkFrameLabeledPrimary or
+-Secondary breaks both the design canvas and the preview; the same button
+inside sCTkScrollableFrame works. Not traced yet. NOT caused by the
+2026-11-05 border fix (`_clear_right_border()`): Mark tried the previous
+release of sCustomTkinter and it fails the same way. So it is the
+Designer's, or the labelled frames' builder objects' -- start there, with
+the traceback from both the design canvas and the preview.
+
 **A clear-rebuild mixin.** Clearing a property the theme never defined now
 sends `""`, which `configure()` drops -- that stops the crash but cannot
 remove a colour already applied to the native widget, so the design canvas
@@ -182,7 +191,15 @@ rig and SDR++. Still to do, roughly in order of value:
   unwired, so both meters are empty. Wiring them also lets the scanner stop
   on a signal, which it cannot do today.
 * **The CW tab** -- key type (`ck_`), speed (`vs_`), sidetone, the two delays
-  (`vy_`, `ve_`) and the offset switch (`ch_`). Mostly WIRING: every setter
+  (`vy_`, `ve_`) and the offset switch (`ch_`). SEEN 2026-11-05: the Keyer
+  segmented button is not set from EEPROM -- nothing on the tab is: its
+  fields are typed-in placeholders ("500", "10", "250", "1000"), the keyer
+  button is not even kept, and the model has no fields for these. Wiring
+  needs model fields, the handlers storing (speed arrives as 1200/wpm,
+  delays in 10 ms and 2 ms units, key type a word), refresh() showing them,
+  edits sending the setters. Also 2026-11-05: the Practice mode switch and
+  the disabled Decoder button were REMOVED from the tab -- TX off on
+  Operate is the one control, and decoding is DEC. Mostly WIRING: every setter
   already exists in the link -- `Set_CW_Tone`, `Set_CW_Keytype`,
   `Set_CW_Speed`, `Set_CW_Delay_Starting_TX`, `Set_CW_Delay_Returning_To_RX`
   -- and so does every handler; the handlers print and their model writes are
@@ -1169,7 +1186,12 @@ upstream's. Checked in the source only, not yet against the two programs.
 
 ### SDR settings -- found 2026-11-04
 
-1. **The CW decode port setting should be greyed for an SDR without decode
+1. BUILT 2026-11-05 (setup_cw_port.zip), to check on the station: a "CW
+   port" line in Setup's SDR group, saved PER PROGRAM into your own
+   sdr_programs.json (sdr_programs.set_user_setting; empty = the usual port
+   back), moved to at once if DEC is on; greyed with the reason for SDRangel
+   ("set up automatically") and for programs without a decoder. 4 tests.
+   Was: **The CW decode port setting should be greyed for an SDR without decode
    over UDP.** Only a program whose entry has a `decoder_udp_port` (SDRoxide,
    SDRoxide Brown) can use it; for the others it should be shown greyed,
    with the reason, as other unavailable controls are.

@@ -5,13 +5,9 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="ffee8cb6-f9f7-4a7a-aac5-5c8718d71e6d" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/tests/test_span.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/docs/RIT_REVIEW.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/RIT_REVIEW.md" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/docs/TODO.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/TODO.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/rigctl_sdr.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/rigctl_sdr.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/sdr_link.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/sdr_link.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/sdr_programs.json" beforeDir="false" afterPath="$PROJECT_DIR$/src/sdr_programs.json" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/ubitx_cec_desktop.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/ubitx_cec_desktop.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -54,14 +50,14 @@
     "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
     "RunOnceActivity.git.unshallow": "true",
     "git-widget-placeholder": "main",
-    "last_opened_file_path": "/Users/markjhatch/Documents/GitHub/ubitx_cec_desktop_nextgen/docs",
+    "last_opened_file_path": "/Users/markjhatch/Documents/GitHub/ubitx_cec_desktop_nextgen/src",
     "settings.editor.selected.configurable": "configurable.group.python.group.settings"
   }
 }]]></component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
-      <recent name="$PROJECT_DIR$/docs" />
       <recent name="$PROJECT_DIR$/src" />
+      <recent name="$PROJECT_DIR$/docs" />
       <recent name="$APPLICATION_CONFIG_DIR$/scratches" />
       <recent name="$PROJECT_DIR$/docs/bug_reports" />
       <recent name="$PROJECT_DIR$/unit_tests" />

@@ -128,6 +128,9 @@ RIG_ANSWER_MS = 2500
 # the same pitch whatever kind of control they hold.
 SETTINGS_ROW_HEIGHT = 30
 SETTINGS_CONTROL_HEIGHT = 24
+# FIX: the first field of each Logbook line -- the File button, and the cell
+# the Enabled switch sits in -- so Format and Backup form a column.
+LOGBOOK_FIELD_WIDTH = 250
 
 # The Channels tab.
 RADIO_SET = "Radio (20 slots)"
@@ -347,7 +350,7 @@ class SmallKnob(sCTkFrame):
         # too, so side by side their captions and values line up.
         range_width, range_height = _range_canvas_size(diameter, widest_label)
         holder_width = max(column, range_width)
-        self.caption = sCTkLabelTertiary(self, text=caption, font=("Arial", 11),
+        self.caption = sCTkLabelTertiary(self, text=caption,
                                          width=holder_width, height=14, anchor="center")
         self.caption.pack(side="top")
         self._on_set = on_set
@@ -400,7 +403,9 @@ class SmallKnob(sCTkFrame):
             # The dial's own double-click; it hands back the dial.
             self.dial.configure(double_click_command=lambda dial: on_double())
         self.dial.pack(expand=True)          # centred in the holder
-        self.value = sCTkLabelPrimary(self, text="", font=("Arial", 11),
+        # FIX: Tertiary, not Primary. With no font of its own the Primary
+        # tier drew the value larger than the knob it belongs to.
+        self.value = sCTkLabelTertiary(self, text="",
                                       width=holder_width, height=14, anchor="center")
         self.value.pack(side="top")
         # state() repaints -- called only when it changes, as the tuning
@@ -477,11 +482,12 @@ class AidPopup(sCTkToplevel):
         body.pack(fill="both", expand=True)
         top = sCTkFrame(body, fg_color="transparent", border_width=0)
         top.pack(fill="x", padx=8, pady=(6, 0))
-        self.heading = sCTkLabelSecondary(top, text=label, font=("Arial", 12, "bold"))
+        # FIX: Tertiary -- with no font of its own the Secondary tier drew
+        # the heading larger than the small pop-up it names.
+        self.heading = sCTkLabelTertiary(top, text=label)
         self.heading.pack(side="left")
         # Secondary, for its pressed look -- pressed while pinned.
-        self.pin_button = sCTkButtonSecondary(top, text="pin", width=44, height=22,
-                                             font=("Arial", 11), command=self.toggle_pin)
+        self.pin_button = sCTkButtonSecondary(top, text="pin", width=44, height=22, command=self.toggle_pin)
         self.pin_button.pack(side="right")
         self.content = sCTkFrame(body, fg_color="transparent", border_width=0)
         self.content.pack(padx=8, pady=(4, 8))
@@ -614,11 +620,10 @@ class RolePanel(sCTkFrame):
         header.pack(fill="x", padx=8, pady=(5, 0))
 
         self.role_label = sCTkLabelSecondary(
-            header, text=role, font=("Arial", 12, "bold"))
+            header, text=role)
         self.role_label.pack(side="left")
 
-        self.vfo_label = sCTkLabelTertiary(header, text="vfo a",
-                                           font=("Arial", 11))
+        self.vfo_label = sCTkLabelTertiary(header, text="vfo a")
         self.vfo_label.pack(side="left", padx=(8, 0))
 
         if role == "tx":
@@ -626,7 +631,6 @@ class RolePanel(sCTkFrame):
             # frequency because that is the thing it is telling you about:
             # this number is going out right now.
             self.led = sCTkLabelPrimary(header, text=" ON AIR ",
-                                        font=("Arial", 11, "bold"),
                                         corner_radius=4)
             self.led.pack(side="right")
         else:
@@ -638,8 +642,7 @@ class RolePanel(sCTkFrame):
             # not a caption explaining one. Tertiary is for the annotations
             # under the readouts -- the step size, the CW tone -- which you
             # check occasionally. VFO B you want legible at a glance.
-            self.standby = sCTkLabelSecondary(header, text="",
-                                              font=("Arial", 14))
+            self.standby = sCTkLabelSecondary(header, text="")
             self.standby.pack(side="right")
             self._standby_shown = True
 
@@ -672,7 +675,9 @@ class RolePanel(sCTkFrame):
         # since it means the rig will not transmit.
         under = sCTkFrame(left, fg_color="transparent", border_width=0)
         under.pack(anchor="w", pady=(2, 0))
-        size = dict(width=60, height=26, font=("Arial", 12))
+        # FIX: no fonts on sCTk widgets in this panel, the knobs or the aid
+        # pop-ups -- the theme's tiers set them (see _build_operate).
+        size = dict(width=60, height=26)
         if role == "rx":
             app._toggles["rit"] = sCTkButtonSecondary(
                 under, text="RIT", command=lambda: app._toggle("rit"), **size)
@@ -684,7 +689,7 @@ class RolePanel(sCTkFrame):
             app.tx_off_button = sCTkButtonSecondary(
                 under, text="TX off", command=lambda: app._toggle("tx_inhibit"), **size)
             app.tx_off_button.pack(side="left", padx=(0, 4))
-        self.note = sCTkLabelTertiary(under, text="", font=("Arial", 10))
+        self.note = sCTkLabelTertiary(under, text="")
         self.note.pack(side="left", padx=(4, 0))
 
         left.pack(side="left", fill="x", expand=True)
@@ -1519,10 +1524,9 @@ class UbitxCecDesktop(sCTk):
         # as it is.
         if self.sdr.dsp_defaults(key):
             sCTkButtonSecondary(page, text="Defaults", width=62, height=24,
-                                font=("Arial", 11),
                                 command=lambda f=key: self._aid_action(f, lambda: self.sdr.reset_dsp(f))
                                 ).pack(side="left", padx=(6, 0))
-        note = sCTkLabelTertiary(page, text="", font=("Arial", 10),
+        note = sCTkLabelTertiary(page, text="",
                                  wraplength=190, justify="left")
         self._knob_boxes[key], self._dsp_notes[key] = box, note
         self.dsp_knobs[key], self._knob_layout[key] = [], None
@@ -1703,21 +1707,32 @@ class UbitxCecDesktop(sCTk):
         self._decode_text = (self._decode_text + text)[-self.DECODE_KEEP_CHARS:]
         self._draw_decoded()
 
-    def _decode_fits(self):
+    def _decode_tail(self, text):
         """
-        How many characters the strip's line holds at its present width -- the
-        font is fixed-pitch, so one character's width tells. The default if
-        the line is not yet laid out.
+        The end of the line that fits the strip at its present width.
+        FIX: measured, not counted (2026-11-05). With the theme's proportional
+        font in place of Courier, a count from one letter's width left the
+        line well short of the right-hand end; now the longest tail whose
+        measured width fits is shown. The last DECODE_SHOW_CHARS if the line
+        is not yet laid out.
         """
         try:
-            inner = self.decode_label._label
-            char = tkfont.Font(font=inner.cget("font")).measure("M" * 10) / 10.0
+            font = tkfont.Font(font=self.decode_label._label.cget("font"))
             width = self.decode_label.winfo_width() - 12   # the label's own inset
-            if char > 0 and width > char * 10:
-                return int(width // char)
         except Exception:
-            pass
-        return self.DECODE_SHOW_CHARS
+            font, width = None, 0
+        if font is None or width <= 0 or font.measure("M") * 10 > width:
+            return text[-self.DECODE_SHOW_CHARS:]
+        if font.measure(text) <= width:
+            return text
+        lo, hi = 0, len(text)            # text[-lo:] fits; text[-hi:] does not
+        while hi - lo > 1:
+            mid = (lo + hi) // 2
+            if font.measure(text[-mid:]) <= width:
+                lo = mid
+            else:
+                hi = mid
+        return text[-lo:] if lo else ""
 
     def _draw_decoded(self, _event=None):
         """
@@ -1728,7 +1743,7 @@ class UbitxCecDesktop(sCTk):
         text = " ".join(self._decode_text.split())
         if self._decode_text[-1:].isspace() and text:
             text += " "                  # a word just ended: keep its gap
-        self.decode_label.configure(text=text[-self._decode_fits():] or " ")
+        self.decode_label.configure(text=self._decode_tail(text) or " ")
 
     def _show_decode_strip(self):
         """The decoded-CW strip, on screen only while DEC is on."""
@@ -1895,6 +1910,13 @@ class UbitxCecDesktop(sCTk):
 
     # -- Operate ----------------------------------------------------------
     def _build_operate(self, page):
+        # FIX: NO FONTS ON sCTk WIDGETS. The theme's tiers -- Primary,
+        # Secondary, Tertiary -- set them; a size given here overrode the
+        # theme and drifted from every other window. The decoded-CW strip's
+        # Courier went too (2026-11-05) -- its scrolling measures whatever
+        # font the label has (see _decode_tail). Two special cases stay, both
+        # drawn sizes rather than label tiers: the frequency display's
+        # FREQ_FONT_SIZE and the dials' RANGE_KNOB_LABEL_FONT tick labels.
         page.grid_columnconfigure(0, weight=1)
         # Row 5 is empty and takes every spare pixel, which holds the real
         # content at the TOP. Without it the rows share the extra height and
@@ -1944,10 +1966,9 @@ class UbitxCecDesktop(sCTk):
         # the decoder sends it in chunks about every three seconds. See
         # SDR_Link._set_decoding.
         self.decode_strip = sCTkFrame(page, border_width=1, corner_radius=6)
-        sCTkLabelTertiary(self.decode_strip, text="DEC",
-                          font=("Arial", 11)).pack(side="left", padx=(8, 6), pady=3)
+        sCTkLabelTertiary(self.decode_strip, text="DEC").pack(side="left", padx=(8, 6), pady=3)
         self.decode_label = sCTkLabelPrimary(self.decode_strip, text=" ",
-                                             font=("Courier", 14), anchor="w")
+                                             anchor="w")
         self.decode_label.pack(side="left", fill="x", expand=True, padx=(0, 8), pady=3)
         # A wider or narrower window holds more or less of the line.
         self.decode_strip.bind("<Configure>", self._draw_decoded, add="+")
@@ -1990,11 +2011,9 @@ class UbitxCecDesktop(sCTk):
             # Two rows of four: AGC NR Notch SQL, then NB CW DEC.
             cell.grid(row=column // 4, column=column % 4, padx=2, pady=2, sticky="w")
             lamp = sCTkButtonSecondary(cell, text=text, width=52, height=26,
-                                       font=("Arial", 12),
                                        command=lambda k=key: self._lamp_clicked(k))
             lamp.pack(side="left")
             arrow = sCTkButtonTertiary(cell, text="\u25be", width=16, height=26,
-                                       font=("Arial", 12),
                                        command=lambda k=key: self._open_aid(k))
             arrow.pack(side="left", padx=(1, 0))
             self.aids_lamps[key], self._lamp_arrows[key] = lamp, arrow
@@ -2008,17 +2027,14 @@ class UbitxCecDesktop(sCTk):
         self.filter_buttons = []
         filter_row = sCTkFrame(rx_column, fg_color="transparent", border_width=0)
         filter_row.grid(row=1, column=0, sticky="w", pady=(14, 0))
-        sCTkLabelTertiary(filter_row, text="Filter",
-                          font=("Arial", 11)).pack(side="left", padx=(2, 6))
+        sCTkLabelTertiary(filter_row, text="Filter").pack(side="left", padx=(2, 6))
         for text, action in (("wide", lambda: self._filter(+1)),
                              ("narrow", lambda: self._filter(-1)),
                              ("reset", self._filter_reset)):
-            btn = sCTkButtonSecondary(filter_row, text=text, width=56, height=24,
-                                      font=("Arial", 12), command=action)
+            btn = sCTkButtonSecondary(filter_row, text=text, width=56, height=24, command=action)
             btn.pack(side="left", padx=1)
             self.filter_buttons.append(btn)
-        self.filter_label = sCTkLabelPrimary(filter_row, text="2400 Hz",
-                                             font=("Arial", 11))
+        self.filter_label = sCTkLabelPrimary(filter_row, text="2400 Hz")
         self.filter_label.pack(side="left", padx=(6, 0))
 
         # What each small knob last showed -- see _dsp_step, _dsp_set,
@@ -2054,7 +2070,7 @@ class UbitxCecDesktop(sCTk):
         self.rf_gain_knob.pack()
         # Packed only while it has something to say -- see _set_rf_gain_note.
         # An empty label still takes a line's height beneath the knob.
-        self.rf_gain_note = sCTkLabelTertiary(rf_area, text="", font=("Arial", 10),
+        self.rf_gain_note = sCTkLabelTertiary(rf_area, text="",
                                               wraplength=110, justify="center")
 
         # VOLUME, beside RF gain and the same size: the two knobs ridden
@@ -2109,14 +2125,16 @@ class UbitxCecDesktop(sCTk):
         # again -- see SDR_Link.set_bandwidth.
         width_row = sCTkFrame(centre, fg_color="transparent", border_width=0)
         width_row.pack(pady=(6, 0))
-        sCTkLabelTertiary(width_row, text="Bandwidth",
-                          font=("Arial", 11)).pack(side="left", padx=(0, 6))
+        # FIX: "Bandwidth" read as the receive filter's width. This sets how
+        # wide a band the SDR samples -- what its spectrum and waterfall show.
+        # Two lines, so the row keeps its width.
+        sCTkLabelTertiary(width_row, text="Spectrum\nSpan", justify="center",
+                          ).pack(side="left", padx=(0, 6))
         self.bandwidth_slider = sCTkSlider(
             width_row, from_=0, to=1, number_of_steps=1, width=110,
             command=self._bandwidth_moved)
         self.bandwidth_slider.pack(side="left")
-        self.bandwidth_label = sCTkLabelPrimary(width_row, text=" ",
-                                                font=("Arial", 11), width=64)
+        self.bandwidth_label = sCTkLabelPrimary(width_row, text=" ", width=64)
         self.bandwidth_label.pack(side="left", padx=(6, 0))
         # What the slider was last set to show: (choices, width, live).
         self._bandwidth_shown = None
@@ -2145,8 +2163,7 @@ class UbitxCecDesktop(sCTk):
 
         def tx_button(text, command, column, width=60):
             btn = sCTkButtonSecondary(
-                self.offset_row, text=text, width=width, height=26,
-                font=("Arial", 12), command=command)
+                self.offset_row, text=text, width=width, height=26, command=command)
             btn.grid(row=0, column=column, padx=2, pady=2, sticky="ew")
             return btn
 
@@ -2154,19 +2171,17 @@ class UbitxCecDesktop(sCTk):
         tx_button("A \u21c4 B", self._swap, 1)
         tx_button("A\u2192B", self._copy_AtoB, 2)
         # Log QSO at the end of the row: what you do when a contact ends.
-        log = sCTkButtonPrimary(self.offset_row, text="Log QSO", height=26,
-                                font=("Arial", 12), command=self._log_qso)
+        log = sCTkButtonPrimary(self.offset_row, text="Log QSO", height=26, command=self._log_qso)
         log.grid(row=0, column=3, columnspan=3, padx=(10, 2), pady=2, sticky="ew")
 
         for column, (label, khz) in enumerate(SPLIT_OFFSETS):
             btn = sCTkButtonSecondary(
-                self.offset_row, text=label, width=48, height=26, font=("Arial", 12),
+                self.offset_row, text=label, width=48, height=26,
                 command=lambda k=khz: self._split_offset(k))
             btn.grid(row=1, column=column, padx=2, pady=2, sticky="ew")
             self._offset_buttons.append(btn)
 
-        self.offset_note = sCTkLabelTertiary(offset_column, text="",
-                                             font=("Arial", 10))
+        self.offset_note = sCTkLabelTertiary(offset_column, text="")
         self.offset_note.pack(anchor="e", pady=(2, 0))
 
         # STATUS, under the transmit group. It had a row of its own under
@@ -2192,8 +2207,7 @@ class UbitxCecDesktop(sCTk):
         # would have stopped. The rig's silence cannot say more: it reports
         # only when something changes. Real status comes with the connection
         # dialog.
-        sCTkLabelTertiary(actions, text="rig ok",
-                          font=("Arial", 11)).pack(side="right", padx=8)
+        sCTkLabelTertiary(actions, text="rig ok").pack(side="right", padx=8)
         self.on_top_button = sCTkButtonTertiary(
             actions, text="not on top", width=96, height=22,
             command=self._toggle_on_top)
@@ -2203,11 +2217,13 @@ class UbitxCecDesktop(sCTk):
         self.after(800, self._restore_pinned_aids)
 
     def _build_rx(self, page):
+        # FIX: no fonts on sCTk widgets -- the theme's tiers set them (see
+        # _build_operate). The heading and "Listen through" were 15 bold;
+        # their tier now carries the emphasis.
         wrap = sCTkFrame(page, fg_color="transparent", border_width=0)
         wrap.pack(fill="both", expand=True, padx=14, pady=12)
 
-        sCTkLabelPrimary(wrap, text="Receive",
-                         font=("Arial", 15, "bold")).pack(anchor="w")
+        sCTkLabelPrimary(wrap, text="Receive").pack(anchor="w")
         sCTkLabelTertiary(
             wrap,
             text="Everything about how you are listening. The choice below "
@@ -2215,7 +2231,7 @@ class UbitxCecDesktop(sCTk):
                  "and which of the controls under it can do anything: ATT and "
                  "IFS belong to the rig's own front end, so they are inert "
                  "while you are listening through the SDR.",
-            font=("Arial", 11), wraplength=640, justify="left").pack(anchor="w", pady=(2, 12))
+            wraplength=640, justify="left").pack(anchor="w", pady=(2, 12))
 
         row = sCTkFrame(wrap, fg_color="transparent", border_width=0)
         row.pack(anchor="w", pady=(8, 0))
@@ -2229,8 +2245,7 @@ class UbitxCecDesktop(sCTk):
         # It was a small control under a lowercase "receiver", level with
         # the switches below it, and read as one more option among them
         # rather than the thing that decides what those options do.
-        sCTkLabelSecondary(row, text="Listen through",
-                           font=("Arial", 15, "bold")).pack(side="left", padx=(0, 14))
+        sCTkLabelSecondary(row, text="Listen through").pack(side="left", padx=(0, 14))
         # dynamic_resizing=False, or `width` is IGNORED: by default each
         # segment shrinks to its own text, which is what made the first
         # enlargement look no different. Off, the width is shared equally,
@@ -2239,7 +2254,7 @@ class UbitxCecDesktop(sCTk):
         self.receiver_picker = sCTkSegmentedButton(
             row, values=["SDR", "Rig"],
             command=lambda source: self._set_listen_source(source, by_operator=True),
-            width=280, height=40, font=("Arial", 15, "bold"),
+            width=280, height=40,
             dynamic_resizing=False)
         self.receiver_picker.pack(side="left")
         self.receiver_picker.set(self._listen_source)
@@ -2247,7 +2262,7 @@ class UbitxCecDesktop(sCTk):
         sCTkLabelTertiary(
             wrap,
             text="Decides where the audio and the signal meter come from.",
-            font=("Arial", 11)).pack(anchor="w", pady=(4, 14))
+        ).pack(anchor="w", pady=(4, 14))
 
         # Volume moved to Operate, beside Mute. What is said here is how the
         # choice above changes the audio.
@@ -2255,7 +2270,7 @@ class UbitxCecDesktop(sCTk):
         # for Gqrx, the whole computer for SDR++ -- so the note is filled in
         # on connecting. See _show_sdr_status.
         self.audio_note = sCTkLabelTertiary(
-            wrap, text="", font=("Arial", 10), wraplength=640, justify="left")
+            wrap, text="", wraplength=640, justify="left")
         self.audio_note.pack(anchor="w", pady=(4, 8))
 
         for label, note in (("ATT", "rig front end only"),
@@ -2264,8 +2279,7 @@ class UbitxCecDesktop(sCTk):
             line.pack(anchor="w", pady=3)
             sw = sCTkSwitch(line, text=label)
             sw.pack(side="left")
-            sCTkLabelTertiary(line, text=note,
-                              font=("Arial", 10)).pack(side="left", padx=10)
+            sCTkLabelTertiary(line, text=note).pack(side="left", padx=10)
 
         # AGC is on Operate, beside NR and Notch -- one control, not two.
 
@@ -2296,8 +2310,9 @@ class UbitxCecDesktop(sCTk):
         # and the header below is left to the set alone.
         now_row = sCTkFrame(page, fg_color="transparent", border_width=0)
         now_row.grid(row=0, column=0, sticky="ew", padx=10, pady=(10, 0))
-        sCTkLabelTertiary(now_row, text="now",
-                          font=("Arial", 11)).pack(side="left", padx=(0, 8))
+        # FIX: no fonts on sCTk widgets -- the theme's tiers set them (see
+        # _build_operate).
+        sCTkLabelTertiary(now_row, text="now").pack(side="left", padx=(0, 8))
         # PRIMARY, and styled by the theme alone -- no font of its own. The
         # value is the most important on the tab, and the primary tier is how
         # the library says so; a font set here would make it primary in name
@@ -2309,7 +2324,7 @@ class UbitxCecDesktop(sCTk):
         # first and the note after it: at the start of the run the bar has a
         # fixed position, so the note's changing length cannot push it about.
         # See _refresh_channels, which packs the bar before the note.
-        self.set_note = sCTkLabelTertiary(now_row, text="", font=("Arial", 10))
+        self.set_note = sCTkLabelTertiary(now_row, text="")
         self.set_note.pack(side="left", padx=(20, 0))
 
         # A MOVING BAR while the rig is read or written. The count in the note
@@ -2322,8 +2337,7 @@ class UbitxCecDesktop(sCTk):
         head = sCTkFrame(page, fg_color="transparent", border_width=0)
         head.grid(row=1, column=0, sticky="ew", padx=10, pady=(6, 4))
 
-        sCTkLabelTertiary(head, text="set",
-                          font=("Arial", 11)).pack(side="left", padx=(0, 6))
+        sCTkLabelTertiary(head, text="set").pack(side="left", padx=(0, 6))
         self.set_picker = sCTkComboBox(
             head, width=200, command=self._on_set_chosen, values=self._set_names())
         self.set_picker.pack(side="left")
@@ -2485,8 +2499,7 @@ class UbitxCecDesktop(sCTk):
         self.dwell_entry.insert(0, str(self.channel_sets.dwell_seconds))
         self.dwell_entry.bind("<Return>", lambda e: self._read_dwell())
         self.dwell_entry.bind("<FocusOut>", lambda e: self._read_dwell())
-        sCTkLabelTertiary(actions, text="seconds on each",
-                          font=("Arial", 11)).pack(side="left", padx=4)
+        sCTkLabelTertiary(actions, text="seconds on each").pack(side="left", padx=4)
         self._scan_set_name = None
 
 
@@ -3270,45 +3283,35 @@ class UbitxCecDesktop(sCTk):
     def _build_cw(self, page):
         wrap = sCTkFrame(page, fg_color="transparent", border_width=0)
         wrap.pack(fill="both", expand=True, padx=14, pady=12)
-        sCTkLabelPrimary(wrap, text="CW",
-                         font=("Arial", 15, "bold")).pack(anchor="w")
+        # FIX: no fonts on sCTk widgets -- the theme's tiers set them (see
+        # _build_operate).
+        sCTkLabelPrimary(wrap, text="CW").pack(anchor="w")
         sCTkLabelTertiary(
             wrap,
             text="Keyer settings live here rather than in a dialog: you adjust "
                  "speed and tone while operating, sometimes mid-QSO.",
-            font=("Arial", 11), wraplength=640, justify="left").pack(anchor="w", pady=(2, 12))
+            wraplength=640, justify="left").pack(anchor="w", pady=(2, 12))
 
         for label, value in (("Tone (Hz)", "500"), ("Speed (wpm)", "10"),
                              ("Delay to TX (ms)", "250"),
                              ("Delay to RX (ms)", "1000")):
             line = sCTkFrame(wrap, fg_color="transparent", border_width=0)
             line.pack(anchor="w", pady=3)
-            sCTkLabelSecondary(line, text=label, width=130,
-                               font=("Arial", 11)).pack(side="left")
+            sCTkLabelSecondary(line, text=label, width=130).pack(side="left")
             entry = sCTkEntryPrimary(line, width=80)
             entry.pack(side="left")
             entry.insert(0, value)
 
         line = sCTkFrame(wrap, fg_color="transparent", border_width=0)
         line.pack(anchor="w", pady=3)
-        sCTkLabelSecondary(line, text="Keyer", width=130,
-                           font=("Arial", 11)).pack(side="left")
+        sCTkLabelSecondary(line, text="Keyer", width=130).pack(side="left")
         sCTkSegmentedButton(line, values=["Straight", "Iambic A",
                                           "Iambic B"]).pack(side="left")
 
-        practice = sCTkFrame(wrap, fg_color="transparent", border_width=0)
-        practice.pack(anchor="w", pady=(14, 0))
-        sCTkSwitch(practice, text="Practice mode").pack(side="left")
-        sCTkLabelTertiary(
-            practice,
-            text="keyer and sidetone work, nothing reaches the antenna",
-            font=("Arial", 10)).pack(side="left", padx=10)
-
-        decoder = sCTkButtonSecondary(wrap, text="Decoder", width=110)
-        decoder.pack(anchor="w", pady=(14, 0))
-        decoder.state("disabled")
-        sCTkLabelTertiary(wrap, text="awaiting a backend that decodes",
-                          font=("Arial", 10)).pack(anchor="w")
+        # FIX: the "Practice mode" switch is gone -- TX off on Operate does
+        # that job, and two controls for one rig setting can disagree.
+        # FIX: the "Decoder" button and "awaiting a backend that decodes" are
+        # gone: decoding is DEC on Operate, through the SDR.
 
     def _build_setup(self, page):
         """
@@ -3351,7 +3354,15 @@ class UbitxCecDesktop(sCTk):
         # Station, Radio, SDR across the top; Logbook beneath.
         self._build_radio_settings(self._settings_box(columns, 0, 1, "Radio", 2))
         self._build_sdr_settings(self._settings_box(columns, 0, 2, "SDR", 4))
-        self._build_logbook_settings(self._settings_box(columns, 1, 0, "Logbook", 4))
+        # FIX: THE BOTTOM ROW IN HALVES, not thirds -- Logbook and Other
+        # Settings each need about a column and a half: Logbook two fields to
+        # a line, Other Settings three buttons. Two lines each, instead of the
+        # four Logbook took in one column, which set the height of the whole
+        # row and made Setup much taller than Operate.
+        bottom = sCTkFrame(wrap, fg_color="transparent", border_width=0)
+        bottom.pack(fill="both", expand=True)
+        bottom.grid_columnconfigure((0, 1), weight=1, uniform="setup_bottom")
+        self._build_logbook_settings(self._settings_box(bottom, 0, 0, "Logbook", 2))
 
         for index, (title, rows) in enumerate(groups):
             row, column = (0, 0) if index == 0 else (1, 0)
@@ -3360,8 +3371,7 @@ class UbitxCecDesktop(sCTk):
             for label, kind, value in rows:
                 line = sCTkFrame(box, fg_color="transparent", border_width=0)
                 line.pack(fill="x", padx=10, pady=1)
-                sCTkLabelTertiary(line, text=label, width=86,
-                                  font=("Arial", 11), anchor="w").pack(side="left")
+                sCTkLabelTertiary(line, text=label, width=86, anchor="w").pack(side="left")
 
                 if kind == "entry":
                     field = sCTkEntryPrimary(line, width=150, height=SETTINGS_CONTROL_HEIGHT)
@@ -3392,11 +3402,9 @@ class UbitxCecDesktop(sCTk):
         # They keep their own windows because each writes values into the
         # radio that can stop it working, and that deserves a deliberate act
         # rather than a field on a page being scrolled past.
-        box = self._settings_box(columns, 1, 1, "Settings", 2, span=2)
-        # ACROSS TWO COLUMNS, three buttons to a line. Down one column they
-        # were four lines tall, which set the height of the whole bottom row;
-        # across two they are two lines, and there is room for the ones still
-        # to come.
+        # FIX: "Other Settings", the right half of the bottom row, three
+        # buttons to a line -- two lines.
+        box = self._settings_box(bottom, 0, 1, "Other Settings", 2)
         pairs = (("EEPROM settings…", None),
                  ("Machine settings…", None),
                  ("Backup and restore…", self._eeprom_backup),
@@ -3406,7 +3414,7 @@ class UbitxCecDesktop(sCTk):
         for index, (text, action) in enumerate(pairs):
             if index % 3 == 0:
                 line = self._settings_line(box, "")
-            button = sCTkButtonSecondary(line, text=text, width=190, anchor="w",
+            button = sCTkButtonSecondary(line, text=text, width=150, anchor="w",
                                          height=SETTINGS_CONTROL_HEIGHT,
                                          command=action)
             button.pack(side="left", padx=(0, 8))
@@ -3463,8 +3471,7 @@ class UbitxCecDesktop(sCTk):
             # half of it empty, and the control beside it lost that room --
             # which is the room the port list needed to show which adapter
             # each port is.
-            sCTkLabelTertiary(line, text=label, width=label_width,
-                              font=("Arial", 11), anchor="w").pack(side="left")
+            sCTkLabelTertiary(line, text=label, width=label_width, anchor="w").pack(side="left")
         return line
 
     # -- where the radio is -------------------------------------------------
@@ -3565,12 +3572,20 @@ class UbitxCecDesktop(sCTk):
         corrects its extension.
         """
         line = self._settings_line(box, "Enabled", 58)
-        self.logbook_switch = sCTkSwitch(line, text="", command=self._save_logbook_switch)
+        # FIX: the switch in a cell as wide as the File button below it, so
+        # Format lines up with Backup -- the two lines form two columns.
+        cell = sCTkFrame(line, fg_color="transparent", border_width=0,
+                         width=LOGBOOK_FIELD_WIDTH, height=SETTINGS_CONTROL_HEIGHT)
+        cell.pack(side="left")
+        cell.pack_propagate(False)
+        self.logbook_switch = sCTkSwitch(cell, text="", command=self._save_logbook_switch)
         self.logbook_switch.pack(side="left")
         if str(gv.config.get_Logbook_Switch()).lower() == "true":
             self.logbook_switch.select()
 
-        line = self._settings_line(box, "Format", 58)
+        # FIX: two fields to a line -- Enabled and Format, then File and
+        # Backup -- now the group is two columns wide (see _build_setup).
+        sCTkLabelTertiary(line, text="Format", width=58, anchor="w").pack(side="left", padx=(24, 0))
         self.logbook_format = sCTkComboBox(
             line, width=110, height=SETTINGS_CONTROL_HEIGHT,
             values=[name for _, name in LOGBOOK_FORMATS],
@@ -3581,19 +3596,18 @@ class UbitxCecDesktop(sCTk):
 
         line = self._settings_line(box, "File", 58)
         self.logbook_file = sCTkButtonSecondary(
-            line, text="", width=250, anchor="w", height=SETTINGS_CONTROL_HEIGHT,
-            command=self._choose_logbook_file)
+            line, text="", width=LOGBOOK_FIELD_WIDTH, anchor="w",
+            height=SETTINGS_CONTROL_HEIGHT, command=self._choose_logbook_file)
         self.logbook_file.pack(side="left")
 
-        line = self._settings_line(box, "Backup", 58)
+        sCTkLabelTertiary(line, text="Backup", width=58, anchor="w").pack(side="left", padx=(24, 0))
         self.logbook_backup = sCTkEntryPrimary(line, width=70,
                                                height=SETTINGS_CONTROL_HEIGHT)
         self.logbook_backup.pack(side="left")
         self.logbook_backup.insert(0, str(gv.config.get_Logbook_Backup_Interval()))
         self.logbook_backup.bind("<Return>", lambda e: self._save_logbook_backup())
         self.logbook_backup.bind("<FocusOut>", lambda e: self._save_logbook_backup())
-        sCTkLabelTertiary(line, text="minutes between backups",
-                          font=("Arial", 11)).pack(side="left", padx=6)
+        sCTkLabelTertiary(line, text="minutes").pack(side="left", padx=6)
         line.pack_configure(pady=(1, 8))
         self._show_logbook_file()
 
@@ -3657,6 +3671,8 @@ class UbitxCecDesktop(sCTk):
         Which SDR program, and where. "None" means there is no SDR: nothing
         is tried, and the interface greys everything an SDR would serve.
         """
+        # FIX: no fonts on sCTk widgets here or in _sdr_advanced -- the
+        # theme's tiers set them (see _build_operate).
         line = self._settings_line(box, "Software", 62)
         self.sdr_picker = sCTkComboBox(line, width=150, height=SETTINGS_CONTROL_HEIGHT,
                                        command=self._on_sdr_software,
@@ -3682,10 +3698,28 @@ class UbitxCecDesktop(sCTk):
         self.sdr_host_entry = sCTkEntryPrimary(line, width=150, height=SETTINGS_CONTROL_HEIGHT)
         self.sdr_host_entry.pack(side="left")
         self.sdr_host_entry.insert(0, gv.config.get_sdr_host())
-        sCTkLabelTertiary(line, text="port", font=("Arial", 11)).pack(side="left", padx=(8, 4))
+        sCTkLabelTertiary(line, text="port").pack(side="left", padx=(8, 4))
         self.sdr_port_entry = sCTkEntryPrimary(line, width=70, height=SETTINGS_CONTROL_HEIGHT)
         self.sdr_port_entry.pack(side="left")
         self.sdr_port_entry.insert(0, str(gv.config.get_sdr_port()))
+
+        # FIX: THE PORT DECODED CW ARRIVES ON, for a program that sends it
+        # over UDP (SDRoxide, SDRoxide Brown). Set in the program too -- its
+        # Settings > Servers -- and the two must agree. SAVED PER PROGRAM, in
+        # your own sdr_programs.json, not as one setting for all: one global
+        # value is what makes the SDR Path setting start the wrong program.
+        # Empty puts the program's usual port back. Greyed, saying why, for a
+        # program without such a decoder, and for SDRangel, which the
+        # application sets up itself.
+        line = self._settings_line(box, "CW port", 62)
+        self.decoder_port_entry = sCTkEntryPrimary(line, width=70,
+                                                   height=SETTINGS_CONTROL_HEIGHT)
+        self.decoder_port_entry.pack(side="left")
+        self.decoder_port_entry.bind("<Return>", lambda e: self._save_decoder_port())
+        self.decoder_port_entry.bind("<FocusOut>", lambda e: self._save_decoder_port())
+        self.decoder_port_note = sCTkLabelTertiary(line, text="", anchor="w")
+        self.decoder_port_note.pack(side="left", padx=(8, 0))
+        self._show_decoder_port()
 
         # EVERYTHING ELSE IS BEHIND "SDR settings…", in the Settings group
         # below: the filter widths now, and in time noise blanking, squelch
@@ -3703,6 +3737,7 @@ class UbitxCecDesktop(sCTk):
         key = next((k for k, name in sdr_choices() if name == shown), "none")
         gv.config.set_sdr_software(key)
         profile = profile_for(key)
+        self._show_decoder_port()       # FIX: the new program's CW port
         if not profile.default_port:
             return
 
@@ -3721,6 +3756,76 @@ class UbitxCecDesktop(sCTk):
         self.sdr_port_entry.delete(0, "end")
         self.sdr_port_entry.insert(0, str(profile.default_port))
 
+    def _decoder_port_kind(self, profile):
+        """'udp' (editable), 'auto' (SDRangel sets it) or None (no decoder)."""
+        if profile.protocol == "rest":
+            return "auto"
+        if profile.decoder_udp_port or sdr_programs.shipped_setting(
+                profile.key, "decoder_udp_port"):
+            return "udp"
+        return None
+
+    def _show_decoder_port(self):
+        """The CW port field for the program chosen: its port, or greyed with why."""
+        entry = getattr(self, "decoder_port_entry", None)
+        if entry is None:
+            return
+        profile = profile_for(gv.config.get_sdr_software())
+        kind = self._decoder_port_kind(profile)
+        entry.configure(state="normal")
+        entry.delete(0, "end")
+        if kind == "udp":
+            entry.insert(0, str(profile.decoder_udp_port or ""))
+            note = f"UDP, as set in {profile.name}"
+        else:
+            entry.configure(state="disabled")
+            if kind == "auto":
+                note = f"{profile.name} is set up automatically"
+            elif profile.key == "none":
+                note = "no SDR chosen"
+            else:
+                note = f"{profile.name} has no CW decoder"
+        self.decoder_port_note.configure(text=note)
+
+    def _save_decoder_port(self):
+        """
+        Saves the CW port for the program chosen -- into your own
+        sdr_programs.json -- and listens on it at once if DEC is on.
+        """
+        profile = profile_for(gv.config.get_sdr_software())
+        if self._decoder_port_kind(profile) != "udp":
+            return
+        text = self.decoder_port_entry.get().strip()
+        usual = sdr_programs.shipped_setting(profile.key, "decoder_udp_port")
+        if not text:
+            value = None                        # back to the usual port
+        elif not text.isdigit() or not 1 <= int(text) <= 65535:
+            self.decoder_port_note.configure(text="a port is a number, 1 to 65535")
+            return
+        else:
+            value = int(text)
+            if usual is not None and value == int(usual):
+                value = None                    # the usual one: no override needed
+        now = profile.decoder_udp_port
+        if (value or (int(usual) if usual else None)) == now:
+            self._show_decoder_port()
+            return
+        fresh = sdr_programs.set_user_setting(profile.key, "decoder_udp_port", value)
+        if fresh is None:
+            self.decoder_port_note.configure(text="could not save -- see the console")
+            return
+        # The SDR link and its transport hold the profile they were made with.
+        if self.sdr.profile.key == fresh.key:
+            self.sdr.profile = fresh
+            self.sdr.controller.profile = fresh
+            if getattr(self.sdr, "_decoding", False):
+                # Listening already: move to the new port now.
+                self.sdr.controller.set_decoder(False)
+                self.sdr.controller.set_decoder(True)
+        print(f"[sdr] {fresh.name}'s decoded CW now expected on 127.0.0.1:"
+              f"{fresh.decoder_udp_port}")
+        self._show_decoder_port()
+
     def _sdr_advanced(self):
         """
         The SDR's finer settings, in a window of their own.
@@ -3736,38 +3841,35 @@ class UbitxCecDesktop(sCTk):
 
         body = sCTkFrame(win, fg_color="transparent", border_width=0)
         body.pack(fill="both", expand=True, padx=16, pady=14)
-        sCTkLabelPrimary(body, text="Default filter widths",
-                         font=("Arial", 14, "bold")).pack(anchor="w")
+        sCTkLabelPrimary(body, text="Default filter widths").pack(anchor="w")
         sCTkLabelTertiary(
             body,
             text="What the SDR's filter returns to for each mode -- and what "
                  "a mode change sets, so an SSB filter is not carried into CW.",
-            font=("Arial", 10), wraplength=380, justify="left").pack(anchor="w", pady=(2, 10))
+            wraplength=380, justify="left").pack(anchor="w", pady=(2, 10))
 
         fields = {}
         for label, value in (("CW", gv.config.get_sdr_cw_filter_default_hz()),
                              ("SSB", gv.config.get_sdr_ssb_filter_default_hz())):
             line = sCTkFrame(body, fg_color="transparent", border_width=0)
             line.pack(anchor="w", pady=3)
-            sCTkLabelTertiary(line, text=label, width=50,
-                              font=("Arial", 11), anchor="w").pack(side="left")
+            sCTkLabelTertiary(line, text=label, width=50, anchor="w").pack(side="left")
             field = sCTkEntryPrimary(line, width=90, height=SETTINGS_CONTROL_HEIGHT)
             field.pack(side="left")
             field.insert(0, str(value))
-            sCTkLabelTertiary(line, text="Hz", font=("Arial", 11)).pack(side="left", padx=6)
+            sCTkLabelTertiary(line, text="Hz").pack(side="left", padx=6)
             fields[label] = field
 
         # WHERE THE PROGRAM IS, for an install this does not know about. Empty
         # means the usual places for that program on this platform, which are
         # in sdr_programs.json along with everything else true of a program
         # rather than of this station.
-        sCTkLabelPrimary(body, text="Where the program is",
-                         font=("Arial", 14, "bold")).pack(anchor="w", pady=(16, 0))
+        sCTkLabelPrimary(body, text="Where the program is").pack(anchor="w", pady=(16, 0))
         sCTkLabelTertiary(
             body,
             text="Only needed if starting it fails, or for rigctld, which "
                  "must be told which radio to use — give the whole command.",
-            font=("Arial", 10), wraplength=400, justify="left").pack(anchor="w", pady=(2, 6))
+            wraplength=400, justify="left").pack(anchor="w", pady=(2, 6))
         path_row = sCTkFrame(body, fg_color="transparent", border_width=0)
         path_row.pack(anchor="w", fill="x")
         path_field = sCTkEntryPrimary(path_row, width=280, height=SETTINGS_CONTROL_HEIGHT)
@@ -3793,8 +3895,7 @@ class UbitxCecDesktop(sCTk):
             text=f"To add an SDR program, or change what is known about one, "
                  f"edit {shown_path(sdr_programs.USER_FILE)}; for its controls' "
                  f"ranges and labels, {shown_path(sdr_controls.USER_FILE)}. Each "
-                 f"is merged over the one this application ships with.",
-            font=("Arial", 10), wraplength=400,
+                 f"is merged over the one this application ships with.", wraplength=400,
             justify="left").pack(anchor="w", pady=(12, 0))
 
         def keep():
@@ -4153,10 +4254,8 @@ class UbitxCecDesktop(sCTk):
         body = sCTkFrame(win, fg_color="transparent", border_width=0)
         body.pack(fill="both", expand=True, padx=18, pady=16)
 
-        sCTkLabelPrimary(body, text="uBITX CEC Desktop",
-                         font=("Arial", 16, "bold")).pack(anchor="w")
-        sCTkLabelTertiary(body, text="a visual desktop for KD8CEC-powered uBITX radios",
-                          font=("Arial", 11)).pack(anchor="w", pady=(0, 10))
+        sCTkLabelPrimary(body, text="uBITX CEC Desktop").pack(anchor="w")
+        sCTkLabelTertiary(body, text="a visual desktop for KD8CEC-powered uBITX radios").pack(anchor="w", pady=(0, 10))
 
         for label, value in (
             ("Version", "1.0  ·  June 2026"),
@@ -4169,10 +4268,8 @@ class UbitxCecDesktop(sCTk):
         ):
             line = sCTkFrame(body, fg_color="transparent", border_width=0)
             line.pack(anchor="w", pady=1)
-            sCTkLabelTertiary(line, text=label, width=120,
-                              font=("Arial", 11), anchor="w").pack(side="left")
-            sCTkLabelSecondary(line, text=value,
-                               font=("Arial", 11)).pack(side="left")
+            sCTkLabelTertiary(line, text=label, width=120, anchor="w").pack(side="left")
+            sCTkLabelSecondary(line, text=value).pack(side="left")
 
         sCTkButtonSecondary(body, text="Close", width=80,
                             command=win.destroy).pack(anchor="w", pady=(14, 0))
@@ -4201,16 +4298,13 @@ class UbitxCecDesktop(sCTk):
 
         direction = sCTkFrame(body, fg_color="transparent", border_width=0)
         direction.pack(anchor="w", pady=(0, 8))
-        sCTkLabelTertiary(direction, text="copy",
-                          font=("Arial", 11)).pack(side="left", padx=(0, 6))
+        sCTkLabelTertiary(direction, text="copy").pack(side="left", padx=(0, 6))
         sCTkComboBox(direction, values=["Config file", "Factory", "Radio"],
                      width=130).pack(side="left")
-        sCTkLabelPrimary(direction, text="  →  ",
-                         font=("Arial", 14, "bold")).pack(side="left")
+        sCTkLabelPrimary(direction, text="  →  ").pack(side="left")
         sCTkComboBox(direction, values=["Radio", "Config file"],
                      width=130).pack(side="left")
-        sCTkLabelTertiary(direction, text="   differences are marked",
-                          font=("Arial", 10)).pack(side="left", padx=8)
+        sCTkLabelTertiary(direction, text="   differences are marked").pack(side="left", padx=8)
 
         table = sCTkFrame(body, border_width=1, corner_radius=6)
         table.pack(fill="both", expand=True)
@@ -4220,7 +4314,6 @@ class UbitxCecDesktop(sCTk):
         for text, width in (("", 30), ("Setting", 150), ("Factory", 120),
                             ("In the radio", 130), ("Config file", 130)):
             sCTkLabelTertiary(head, text=text, width=width,
-                              font=("Arial", 11, "bold"),
                               anchor="w").pack(side="left")
 
         rows = (
@@ -4240,19 +4333,18 @@ class UbitxCecDesktop(sCTk):
             # picking rows out of a table is selection, and a tick reads as
             # selected at a glance where a coloured track does not.
             sCTkCheckBox(line, text="", width=30).pack(side="left")
-            sCTkLabelTertiary(line, text=name, width=150,
-                              font=("Arial", 11), anchor="w").pack(side="left")
-            sCTkLabelTertiary(line, text=factory, width=120,
-                              font=("Arial", 11), anchor="w").pack(side="left")
+            sCTkLabelTertiary(line, text=name, width=150, anchor="w").pack(side="left")
+            sCTkLabelTertiary(line, text=factory, width=120, anchor="w").pack(side="left")
             # A value that differs from the one beside it is the whole reason
             # for looking at this table, so it is the thing that stands out.
             differs = radio_value != config and "—" not in (radio_value, config)
+            # FIX: the TIER marks it -- Secondary against Tertiary -- with
+            # no font of its own; the bold it also had is gone with the
+            # sizes (see _build_operate).
             cell = sCTkLabelSecondary if differs else sCTkLabelTertiary
             cell(line, text=radio_value, width=130,
-                 font=("Arial", 11, "bold") if differs else ("Arial", 11),
                  anchor="w").pack(side="left")
             cell(line, text=config, width=130,
-                 font=("Arial", 11, "bold") if differs else ("Arial", 11),
                  anchor="w").pack(side="left")
 
         footer = sCTkFrame(body, fg_color="transparent", border_width=0)
@@ -4276,8 +4368,7 @@ class UbitxCecDesktop(sCTk):
         body = sCTkFrame(win, fg_color="transparent", border_width=0)
         body.pack(fill="both", expand=True, padx=16, pady=14)
 
-        sCTkLabelSecondary(body, text="Callsign",
-                           font=("Arial", 11)).pack(anchor="w")
+        sCTkLabelSecondary(body, text="Callsign").pack(anchor="w")
         call = sCTkEntryPrimary(body, width=200)
         call.pack(anchor="w", pady=(2, 10))
         call.focus_set()
@@ -4294,10 +4385,8 @@ class UbitxCecDesktop(sCTk):
         for label, value in known:
             line = sCTkFrame(body, fg_color="transparent", border_width=0)
             line.pack(anchor="w", pady=1)
-            sCTkLabelTertiary(line, text=label, width=110,
-                              font=("Arial", 11)).pack(side="left")
-            sCTkLabelSecondary(line, text=value,
-                               font=("Arial", 11)).pack(side="left")
+            sCTkLabelTertiary(line, text=label, width=110).pack(side="left")
+            sCTkLabelSecondary(line, text=value).pack(side="left")
 
         row = sCTkFrame(body, fg_color="transparent", border_width=0)
         row.pack(anchor="w", pady=(14, 0))

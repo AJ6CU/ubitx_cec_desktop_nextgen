@@ -307,6 +307,69 @@ def profile_for(setting):
     return PROFILES.get(key) or PROFILES.get("sdr++") or NONE
 
 
+def shipped_setting(key, name):
+    """One setting as the shipped file gives it for a program, or None."""
+    entry = _read_raw(SHIPPED_FILE, "the programs file").get(key)
+    return entry.get(name) if isinstance(entry, dict) else None
+
+
+def set_user_setting(key, name, value):
+    """
+    FIX: writes ONE setting for one program into the operator's own file --
+    the Setup page's CW decode port, the first setting changed from the
+    window rather than by hand. None removes it, so the shipped value applies
+    again; an entry left empty is removed too.
+
+    Everything else in the file is kept as it was, comments ("_" keys)
+    included. A file that cannot be read is NOT overwritten: that would lose
+    whatever the operator wrote in it.
+
+    The programs are read again afterwards, so profile_for() answers with the
+    new value. Returns the program's new Profile, or None if nothing was
+    written.
+    """
+    data = {}
+    if os.path.exists(USER_FILE):
+        try:
+            with open(USER_FILE, "r", encoding="utf-8") as handle:
+                data = json.load(handle)
+        except Exception as err:
+            print(f"[sdr] your programs file ({USER_FILE}) could not be read, so it "
+                  f"was not changed: {err}")
+            return None
+        if not isinstance(data, dict):
+            print(f"[sdr] your programs file ({USER_FILE}) is not a block of "
+                  f"programs, so it was not changed")
+            return None
+    entry = data.get(key)
+    if not isinstance(entry, dict):
+        entry = {}
+    if value is None:
+        entry.pop(name, None)
+    else:
+        entry[name] = value
+    if entry:
+        data[key] = entry
+    else:
+        data.pop(key, None)
+    try:
+        os.makedirs(os.path.dirname(USER_FILE) or ".", exist_ok=True)
+        temporary = USER_FILE + ".new"
+        with open(temporary, "w", encoding="utf-8") as handle:
+            json.dump(data, handle, indent=4)
+            handle.write("\n")
+        os.replace(temporary, USER_FILE)
+    except OSError as err:
+        print(f"[sdr] could not write your programs file ({USER_FILE}): {err}")
+        return None
+    # Read again, IN PLACE: other modules hold this dict.
+    fresh = load()
+    PROFILES.clear()
+    PROFILES.update(fresh)
+    PROFILES["none"] = NONE
+    return PROFILES.get(key)
+
+
 def choices():
     """
     (key, name) for every program, for the Setup page -- "None" first, then
