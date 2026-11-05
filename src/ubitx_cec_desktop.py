@@ -3678,8 +3678,10 @@ class UbitxCecDesktop(sCTk):
                                        command=self._on_sdr_software,
                                        values=[name for _, name in sdr_choices()])
         self.sdr_picker.pack(side="left")
-        sCTkButtonPrimary(line, text="Connect", width=90, height=SETTINGS_CONTROL_HEIGHT,
-                          command=self._connect_sdr).pack(side="left", padx=8)
+        connect = sCTkButtonPrimary(line, text="Connect", width=90,
+                                    height=SETTINGS_CONTROL_HEIGHT,
+                                    command=self._connect_sdr)
+        connect.pack(side="left", padx=8)
         current = gv.config.get_sdr_software()
         self.sdr_picker.set(dict(sdr_choices()).get(current, "None"))
 
@@ -3693,6 +3695,26 @@ class UbitxCecDesktop(sCTk):
         self.sdr_autostart.pack(side="left")
         if str(gv.config.get_SDR_Autostart()) in ("1", "True", "true"):
             self.sdr_autostart.select()
+
+        # FIX: SAYS WHEN THE PROGRAM'S USUAL LOCATION IS OVERRIDDEN by the
+        # path in SDR settings -- otherwise a program that starts from an
+        # unexpected place, or will not start, has no visible cause. On the
+        # "Start it" line, at its top, LEFT-ALIGNED under Connect
+        # (2026-11-05) -- beside Connect it was cut off, and centred it ran
+        # into the checkbox's text. Placed, not packed, so it follows Connect
+        # wherever the layout puts it.
+        self.sdr_path_note = sCTkLabelTertiary(line, text="")
+
+        def under_connect(_event=None, start_line=line):
+            try:
+                x = connect.winfo_rootx() - start_line.winfo_rootx()
+                self.sdr_path_note.place(in_=start_line, x=x+8, y=0, anchor="nw")
+            except Exception:
+                pass
+
+        connect.bind("<Configure>", under_connect, add="+")
+        line.bind("<Configure>", under_connect, add="+")
+        self._show_sdr_path()
 
         line = self._settings_line(box, "Address", 62)
         self.sdr_host_entry = sCTkEntryPrimary(line, width=150, height=SETTINGS_CONTROL_HEIGHT)
@@ -3735,6 +3757,15 @@ class UbitxCecDesktop(sCTk):
         operator has already set one of their own.
         """
         key = next((k for k, name in sdr_choices() if name == shown), "none")
+        # FIX: A DIFFERENT PROGRAM CLEARS THE CUSTOM LOCATION. It is one
+        # setting for every program, so the path set for one was used to
+        # start the next -- the wrong program, or none. Choosing the same
+        # program again keeps it.
+        if key != gv.config.get_sdr_software() and gv.config.get_sdr_path():
+            print(f"[sdr] custom location {gv.config.get_sdr_path()!r} cleared: "
+                  f"{shown} is looked for in its usual places")
+            gv.config.set_sdr_path("")
+            self._show_sdr_path()
         gv.config.set_sdr_software(key)
         profile = profile_for(key)
         self._show_decoder_port()       # FIX: the new program's CW port
@@ -3755,6 +3786,12 @@ class UbitxCecDesktop(sCTk):
         gv.config.set_sdr_port(profile.default_port)
         self.sdr_port_entry.delete(0, "end")
         self.sdr_port_entry.insert(0, str(profile.default_port))
+
+    def _show_sdr_path(self):
+        """'custom path' under Connect while SDR settings holds a path."""
+        note = getattr(self, "sdr_path_note", None)
+        if note is not None:
+            note.configure(text="(custom path)" if gv.config.get_sdr_path() else "")
 
     def _decoder_port_kind(self, profile):
         """'udp' (editable), 'auto' (SDRangel sets it) or None (no decoder)."""
@@ -3898,7 +3935,7 @@ class UbitxCecDesktop(sCTk):
                  f"is merged over the one this application ships with.", wraplength=400,
             justify="left").pack(anchor="w", pady=(12, 0))
 
-        def keep():
+        def save():
             for name, setter in (("CW", gv.config.set_sdr_cw_filter_default_hz),
                                  ("SSB", gv.config.set_sdr_ssb_filter_default_hz)):
                 try:
@@ -3906,11 +3943,13 @@ class UbitxCecDesktop(sCTk):
                 except ValueError:
                     pass
             gv.config.set_sdr_path(path_field.get())
+            self._show_sdr_path()
             win.destroy()
 
         row = sCTkFrame(body, fg_color="transparent", border_width=0)
         row.pack(anchor="w", pady=(14, 0))
-        sCTkButtonPrimary(row, text="Keep", width=80, command=keep).pack(side="left", padx=(0, 6))
+        # FIX: "Save", not "Keep" -- what the button does (2026-11-05).
+        sCTkButtonPrimary(row, text="Save", width=80, command=save).pack(side="left", padx=(0, 6))
         sCTkButtonSecondary(row, text="Cancel", width=80,
                             command=win.destroy).pack(side="left")
 

@@ -810,6 +810,24 @@ connection above.
 
 ---
 
+### No font sizes on sCTk widgets -- DONE (2026-11-05)
+
+Every `font=(...)` on an sCTk widget in ubitx_cec_desktop.py is gone --
+Operate, RX, Channels, CW, Setup, the pop-ups, EEPROM backup, About and Log
+QSO. The theme's tiers (Primary, Secondary, Tertiary) set the size; where a
+size had been wanted smaller, the widget moved down a tier (the knobs'
+values and the pop-ups' headings are Tertiary now). The rule is in a FIX
+comment at the top of `_build_operate`.
+TWO SPECIAL CASES KEPT, both drawn sizes rather than label tiers (Mark's
+decision): the frequency display's `FREQ_FONT_SIZE` (56) and the dials'
+end labels, `RANGE_KNOB_LABEL_FONT` -- which `_range_canvas_size` also uses to
+measure the room a dial needs.
+*To look at:* About and Log QSO's value labels are Secondary; Tertiary if
+they look large.
+Setup reworked the same day: the bottom row in halves, Logbook (two fields
+a line, Format and Backup in one column) and "Other Settings" (three
+buttons a line); a CW port line in the SDR group (see SDR settings, 1).
+
 <a name="much-later"></a>
 ### SDR isolation and the config folder (2026-09-27)
 
@@ -871,7 +889,12 @@ choice when its list changes -- notes, "The Morse decoder"). The decoder's
 window still shows stopped, UDP off and its own source: it is not told of
 REST changes. FIX: the strip now fills from the left and scrolls left once
 full, holding as much as its width allows.
-*Still to check:* the strip scrolling; resizing the window.
+*Still to check:* resizing the window.
+FIX (2026-11-05): the strip's Courier went with the other fonts, so the line
+is now FITTED BY MEASURING the text in the label's own font
+(`_decode_tail`), not by counting characters -- a count from one letter's
+width stopped two-thirds across. CONFIRMED with SDRoxide Brown: it fills to
+within a couple of centimetres of the right-hand end, then scrolls left.
 *Was to check:* DEC in CW -- the console line says UDP on,
 source chosen, decoder running; the decoder's window shows the WDSP
 receiver as source, UDP ticked, Start pressed; text in the strip. DEC off
