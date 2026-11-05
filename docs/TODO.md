@@ -965,8 +965,9 @@ shipped `"sdroxide"` entry, for v1.6.11 and later -- DONE 2026-11-04:
 - nothing for PRs 2 and 5: found at connect.
 The mode switch-and-back code (`RigctlSDR._send_mode` / `_follow_hop`) stays:
 the `"sdroxide-brown"` entry still needs it until brown merges its PR 1.
-The upstream PR branches are deleted from the clone and the fork, except
-PR 4's `panadapter-view`, kept for the rethink.
+The upstream PR branches are deleted from the clone and the fork; PR 4's
+`panadapter-view` was kept for a rethink, then dropped (brown's dock/undock
+covers it) -- deleted 2026-11-04.
 An SDRoxide older than v1.6.11 needs the old values back in the user's own
 `~/.ubitx_cec_desktop/sdr_programs.json`.
 The original list, kept for what each one does:
@@ -998,7 +999,10 @@ Five PRs prepared 2026-09-28/29 (sdroxide_prs_bundle.zip, with instructions):
    the corner brings it back) and its CW panel -- SDRoxide as a bare
    panadapter beside our app. Nothing in our app; untick both in SDRoxide
    once released.
-   NOT MERGED -- RETHINK. Built and tried 2026-09-29: the switches work, but
+   DROPPED 2026-11-04: SDRoxide Brown's dock/undock gives the bare waterfall
+   and frequency view this was for. Patches and PR text deleted from the
+   project; the fork's `panadapter-view` branch deleted too.
+   (Was: NOT MERGED -- RETHINK.) Built and tried 2026-09-29: the switches work, but
    the window's minimum (800 x 500, fixed in gui_main.rs) did not shrink, so
    a follow-up made it follow the strip and panel; and below 600 x 440
    SDRoxide's Auto layout goes to its phone layout, which drops the spectrum
@@ -1013,19 +1017,116 @@ Five PRs prepared 2026-09-28/29 (sdroxide_prs_bundle.zip, with instructions):
    the slider. TESTED 2026-09-29: built on the Mac, 46 rigctld tests pass
    on PR 2 + PR 5, `l RF` / `L RF` right, and the knob works in the app.
 6. If the location of the SDR is ever defined in the SDR settings, there is no way to completely erase it without hand editing the settings file.
+7. NEXT PR CANDIDATE (2026-11-04): the WATERFALL WIDTH over rigctl, so the
+   Operate tab's Bandwidth slider (and band framing) work with SDRoxide. Today
+   the slider is greyed for every rigctl SDR: the capability `bandwidth` comes
+   only from SDRangel's REST transport (log2Decim). SDRoxide can do it inside
+   (`Command::SetSampleRate`, `Command::SetDecimation`, an on-screen span) but
+   its rigctl server has no command for any of them -- checked in upstream's
+   and brown's `crates/sdroxide-rigctld/src/proto.rs`.
+   *Plan:* use Hamlib's own spectrum-scope levels (added in Hamlib 4.x for the
+   IC-7300/7610 scope) rather than inventing one -- `SPECTRUM_SPAN` (the width
+   shown, Hz) for the slider; `SPECTRUM_MODE` and `SPECTRUM_EDGE_LOW/HIGH`
+   possibly for band framing. Advertised in `\dump_state` like the other
+   levels. App side: found at connect, moved by the slider -- as RF gain.
+   *Checked in Hamlib's rig.h (2026-11-04):* SPECTRUM_MODE 1<<40 (1 centre,
+   2 fixed, 3/4 scroll), SPECTRUM_SPAN 1<<41 (int Hz, centre mode),
+   SPECTRUM_EDGE_LOW/HIGH 1<<42/43, SPEED/REF/AVG/ATT 1<<44-47; funcs
+   SPECTRUM 1<<43, SPECTRUM_HOLD 1<<44. From OH3BHX's spectrum work (4.5).
+   rigctld's \dump_state carries the level masks and `level_gran=` (min/max/
+   step) but not the `spectrum_spans` list. *Proposed mapping:* decimation
+   (span = rate / 2^n; SetDecimation already rounds and clamps) -- the same
+   as SDRangel's log2Decim behind our slider. Issue drafted:
+   sdroxide/issue_spectrum_span.md -- its one question is decimation or the
+   displayed zoom. SUBMITTED as an issue 2026-11-04. ANSWERED: decimation;
+   brown built it himself as #479, MERGED 2026-11-05 (l/L SPECTRUM_SPAN in
+   Hz; RPRT -11 where there is no decimation; no level_gran/spectrum_spans,
+   which we do not need). APP SIDE BUILT 2026-11-05 (spectrum_span.zip):
+   RigctlSDR finds SPECTRUM_SPAN at connect (capability `bandwidth`), offers
+   the span x powers of two (48 kHz..20 MHz) trimmed to what the SDR is found
+   to allow, sets with L, reads back in the poll (own 2 s settle window),
+   follows a change made in the SDR; set_frequency accepts band= and ignores
+   it -- over rigctl the SDR places its span itself, so no band framing.
+   10 transport tests. CONFIRMED ON THE STATION 2026-11-05 (brown main
+   25ba95d6, RTL-SDR at 2.4 MHz): found at connect, the slider starts at
+   SDRoxide's width, every step applied down to 75 kHz (decimation 32, its
+   floor). Then: the same width is no longer sent twice (it re-sent F too).
+   Also confirmed: brown's DEC chip (top bar, beside the gain) moves the
+   app's slider; asking past the widest (19.2 MHz) gave 2.4 MHz and trimmed
+   the slider -- after a ~2 s pause (SPAN_SETTLE_SECONDS), which goes away
+   once the device rate is readable.
+   SEEN: SDRoxide's display ZOOM is separate from the sampled span. Narrowing
+   the span below what is shown zooms the view in with it; WIDENING it is not
+   seen until zoomed out in SDRoxide -- the view keeps its zoom. Possible ask
+   for brown: fit the view when the span changes over rigctl, or expose the
+   zoom (Hamlib has SPECTRUM_EDGE_LOW/HIGH in fixed mode). ASKED 2026-11-05
+   on #479, with the device rate (and how he would like it -- `\dump_state`
+   or otherwise); asked whether he does them or we send a PR. Waiting.
+   Upstream SDRoxide: offer #479's change there too, later.
+   *NEXT, once it works on the station:* ask brown to make the DEVICE RATE
+   readable over rigctl -- #479 already carries it in RigState
+   (`device_rate_hz`); it just is not exposed. With it the app computes the
+   exact spans (rate / 2^n), as for SDRangel, instead of guessing. Until
+   then `rigctl_sdr.MAX_SPAN_HZ = 20 MHz` is a GUESS (just above a HackRF):
+   the slider starts with steps the device cannot reach -- up to 12.3 MHz
+   for an RTL-SDR at 768 kHz -- trimmed once a drag past the top shows the
+   limit. Remove the guess when the rate is readable.
+   Then the same for brown.
+8. CW PEAK FILTER (2026-11-04): SDRoxide (upstream and brown) has no receive
+   audio peak filter, so the CW lamp stays greyed. Moderate work -- the
+   peaking biquad exists (brown `sdroxide-dsp/src/eq.rs`, transmit EQ), it
+   would sit beside the auto-notch stage, CW only, ahead of AGC; needs a
+   state field (wire change: PROTO_VERSION + round-trip test), a chip and
+   pop-up in eleven languages, and Hamlib `APF` over rigctl. ASK FIRST: issue
+   drafted, sdroxide/brown/brown_issue_cw_peak.md; SUBMITTED 2026-11-04
+   (number: fill in), no reply yet as of 2026-11-05. App side once it exists:
+   the CW lamp found at connect through `U APF` / `L APF`.
 Step by step in SDROXIDE_UPGRADE.md.
 
-### Waiting on SDRoxide Brown -- PRs submitted 2026-11-04
+### SDRoxide Brown -- PRs submitted and all merged 2026-11-04; waiting on a release
 
 Four PRs to madmedicnl/sdroxide-brown, from branches `brown-…` on our fork
 AJ6CU/sdroxide (GitHub allows one fork per fork family, so the upstream
 fork serves both). Patches, texts and steps: sdroxide/brown/ in the project
 (BROWN_PR_INSTRUCTIONS.md). Rebased onto brown's main 2609ddd4 on 2026-11-04.
-PR numbers: fill in.
-1. `brown-same-mode-passband` (#___): a new width in the mode running sets
+MERGED into brown's main by 2026-11-04 (fe0d1266): #451 (PR 1), #452 (PR 2),
+#454 (PR 5). PR 3 not yet merged; its number: fill in. Not yet in a brown
+release, so the `"sdroxide-brown"` entry is unchanged until one ships.
+Follow-up to #451 from its review (2026-11-04): CW width centred on the
+pitch, and the clamped width compared -- branch `brown-passband-followups`,
+patch and PR text in brown_pr6.zip. PR #464. OVERLAPS #463, the
+maintainer's own fix for the CW point (centred at the rigctl edge via
+`mode_filter`/`centred_on`, filter_for unchanged). #463 does not cover the
+clamped-width point. Plan: once #463 merges, cut #464 down to the clamped
+width (compare the width `mode_filter` gives), rebased on main.
+#463 MERGED 2026-11-04; the maintainer asked for exactly that. Trimmed
+patch in brown_pr464_trimmed.zip, force-pushed; #464 MERGED 2026-11-04.
+ALL brown PRs merged (#451 #452 #453 #454 #464 #465). The shipped
+`"sdroxide-brown"` entry is UPDATED for them (Mark, 2026-11-05):
+width_needs_mode_change false, settle_seconds 1.5, decoder_udp_port 9998,
+and the local overrides dropped. This assumes a brown build from main
+(25ba95d6 or later) until brown makes a release. CONFIRMED on the station
+2026-11-05: wide/narrow in USB is one `M USB <w>` each, no hop; DEC on
+127.0.0.1:9998 shows the copy; the SQL lamp lights with a threshold and goes
+out at the bottom. The brown-… branches are deleted from the fork and the
+clone, with local-test and the local rigctl-… names (2026-11-05). Nothing
+left from this set.
+Follow-up to #452 from its review: a test on dump_state's level masks --
+branch `brown-level-masks-test`, brown_pr7.zip, PR #465 -- MERGED 2026-11-04. Its other point (`U NR 1`
+can bring back an older engine if the operator switched engine and turned NR
+off between two rigctl commands) is answered in #452: the radio state keeps
+no engine while NR is off, so a fix would be engine-side. Awaiting his view.
+#454 (PR 5) merged with no comments.
+PR 3 is #453: the reviewer's WsjtxConfig round-trip test pushed to its
+branch 2026-11-04 (0bcbb94a), 23 proto tests passing -- it was the only
+thing blocking the merge. Rebased onto main 62fd7dc7 the same day (the
+eleven .ftl files conflicted: both sides had appended messages; both kept)
+and force-pushed; conflicts cleared. MERGED 2026-11-04. When brown releases
+it: `"decoder_udp_port": 9998` in the shipped `"sdroxide-brown"` entry.
+1. `brown-same-mode-passband` (#451, merged): a new width in the mode running sets
    the filter. When merged and released: in the shipped `"sdroxide-brown"`
    entry, `"width_needs_mode_change": false`, `"settle_seconds": 1.5`.
-2. `brown-sql-agc` (#___): SQL, AGC and NR strength levels. When merged:
+2. `brown-sql-agc` (#452, merged): SQL, AGC and NR strength levels. When merged:
    nothing to switch.
 3. `brown-cw-text-udp` (#___): upstream's decoded-CW output, ported; brown's
    own "Decoded text over UDP" is JSON and never sends CW. DEFAULT PORT 9998
@@ -1033,7 +1134,7 @@ PR numbers: fill in.
    feed. Protocol v264. When merged: `"decoder_udp_port": 9998` in the
    shipped `"sdroxide-brown"` entry. Most likely to need rebasing again:
    brown bumps the protocol version and adds translations often.
-5. `brown-rf-gain` (#___): RF level. Builds on #___ (PR 2). When merged:
+5. `brown-rf-gain` (#454, merged): RF level. Builds on #452 (PR 2). When merged:
    nothing to switch.
 Until then the station runs a `local-test` build (all four merged, never
 pushed), with the three settings above in `~/.ubitx_cec_desktop/
@@ -1082,6 +1183,15 @@ upstream's. Checked in the source only, not yet against the two programs.
    SDR settings box should say so, so users know to check the advanced
    setting -- otherwise a program that starts from an unexpected place, or
    will not start, has no visible cause.
+4. **SDRoxide started muted: the app shows it unmuted.** Found 2026-11-04.
+   If SDRoxide is already muted when the app connects, the app assumes it
+   is not, and the two are out of step until the mute is changed from one
+   side. Not yet traced. Where to look first: `discover()` reads `u MUTE`
+   into `RigctlSDR.muted` without calling `on_mute`, and the poll reports
+   only a CHANGE from that -- so if nothing redraws the audio controls after
+   connecting (`SDR_Link.connect` calls `follow()`, not `_audio_changed()`),
+   the window keeps its own starting assumption. Check the same for volume,
+   squelch and the DSP switches, which are read the same way.
 
 ### Waiting on SDRangel -- workarounds to remove when fixed
 

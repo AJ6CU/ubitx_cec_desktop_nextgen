@@ -201,6 +201,7 @@ class SDR_Link:
         self.controller.on_mode = self._from_sdr_mode
         self.controller.on_filter = self._from_sdr_filter
         self.controller.on_rit = self._from_sdr_rit   # FIX: one hook, not five
+        self.controller.on_bandwidth = lambda span: self._audio_changed()
         self.controller.on_split = self._from_sdr_split
         self.controller.on_volume = lambda level: self._audio_changed()
         self.controller.on_mute = lambda muted: self._audio_changed()
@@ -260,6 +261,7 @@ class SDR_Link:
         self.controller.on_mode = self._from_sdr_mode
         self.controller.on_filter = self._from_sdr_filter
         self.controller.on_rit = self._from_sdr_rit   # FIX: one hook, not five
+        self.controller.on_bandwidth = lambda span: self._audio_changed()
         self.controller.on_split = self._from_sdr_split
         self.controller.on_volume = lambda level: self._audio_changed()
         self.controller.on_mute = lambda muted: self._audio_changed()
@@ -1235,10 +1237,13 @@ class SDR_Link:
             if hz:
                 self._sent_hz = hz
                 band = self._band_of(hz)
+                # FIX: less the RIT offset, as in follow() -- the SDR is sent
+                # the base. (0 for anything without RIT.)
+                base = hz - self._model.rit_offset
                 if band is not None:
-                    self.controller.set_frequency(hz, band=band)
+                    self.controller.set_frequency(base, band=band)
                 else:
-                    self.controller.set_frequency(hz)
+                    self.controller.set_frequency(base)
 
     def frame_band(self, start, end):
         """

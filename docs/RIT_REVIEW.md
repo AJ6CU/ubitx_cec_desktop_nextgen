@@ -16,7 +16,32 @@ The step 1 fixes:
 - an unreadable `j` reply is skipped, not read as 0 (0 means RIT off);
 - the toggle wait now times out after 3 s (`RIT_TOGGLE_TIMEOUT_SECONDS`). On timeout the SDR is set to the rig's state, without sending the toggle again (finding 9).
 
-**Step 2 not started:** the rig-leads redesign (finding 8), which also closes finding 7.
+**Step 2 done and confirmed on the rig with SDRoxide (2026-11-04).** Delivered as `rit_step2.zip`: four files, diffs against step 1 (`radio_model.py` diffed against the copy attached on 2026-11-03), `test_rit.py` (9 cases) and `test_rit_step2.py` (44 cases: 22, each with and without a settle window; link + transport + real RadioModel, a fake SDRoxide, and a rig that reports on the next tick or later). All pass.
+- **The transport** reports `j` changes through one hook, `on_rit`, and sets the SDR's RIT with `set_rit(hz)`. It no longer reads the model. The four-state machine, the toggle flags and the 5 `model_*` hooks are gone.
+- **The link** owns the RIT conversation:
+  - `_follow_rit()` (from `follow()`) sends the rig's offset as `J`, including 0. That closes finding 7.
+  - `_from_sdr_rit()` asks the rig: it toggles only if the state the rig will end up in differs from the one wanted, then requests base + offset. The request goes once per offset.
+  - `RIT_CONFIRM_SECONDS = 3`: past that, the SDR is put back to the rig's state.
+- **`ubitx_link.py`:** the seed lines are gone from `cr_UX_RIT_Toggle`, and the flags are gone from `_leave_rit`.
+- **`radio_model.py`:** `rit_sdr_seed`, `rit_turn_off_sdr_flag`, both properties and the commented setter are gone.
+- **A QSY clears RIT (decided with Mark, 2026-11-04).** RIT is for the station being worked, so a change of the SDR's own frequency with RIT on (a click on the spectrum, its dial) means a new station.
+  - The rig has no command to move the held (base) frequency, so keeping the offset would take four commands per step.
+  - In order: RIT off; once the rig confirms, the new frequency; then wait until the rig reports it. `_leave_rit` sends receive back to the old base first, so the order matters.
+  - Meanwhile `follow()` holds back the frequency, so the SDR doesn't snap back. A move made during the wait replaces the target. Past `RIT_CONFIRM_SECONDS` the QSY is given up and the SDR follows the rig.
+  - The poll now reports plain `f` (no offset).
+  - The same applies with SDR++ or Gqrx when the app's RIT is on.
+- **Found on Mark's Mac:** the settle window. His SDRoxide entry has a settle window (`settle_seconds`); the test machine's had none, so it didn't show here.
+  - The bug: the poll compared a reading with the last value before calling `_stale()`. Reading back what was just set never reached `_stale()`, so the window never ended early. Any change made in the SDR within `settle_seconds` of something the app sent was ignored until the window ran out.
+  - Fixed for frequency, mode, width, RIT and the DSP switches. Volume, squelch and the RF gain already had the right order.
+  - `test_rit_step2.py` now runs every case with no window and with a 3 s one: 44 cases. 27 of 44 pass with the old order.
+- Found while testing: with a slow rig, the link asked for the RIT receive frequency on every `follow()`, because `_sent_hz` was overwritten each time. Fixed: the request is tracked in `_rit_rx_asked`.
+
+## SDRoxide's RIT (from its source, crates/sdroxide-rigctld/src/proto.rs)
+
+- Its RIT is a switch plus an offset. `j` reports the offset only while the switch is on (`effective_hz`), and 0 otherwise.
+- `J n` sets the offset and turns the switch on; `J 0` turns it off.
+- An offset typed into SDRoxide's field while its RIT is off is only stored. SDRoxide doesn't apply it, and `j` stays 0, so the app sees no RIT until RIT is clicked on in SDRoxide. This is by design, not ours to fix.
+- SDRoxide's offset field doesn't show changes from rigctl while it has keyboard focus (seen 2026-11-04). Clicking elsewhere in SDRoxide shows the value it already has.
 
 ## Rig firmware behaviour (from Mark)
 

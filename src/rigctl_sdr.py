@@ -25,13 +25,28 @@ import time
 import globalvars as gv
 from rigctl_client import RigctlClient, ConnectionLost
 from sdr_programs import (FREQUENCY, MODE, FILTER, SIGNAL, VOLUME, SQUELCH, MUTE,
-                          NB, NR, NOTCH, AGC, DECODER, RF_GAIN, RIT, SPLIT)
+                          NB, NR, NOTCH, AGC, DECODER, RF_GAIN, RIT, SPLIT,
+                          BANDWIDTH)
 
 POLL_MS = 200
 
 # UBITX_SDR_TRACE=1 in the environment: every command sent, and every change
 # the poll reports as made in the SDR, printed -- for finding who moved what.
 TRACE = os.environ.get("UBITX_SDR_TRACE") == "1"
+
+# FIX: THE SAMPLED SPAN over rigctl -- Hamlib's SPECTRUM_SPAN level, which
+# SDRoxide Brown (#479) maps to its decimation: a width is asked for, the
+# nearest the device can carry is applied, and "l SPECTRUM_SPAN" reads back
+# what it got. Widths offered are the span read at connect times powers of
+# two -- the device rate over each decimation -- within these bounds, and
+# trimmed to what the SDR is found to allow (see _take_span).
+MIN_SPAN_HZ = 48_000
+MAX_SPAN_HZ = 20_000_000
+# The SDR applies a new span a moment after accepting it, so the read-back is
+# given at least this long to arrive before a different reading is believed --
+# whatever the profile's settle_seconds, since a span believed early would be
+# taken as the SDR's own limit.
+SPAN_SETTLE_SECONDS = 2.0
 
 # The listening aids rigctl can switch: the window's name for each, its
 # capability, and Hamlib's function name for `u` / `U`. On or off only --
@@ -193,6 +208,13 @@ class RigctlSDR:
         # RIT off. Replaces the five model_* hooks: the transport reports what
         # the SDR did and is told what to set, and never reads the model.
         self.on_rit = None
+        self.on_bandwidth = None     # FIX: the span changed in the SDR itself
+        # FIX: the sampled span, in Hz, where the SDR has one (SPECTRUM_SPAN);
+        # the narrowest and widest it was found to allow; and the width last
+        # asked for, until its read-back settles.
+        self.bandwidth = None
+        self._span_min = self._span_max = None
+        self._span_asked = None
         self.on_split = None
         self.on_signal = None
         self.on_volume = None        # the level changed in the SDR itself
@@ -364,6 +386,16 @@ class RigctlSDR:
                 self.rit = self.rit_offset != 0
                 caps.add(RIT)
 
+        # FIX: the sampled span -- SPECTRUM_SPAN (Hamlib's spectrum-scope
+        # level; SDRoxide Brown's decimation). Read only; a program without
+        # it answers RPRT -11, and the Bandwidth slider stays greyed.
+        if "bandwidth" not in known_missing:
+            reply = client.query("l SPECTRUM_SPAN")
+            span = _number(reply.values[0]) if reply.ok and reply.values else None
+            if span is not None and span > 0:
+                self.bandwidth = int(span)
+                caps.add(BANDWIDTH)
+
         # Discover SPLIT
         if "split" not in known_missing:
             split_status, split_vfo = _split_and_vfo(self._client.query("s", lines=2))
@@ -439,6 +471,8 @@ class RigctlSDR:
         # FIX: RIT forgotten with the connection, so the next SDR -- which
         # may have no RIT at all -- does not inherit an offset.
         self.rit, self.rit_offset = False, 0
+        self.bandwidth = None
+        self._span_min = self._span_max = self._span_asked = None
         self.dsp_on = {}
         self.dsp_settings, self._levels_found = {}, set()
         self._hop = None
@@ -454,7 +488,11 @@ class RigctlSDR:
     # ------------------------------------------------------------------
     # Setting -- each records what it set, so the poll does not echo it
     # ------------------------------------------------------------------
-    def set_frequency(self, hz):
+    def set_frequency(self, hz, band=None):
+        # FIX: `band` accepted and not used. SDR_Link asks to FRAME a band
+        # wherever the transport has a sampled span; over rigctl only the
+        # frequency can be set, not where the span sits -- the SDR places
+        # that itself. Without the parameter, framing raised TypeError.
         if self._command(f"F {int(hz)}"):
             self.frequency = int(hz)
             # FIX: what was SENT is what the SDR reads back. "f" is SDRoxide's
@@ -464,6 +502,68 @@ class RigctlSDR:
             self._set("frequency", self.frequency)
             return True
         return False
+
+    def bandwidth_choices(self):
+        """
+        The spans offered, narrowest first: the span read at connect times
+        each power of two -- the device rate over each decimation -- within
+        MIN_SPAN_HZ..MAX_SPAN_HZ and what the SDR has been found to allow.
+        """
+        if BANDWIDTH not in self.capabilities or not self._span_base:
+            return []
+        low = max(MIN_SPAN_HZ, self._span_min or 0)
+        high = min(MAX_SPAN_HZ, self._span_max or MAX_SPAN_HZ)
+        widths = set()
+        for k in range(-12, 13):
+            w = self._span_base * 2 ** k if k >= 0 else self._span_base // 2 ** -k
+            if low <= w <= high:
+                widths.add(int(w))
+        return sorted(widths)
+
+    @property
+    def _span_base(self):
+        """The span the powers of two are taken from."""
+        return self.bandwidth
+
+    def set_bandwidth(self, hz):
+        """
+        Asks for a sampled span (SPECTRUM_SPAN). The SDR applies the nearest
+        it can and the poll reads back what it got (_take_span).
+        """
+        if BANDWIDTH not in self.capabilities:
+            return False
+        hz = int(hz)
+        # FIX: not sent again for the width already set or already on its
+        # way -- the slider settles on the same step more than once as it is
+        # dragged, and each repeat also re-sent the frequency (SDR_Link
+        # re-places the view only after a width that was sent). False here
+        # means "nothing sent", not a failure.
+        if hz == self._span_asked or (self._span_asked is None and hz == self.bandwidth):
+            return False
+        if not self._command(f"L SPECTRUM_SPAN {hz}"):
+            return False
+        self._span_asked = hz
+        self._settling["bandwidth"] = (
+            hz, time.monotonic() + max(SPAN_SETTLE_SECONDS,
+                                       self.profile.settle_seconds))
+        return True
+
+    def _take_span(self, span):
+        """
+        A span read in the poll and believed. If it is not what was asked
+        for, the SDR could not go there: it is narrower than a wider request
+        (its widest) or wider than a narrower one (its narrowest), and the
+        choices are trimmed to match.
+        """
+        asked, self._span_asked = self._span_asked, None
+        if asked is not None and span != asked:
+            if span < asked:
+                self._span_max = span
+            else:
+                self._span_min = span
+        if span != self.bandwidth:
+            self.bandwidth = span
+            self._call(self.on_bandwidth, span)
 
     def set_rit(self, hz):
         """
@@ -926,6 +1026,15 @@ class RigctlSDR:
                     self.rit_offset = offset
                     self.rit = offset != 0
                     self._call(self.on_rit, offset)
+
+            # FIX: the sampled span, so the slider follows a change made in
+            # the SDR and a request learns what it actually got.
+            if BANDWIDTH in self.capabilities and not hopping:
+                reply = self._client.query("l SPECTRUM_SPAN")
+                span = _number(reply.values[0]) if reply.ok and reply.values else None
+                if (span is not None and span > 0
+                        and not self._stale("bandwidth", int(span))):
+                    self._take_span(int(span))
 
             if SPLIT in self.capabilities and not hopping:
                 pass
