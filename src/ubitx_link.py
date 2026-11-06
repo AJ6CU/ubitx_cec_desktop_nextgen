@@ -220,6 +220,11 @@ class uBITX_Link:
 
         # Report codes seen since connecting -- see check_expected_reports().
         self.seen_reports = set()
+        # FIX (2026-11-06): bytes of any kind since connecting, zeros included.
+        # A rig still booting holds its line low -- thousands of zero bytes --
+        # before the first report, so "nothing yet" and "nothing at all" are
+        # different, and the window's answer check needs to tell them apart.
+        self.bytes_seen = 0
 
         self.mcu_command_buffer = []  # buffer used to send bytes to MCU
         self.time_of_last_sent = timer()  # used to avoid overloading MCU
@@ -330,12 +335,14 @@ class uBITX_Link:
             start, for one). A partial report waits for the next pass.
             """
             skipped = []
+            skipped_raw = []        # FIX (2026-11-06): with the 0xff bytes, for the hex
             taken = 0
             while taken < READER_MAX_BYTES_PER_PASS and self._port.in_waiting > 0:
                 in_byte = self._port.read(1)
                 if not in_byte:
                     break
                 taken += 1
+                self._radio_link.bytes_seen += 1
 
                 if RIG_TIMING and not getattr(self._radio_link, "_t_first_byte", None):
                     self._radio_link._t_first_byte = monotonic()
@@ -357,6 +364,7 @@ class uBITX_Link:
                 if not self._buffer and in_byte != b'p':
                     if in_byte != b'\xff':
                         skipped.append(in_byte)
+                    skipped_raw.append(in_byte)
                     continue
 
                 self._buffer.append(in_byte)
@@ -374,12 +382,20 @@ class uBITX_Link:
                 if len(self._buffer) > READER_MAX_FRAME:
                     text = b''.join(self._buffer).decode(errors='replace')
                     print(f"[rig] dropped a report that never ended: {text[:40]!r}...")
+                    # FIX (2026-11-06): and in hex, as for skipped bytes.
+                    print(f"[rig]   as sent: {b''.join(self._buffer).hex(' ')}")
                     self._buffer.clear()
                     self._ff_count = 0
 
             if skipped:
                 text = b''.join(skipped).decode(errors='replace')
                 print(f"[rig] skipped {len(skipped)} bytes before a report: {text!r}")
+                # FIX (2026-11-06): THE SAME BYTES IN HEX, 0xff included -- the
+                # text above leaves the terminators out, so it cannot say
+                # whether reports ran together or each ended properly.
+                raw = b''.join(skipped_raw)
+                print(f"[rig]   as sent ({len(raw)} bytes): {raw[:96].hex(' ')}"
+                      f"{' ...' if len(raw) > 96 else ''}")
 
             try:
                 self.id=self._radio_link.root.after(self._schedule, self._reader)
@@ -2049,6 +2065,10 @@ class uBITX_Link:
         """
         if self._model.channels_state in ("reading", "writing"):
             return
+        # FIX (2026-11-06): nor while the settings are being read -- the two
+        # share the memory queue, and one reply would be filed against the other.
+        if self._model.settings_state == "reading":
+            return
 
         requests = []
         for category, key in (("Freq", "channel_freq_Mode"),
@@ -2138,6 +2158,11 @@ class uBITX_Link:
         a straggler from a read already given up on -- is ignored rather than
         filed against whatever is sent next.
         """
+        # FIX (2026-11-06): a settings read, if one is outstanding -- see
+        # read_settings. Never both at once.
+        if getattr(self, "_setting_requests", None):
+            self._on_setting_reply(value)
+            return
         if not self.memoryQueue or not getattr(self, "_channel_requests", None):
             print("[chan] a memory reply arrived with nothing outstanding; ignored")
             return
@@ -2160,6 +2185,103 @@ class uBITX_Link:
             print(f"[chan] could not decode {category} slot {slot + 1}: "
                   f"{value!r} ({err})")
         self._finish_channel_request()
+
+    # ------------------------------------------------------------------
+    # The radio's stored settings -- for backup
+    # ------------------------------------------------------------------
+    # FIX (2026-11-06): THE CALIBRATION AND BFOs, and the factory values,
+    # read from EEPROM for the backup dialog -- the rig reports none of them
+    # at connect. The CW values in the radio come from the reports already
+    # (model.cw_*); only their factory copies are read here. One read at a
+    # time, paced, retried and given up on exactly as the channel reads are.
+    SETTING_READS = ("master_cal", "ssb_bfo", "cw_bfo", "factory_master_cal",
+                     "factory_ssb_bfo", "factory_cw_wpm", "factory_cw_sidetone")
+
+    def read_settings(self):
+        """Reads SETTING_READS into model.eeprom_settings."""
+        model = self._model
+        if model.settings_state == "reading" or \
+                model.channels_state in ("reading", "writing"):
+            return
+        requests = []
+        for name in self.SETTING_READS:
+            spec = EEPROM.Mem_Address[name]
+            requests.append((name, [self.toRadioCommandDict["TS_CMD_READMEM"],
+                                    spec[EEPROM.lsb], spec[EEPROM.msb],
+                                    spec[EEPROM.memLength], spec[EEPROM.charFlag]]))
+        self._setting_requests = requests
+        self._setting_attempts = 0
+        self._setting_timer = None
+        model.settings_state = "reading"
+        model.settings_failed = []
+        model.changed()
+        self._send_next_setting_request()
+
+    def _send_next_setting_request(self):
+        requests = getattr(self, "_setting_requests", None)
+        if not requests:
+            self._model.settings_state = "read"
+            self._model.changed()
+            return
+        name, command = requests[0]
+        self.memoryQueue.append(name)
+        self.sendCommandToMCU(bytes(command))
+        self._setting_timer = self.root.after(CHANNEL_READ_TIMEOUT_MS,
+                                              self._setting_read_timed_out)
+
+    def _setting_read_timed_out(self):
+        self._setting_timer = None
+        if self.memoryQueue:
+            self.memoryQueue.pop()
+        name = self._setting_requests[0][0]
+        self._setting_attempts += 1
+        if self._setting_attempts <= CHANNEL_READ_RETRIES:
+            print(f"[settings] no reply for {name}; retrying")
+            self._send_next_setting_request()
+            return
+        print(f"[settings] giving up on {name}")
+        self._model.settings_failed.append(name)
+        self._finish_setting_request()
+
+    def _finish_setting_request(self):
+        self._setting_requests.pop(0)
+        self._setting_attempts = 0
+        self._model.changed()
+        self.root.after(CHANNEL_READ_PACE_MS, self._send_next_setting_request)
+
+    def _on_setting_reply(self, value):
+        if not self.memoryQueue:
+            return
+        name = self.memoryQueue.pop(0)
+        if self._setting_timer is not None:
+            self.root.after_cancel(self._setting_timer)
+            self._setting_timer = None
+        expected = self._setting_requests[0][0]
+        if name != expected:
+            print(f"[settings] reply for {name} while waiting on {expected}; ignored")
+            return
+        try:
+            self._model.eeprom_settings[name] = self._decode_setting(name, value)
+        except (TypeError, ValueError) as err:
+            print(f"[settings] could not decode {name}: {value!r} ({err})")
+        self._finish_setting_request()
+
+    @staticmethod
+    def _decode_setting(name, value):
+        """
+        A setting from its reply -- hex, as for channels -- in the operator's
+        units. The CALIBRATION IS SIGNED: a 32-bit two's complement, so a
+        negative correction does not show as four thousand million. The
+        factory speed is a dot length, like the live one (1200 / wpm); zero,
+        or erased EEPROM (all ones), is no value.
+        """
+        raw = int(str(value).strip(), 16)
+        if name in ("master_cal", "factory_master_cal"):
+            return raw - (1 << 32) if raw >= (1 << 31) else raw
+        if name == "factory_cw_wpm":
+            raw &= 0xFF
+            return round(1200 / raw) if raw not in (0, 0xFF) else None
+        return None if raw == 0xFFFFFFFF else raw
 
     # -- decoding. Every value from EEPROM is distrusted: a slot that was
     # -- never written holds whatever the chip was left with.
@@ -2752,11 +2874,72 @@ class uBITX_Link:
             self._cw_write_attempts = 0
             self._send_cw_write()
 
+    # FIX (2026-11-06): THE CALIBRATION AND BFOs, written for a restore from
+    # the config file. Same queue and acknowledgement as the keyer settings.
+    # All three are read by the firmware AS IT BOOTS, so they wait in
+    # model.settings_pending until a restart. Limits as globalvars'
+    # MASTER_CAL_BOUNDS, BFO_CAL_BOUNDS and CW_CAL_BOUNDS. The FACTORY copies
+    # are never written (Mark) -- they are not in this table.
+    STORED_LIMITS = {"master_cal": (-500000, 500000),
+                     "ssb_bfo": (11048000, 12010000),
+                     "cw_bfo": (11048000, 12010000)}
+
+    def set_stored(self, name, value):
+        """Writes the master calibration or a BFO to EEPROM. 4 bytes, low first;
+        the calibration as 32-bit two's complement, as the rig keeps it."""
+        low, high = self.STORED_LIMITS[name]
+        value = int(value)
+        if not low <= value <= high:
+            raise ValueError(f"{name} {value} outside {low}-{high}")
+        data = bytes(self.Freq_Encode(value & 0xFFFFFFFF))
+        spec = list(EEPROM.Mem_Address[name])
+        # FIX (2026-11-06): THE FIRMWARE'S CHECKSUM DOES NOT WRAP. KD8CEC's
+        # TS_CMD_WRITEMEM (ubitx_lcd_nextion.ino) compares the checksum BYTE
+        # with addr0 + addr1 + length as an int, so a write whose sum reaches
+        # 256 is always refused -- answered with -2 (65534), nothing written.
+        # The CW BFO at 252 with 4 bytes sums to 256: it could never be
+        # written this way. Its top byte is zero for any BFO (under 16.7 MHz),
+        # so it is written as THREE bytes, 252+0+3 = 255, provided the byte
+        # already there is zero -- known from the value just read.
+        spec, data = self._fit_firmware_checksum(name, spec, data)
+        address, command = self._eeprom_write(spec, 0, data)
+        queue = self.__dict__.setdefault("_cw_writes", [])
+        queue[:] = [w for w in queue if w[0] != name]
+        queue.append((name, value, address, command, "stored"))
+        self._model.cw_write_failed = None
+        if len(queue) == 1:
+            self._cw_write_attempts = 0
+            self._send_cw_write()
+
+    def _fit_firmware_checksum(self, name, spec, data):
+        """
+        (spec, data) shortened from the top until address + length < 256, as
+        the firmware needs (see set_stored). Only zero bytes are dropped, and
+        only where EEPROM already holds zeros there; otherwise ValueError --
+        the setting cannot be written over this command.
+        """
+        lsb, msb, length = spec[EEPROM.lsb], spec[EEPROM.msb], spec[EEPROM.memLength]
+        if lsb + msb + length < 256:
+            return spec, data
+        keep = 255 - lsb - msb
+        current = self._model.eeprom_settings.get(name)
+        if keep < 1 or any(data[keep:]) or current is None \
+                or (current & 0xFFFFFFFF) >> (8 * keep):
+            raise ValueError(f"{name}: the firmware refuses a write at {lsb + 256 * msb} "
+                             f"of {length} bytes, and it cannot be shortened safely")
+        spec[EEPROM.memLength] = keep
+        return spec, data[:keep]
+
     def _send_cw_write(self):
         queue = getattr(self, "_cw_writes", [])
         if not queue:
             return
-        self.sendCommandToMCU(bytes(queue[0][3]))
+        key, value, address, command, _ = queue[0]
+        # FIX (2026-11-06): each EEPROM write said, with its bytes -- to see
+        # what reached the rig when a setting does not stick.
+        print(f"[eeprom] writing {key} = {value} at {address} (0x{address:03x}): "
+              f"{bytes(command).hex(' ')}")
+        self.sendCommandToMCU(bytes(command))
         self._cw_write_timer = self.root.after(CHANNEL_WRITE_TIMEOUT_MS,
                                                self._cw_write_timed_out)
 
@@ -2783,8 +2966,14 @@ class uBITX_Link:
             self.root.after_cancel(self._cw_write_timer)
             self._cw_write_timer = None
         key, value, _, _, reboot = queue.pop(0)
+        print(f"[eeprom] {key} confirmed by the rig (address {address})")
         model = self._model
-        if reboot:
+        if reboot == "stored":
+            # What EEPROM now holds -- the dialog's radio column -- and in use
+            # after the next restart.
+            model.eeprom_settings[key] = value
+            model.settings_pending[key] = value
+        elif reboot:
             model.cw_pending[key] = value
         else:
             setattr(model, key, value)
@@ -2828,7 +3017,10 @@ class uBITX_Link:
 
     def _eeprom_write(self, spec, slot, data):
         """One TS_CMD_WRITEMEM command for a slot, and the address it writes."""
-        lsb = spec[EEPROM.lsb] + slot * spec[EEPROM.memOffset]
+        # FIX (2026-11-06): no slot offset for a single setting -- the
+        # calibration and BFO entries in EEPROM.py stop at the flag and have
+        # no memOffset to read.
+        lsb = spec[EEPROM.lsb] + (slot * spec[EEPROM.memOffset] if slot else 0)
         msb = spec[EEPROM.msb]
         length = spec[EEPROM.memLength]
         checksum = (lsb + msb + length) % 256
@@ -2922,6 +3114,32 @@ class uBITX_Link:
         try:
             address = int(str(value).strip())
         except ValueError:
+            return
+        # FIX (2026-11-06): A REFUSAL. The firmware answers -2 -- 65534 as
+        # reported -- when it rejects a write (a checksum it does not accept;
+        # see set_stored). Before, that matched nothing, so the write was
+        # retried twice and given up on, with no hint why. Now it fails the
+        # write outstanding at once, and says so. One outstanding write per
+        # queue: a keyer/settings write is taken to be the one refused if
+        # there is one, otherwise the channel write.
+        if address in (65534, -2):
+            print("[eeprom] the rig REFUSED a write (it answered -2)")
+            queue = getattr(self, "_cw_writes", [])
+            if queue:
+                if getattr(self, "_cw_write_timer", None) is not None:
+                    self.root.after_cancel(self._cw_write_timer)
+                    self._cw_write_timer = None
+                key = queue.pop(0)[0]
+                self._model.cw_write_failed = key
+                self._model.changed()
+                self._cw_write_attempts = 0
+                self.root.after(STEP_SETTLE_MS, self._send_cw_write)
+            elif getattr(self, "_channel_writes", None):
+                if self._channel_write_timer is not None:
+                    self.root.after_cancel(self._channel_write_timer)
+                    self._channel_write_timer = None
+                self._model.channels_write_failed.append(self._channel_writes[0][1])
+                self._finish_channel_write()
             return
         # FIX (2026-11-06): a keyer setting's write is acknowledged the same
         # way, by its address -- see set_cw.
@@ -3094,6 +3312,24 @@ class uBITX_Link:
 
         command = [self.toRadioCommandDict["TS_CMD_UBITX_REBOOT"], lsb1, lsb2, lsb3, lsb4, checksum]
         self.sendCommandToMCU(bytes(command))
+
+    def restart_rig(self):
+        """
+        FIX (2026-11-06): a restart AFTER connecting -- to fetch values that
+        did not arrive, or to make the rig read settings it takes only as it
+        boots. The rig sends everything again as it boots and the reader,
+        already running, takes it through the ordinary handlers.
+
+        THE TUNING PRESET AGAIN, as at connect (see __init__): the reboot puts
+        the rig's own back, and at a coarse one the rig rounds away fine
+        tuning steps. Sent at the same moment after the reboot command as at
+        connect.
+        """
+        self.reboot_ubitx()
+        self.root.after(int(REBOOT_SETTLE * 1000), lambda: self.Set_Tuning_Preset(1))
+        # The calibration and BFOs written are in use from this boot; the rig
+        # does not report them, so nothing else would clear them.
+        self._model.settings_pending.clear()
 
     def _since_reboot(self):
         """Seconds since the reboot command -- for UBITX_RIG_TIMING."""

@@ -1,24 +1,18 @@
-# Open items — ubitx_cec_desktop (2026-11-05)
+# Open items — ubitx_cec_desktop (2026-11-06)
 
 The short list. Detail for each is in TODO.md.
 
 ## The app
 
-- **CW tab wiring:**
-  - the keyer type (set from EEPROM), speed, sidetone and the two delays;
-  - three of them need a rig reboot, which the tab should offer, not do silently.
 - **Meters:** the S-meter and the power/SWR meter aren't wired to the rig's reports, so the scanner can't stop on a signal.
 - **RX tab:** ATT and IFS aren't wired.
-- **Lock, mute and TX off:** check on the rig that these report on/off and aren't just toggles.
-- **Setup, Log QSO, EEPROM backup and restore:** check what's still not read or saved. The MCU headroom is hard-coded in the link.
-- **Values that don't arrive at connect:** the app prints which ones are missing but doesn't ask the rig for them yet.
+- **Setup, Log QSO:** check what's still not read or saved. The MCU headroom is hard-coded in the link.
+- **Startup recovery:** a slow-booting rig is no longer called silent, and missing values are fetched by restarting it (confirmed 2026-11-06). Still to watch: the "skipped bytes" at startup -- the hex lines will show if reports run together.
 - **The SDR connection can stall the window** for half a second when the SDR stops answering. A thread would fix it.
 - **SDRoxide VFO A/B:**
   - read which VFO is active in SDRoxide, and B's frequency, so a change made there is known;
   - split itself probably deferred.
 - **SDRoxide vs. SDRoxide Brown on the Mac:** they have the same app name, so the app can start or attach to the wrong one. Pick one of the three options in TODO.
-- **Small station checks:**
-  - the decode strip when the window is resized.
 - **Low priority:**
   - `socket://` doesn't take an IPv6 address;
   - there's no way to give a command line for rigctld;

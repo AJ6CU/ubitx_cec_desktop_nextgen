@@ -204,14 +204,38 @@ rig and SDR++. Still to do, roughly in order of value:
 * **The meters.** `cp_`, `al_` (S-meter) and `vm_` (power and SWR) are
   unwired, so both meters are empty. Wiring them also lets the scanner stop
   on a signal, which it cannot do today.
-* **The CW tab** -- key type (`ck_`), speed (`vs_`), sidetone, the two delays
+* ~~**The CW tab**~~ DONE 2026-11-06, checked at the station (cw_edit.zip) -- key type (`ck_`), speed (`vs_`), sidetone, the two delays
   (`vy_`, `ve_`) and the offset switch (`ch_`). SEEN 2026-11-05: the Keyer
   segmented button is not set from EEPROM -- nothing on the tab is: its
   fields are typed-in placeholders ("500", "10", "250", "1000"), the keyer
   button is not even kept, and the model has no fields for these. Wiring
   needs model fields, the handlers storing (speed arrives as 1200/wpm,
   delays in 10 ms and 2 ms units, key type a word), refresh() showing them,
-  edits sending the setters. Also 2026-11-05: the Practice mode switch and
+  edits sending the setters.
+  STEP 1 DONE 2026-11-06 (cw_values.zip): the five values the rig sends
+  at connect are stored in the model (cw_key_type, cw_wpm, cw_delay_tx_ms,
+  cw_delay_rx_ms; cw_tone_reported beside cw_tone) in the operator's units,
+  and the tab shows them READ-ONLY, "--" until reported, key chosen on the
+  Keyer button (greyed). test_cw_values.py 7/7. To check at the station:
+  the values match the Nextion's, and what ck_ really sends (0/1/2 assumed).
+  Step 1 CONFIRMED at the station 2026-11-06: all values read correctly.
+  STEP 2 DONE 2026-11-06 (cw_edit.zip): the tab is editable -- Return or
+  leaving a field sends it, the Keyer button sends its choice; range shown
+  beside each field; refused (and put back) out of range; read-only when
+  locked or no rig. ubitx_link.set_cw replaces the five never-called
+  Set_CW_* (Set_CW_Speed's live command was a byte short). Speed and key
+  type: the live command (TS_CMD_WPM, TS_CMD_KEYTYPE) then the EEPROM write;
+  tone and delays: the EEPROM write only, using EEPROM.py's addresses. THE
+  MODEL CHANGES ON THE ACKNOWLEDGEMENT (vn_ names the address), one write
+  at a time, retried twice. Tone and delays are read only at boot, so they
+  wait in model.cw_pending -- shown in the field, a note says so, and a
+  "Restart rig" button offers the reboot (never automatic); the reports
+  after the boot clear them. The live cw_tone (the CW TX offset) is not
+  changed until then. Values as the rig stores them: delays in whole 2 ms /
+  10 ms, speed through the dot length (45 wpm reads back 44). Speed limited
+  to 5-60 wpm: the live command carries the dot length in one byte.
+  test_cw_values.py 18/18 (1/18 on the old files). CHECKED AT THE STATION
+  2026-11-06: the edits take, and Restart rig works. Also 2026-11-05: the Practice mode switch and
   the disabled Decoder button were REMOVED from the tab -- TX off on
   Operate is the one control, and decoding is DEC. Mostly WIRING: every setter
   already exists in the link -- `Set_CW_Tone`, `Set_CW_Keytype`,
@@ -244,6 +268,42 @@ rig and SDR++. Still to do, roughly in order of value:
 * **Log QSO, the Setup tab, EEPROM backup and restore.** Setup's fields do
   not yet read or save the configuration -- including the MCU headroom, which
   the link hardcodes as 0.04 while the settings file holds its own value.
+  *EEPROM backup, step 1 DONE 2026-11-06 (eeprom_backup.zip):* the "Radio
+  settings -- compare and copy" dialog shows REAL values. On opening it reads
+  master cal, SSB BFO, CW BFO and the factory cal, SSB BFO, CW speed and
+  sidetone from EEPROM (ubitx_link.read_settings: one read at a time, paced
+  and retried like the channel reads, never alongside them; the cal decoded
+  SIGNED); the radio's CW values are the ones reported at connect; the
+  config file's from configuration.py. Copy goes RADIO -> CONFIG FILE only
+  (ticked rows). test_eeprom_backup.py 7/7 (0/7 on the old files).
+  CONFIRMED at the station 2026-11-06: reading and copying to the file work.
+  *Step 2, restore, DONE 2026-11-06 (eeprom_restore.zip):* a direction
+  choice above the table (radio -> file, file -> radio); file -> radio
+  lists old -> new and asks before writing; CW values go through set_cw,
+  cal and BFOs through the new set_stored (limits from globalvars' bounds,
+  the cal as 32-bit two's complement), same write queue and acknowledgement.
+  All but speed/key type wait on a restart -- the dialog says which and
+  offers Restart rig; restart_rig clears the cal/BFO waits. Not while
+  locked or with no rig. FOUND: _eeprom_write read memOffset, which the cal
+  and BFO entries in EEPROM.py do not have -- it would have raised; fixed.
+  test_eeprom_backup.py 11/11. At the station: key type and master cal
+  restore and stick; THE CW BFO DID NOT.
+  WHY (KD8CEC source, ubitx_lcd_nextion.ino, TS_CMD_WRITEMEM): the firmware
+  compares the checksum BYTE with addr0 + addr1 + length as an int -- no
+  % 256 -- so any write whose sum reaches 256 is refused, answered -2
+  (65534), nothing written. The CW BFO at 252 with 4 bytes sums to 256.
+  FIX (cw_bfo_fix.zip): written as 3 bytes (252+0+3 = 255) -- its top byte
+  is zero for any BFO -- and only when the byte left alone is known zero
+  from the read; the -2 answer now fails the write at once and says so
+  (it used to be retried twice and given up on, with no reason). The same
+  limit explains the "broken tenth label slot": 0xFD + 2 + 5 = 260.
+  test_eeprom_backup.py 14/14 (11/14 on the old files). CONFIRMED at the
+  station 2026-11-06: the CW BFO restores and sticks. Backup and restore DONE. FACTORY VALUES ARE
+  NEVER WRITTEN from the app (Mark) -- read only. A full EEPROM image is out
+  of scope: other tools do that.
+  *To check:* the formats the config file keeps (defaultubitx_cec_desktop.py
+  not seen): copy writes numbers as ints and the key type as STRAIGHT /
+  IAMBICA / IAMBICB; reading accepts strings, numbers and "Iambic A".
 * ~~Launching the SDR at startup when autostart is set.~~ **Done.** An SDR
   already running is attached to and left running; one this application
   starts is stopped, disconnected and asked to quit, in that order, and is
@@ -715,7 +775,7 @@ again. Same fault, same cure: it is the adapter.
 low during the boot burst, reboot the rig once more to get the burst again
 -- ties in with the item below.
 
-**Ask the rig for values that have not arrived.** *Half done.*
+**Ask the rig for values that have not arrived.** *Done 2026-11-06; the late-answer fix confirmed at the station.*
 
 `_read_all_values()` is GONE -- 101 lines that blocked, counted to 26, timed
 out after five seconds and raised modal dialogs from inside the loop. The
@@ -730,7 +790,33 @@ inhibit -- are reported ONLY when not in their default state, and the rig
 comes up in all of them, so their silence is an answer; `RadioModel` starts in
 exactly those states.
 
-What is left: ASK for what has not arrived, rather than print it.
+~~What is left: ASK for what has not arrived, rather than print it.~~
+DONE 2026-11-06 (report_recovery.zip), by RESTARTING the rig -- it has no
+request for one value, it sends them all as it boots. `_check_rig_answered`
+restarts it when values are missing, checks again 2.5 s later, at most
+twice (RIG_REPORT_RETRIES), never while transmitting; what arrived the
+first time stays counted. `uBITX_Link.restart_rig()` = reboot + the fine
+tuning preset again, as at connect; the CW tab's Restart rig uses it too
+(before, it left the rig on its own coarse preset). test_report_recovery.py
+5/5. To check at the station: a normal connect still says "all 12 expected
+values arrived" with no restart -- if one of the twelve is NEVER sent by
+this firmware, every connect would restart twice, and that code should
+leave EXPECTED_REPORTS. Next: the "skipped N bytes" messages at startup.
+Seen 2026-11-06: `m.vs.val=100` eleven times, skipped. Mark: not a report
+that lost its "p" -- the ill-formed run-together case his old validateKey
+caught ("looks like val"). The skipped/dropped messages now print the raw
+bytes in hex, 0xff included (rig_hex.zip), to see the terminators before
+deciding the recovery.
+FOUND 2026-11-06 (rig_late.zip): a rig still BOOTING was called silent.
+It held its line low for 17 352 zero bytes (~3 s) before the first report,
+past the 2.5 s answer check -- so rig_state went "silent", the backup
+dialog said "no radio" over a working rig, and the missing-values restart
+never ran. Now: bytes arriving (zeros included, uBITX_Link.bytes_seen) mean
+wait, up to RIG_ANSWER_MAX_MS (10 s); and a rig called silent that then
+reports is put back to connected (_rig_answered_late, from refresh) and its
+values checked. The repeated vs/vy/ve/cn lines are the rig re-sending after
+the app's tuning-preset command -- noise, not a fault. test_report_recovery
+9/9 (6/9 on the old files).
 
 **This matters more than it looks, because the reboot is not portable.** The
 whole arrangement rests on rebooting the rig: the burst is what the boot
@@ -1223,7 +1309,8 @@ Five PRs prepared 2026-09-28/29 (sdroxide_prs_bundle.zip, with instructions):
    a help-style window, raised; Log QSO, About, SDR settings and the
    radio-settings compare open centred over the app, not at the screen's
    top left (_over_app). Log QSO stays live while locked (Mark: right).
-   test_lock_and_quiet.py 10/10, test_dialog_place.py 4/4.
+   test_lock_and_quiet.py 10/10, test_dialog_place.py 4/4. All three
+   confirmed at the station 2026-11-06, the hover included.
    *Document (Mark, 2026-11-05):* the settings that stay in SDRoxide's own
    window because rigctl cannot reach them -- the APF lift, the NR engine,
    and the rest -- collected in one place in the user documentation. App side once it exists:

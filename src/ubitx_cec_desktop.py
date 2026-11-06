@@ -123,6 +123,13 @@ TURN_ACCUMULATE_SECONDS = 0.6
 # How long the rig has to answer the startup dump before it counts as silent.
 # The reports normally begin within a fraction of a second.
 RIG_ANSWER_MS = 2500
+# FIX (2026-11-06): how many times the rig is restarted at connect to fetch
+# values its startup burst lost -- see _check_rig_answered.
+RIG_REPORT_RETRIES = 2
+# FIX (2026-11-06): how long a rig that is SENDING (zeros, while it boots) is
+# waited for before it is called silent -- seen on the station: 17 352 zero
+# bytes, about three seconds, before the first report.
+RIG_ANSWER_MAX_MS = 10000
 
 # One row of a Setup group, and the controls in it. Fixed so the rows keep
 # the same pitch whatever kind of control they hold.
@@ -1157,6 +1164,9 @@ class UbitxCecDesktop(sCTk):
         self.rig_state, self.rig_note = "connected", f"connected on {value}"
         print(f"[rig] {self.rig_note}")
         # Give the rig time to answer the startup dump before believing it.
+        self._report_retries = 0
+        self._answer_waited_ms = 0
+        self._connected_note = self.rig_note
         self.after(RIG_ANSWER_MS, self._check_rig_answered)
         return True
 
@@ -1200,8 +1210,37 @@ class UbitxCecDesktop(sCTk):
             # It is answering. Say which of the values the interface needs
             # have not arrived -- the rig sends them as it boots and the
             # reader takes what comes, so a gap is something to ask for
-            # rather than an error. Printed for now; asking comes later.
-            self.connection.check_expected_reports()
+            # rather than an error.
+            missing = self.connection.check_expected_reports()
+            # FIX (2026-11-06): AND ASK FOR THEM, by restarting the rig. It
+            # does not answer a request for one value -- it sends them all as
+            # it boots -- so a restart is the only way to ask. A report torn
+            # in the startup burst (bytes skipped, a frame dropped) is the
+            # usual cause, and a second burst fills it in: values that
+            # arrived the first time stay counted, so only what is still
+            # missing matters. Twice at most, then it is said and left. Not
+            # while transmitting: a restart drops the rig out of it.
+            if (missing and self._report_retries < RIG_REPORT_RETRIES
+                    and not self.model.transmitting):
+                self._report_retries += 1
+                print(f"[rig] restarting the rig for the missing values "
+                      f"({self._report_retries} of {RIG_REPORT_RETRIES})")
+                self.connection.restart_rig()
+                self.after(RIG_ANSWER_MS, self._check_rig_answered)
+            elif missing:
+                print("[rig] still missing after restarting -- shown as not known")
+            return
+        # FIX (2026-11-06): NOT SILENT WHILE IT IS STILL BOOTING. The rig
+        # holds its line low as it starts, and took longer than this check's
+        # 2.5 s on the station -- so it was called silent, the backup dialog
+        # said "no radio", and the missing-values restart never ran. Bytes
+        # arriving, even zeros, mean wait; up to RIG_ANSWER_MAX_MS.
+        self._answer_waited_ms += RIG_ANSWER_MS
+        if (getattr(self.connection, "bytes_seen", 0)
+                and self._answer_waited_ms < RIG_ANSWER_MAX_MS):
+            print(f"[rig] the rig is still starting -- waiting "
+                  f"({self._answer_waited_ms / 1000:.1f} s so far)")
+            self.after(RIG_ANSWER_MS, self._check_rig_answered)
             return
         self.rig_state = "silent"
         self.rig_note = ("the port opened but the radio is not answering -- "
@@ -1209,6 +1248,20 @@ class UbitxCecDesktop(sCTk):
         print(f"[rig] {self.rig_note}")
         self._show_rig_status()
         self.notebook.set("Setup")
+
+    def _rig_answered_late(self):
+        """
+        FIX (2026-11-06): A RIG CALLED SILENT THAT ANSWERS AFTER ALL is
+        connected -- the first report puts it right, rather than the window
+        going on saying "no radio" over a working rig. Its values are checked
+        as on a normal connect, the missing-values restart included.
+        """
+        if self.rig_state == "silent" and self.model.reports:
+            self.rig_state = "connected"
+            self.rig_note = getattr(self, "_connected_note", "connected")
+            print(f"[rig] the rig answered after all -- {self.rig_note}")
+            self._show_rig_status()
+            self.after(RIG_ANSWER_MS, self._check_rig_answered)
 
     def _show_rig_status(self):
         """Puts the connection's state on the Setup page and the status line."""
@@ -3509,7 +3562,8 @@ class UbitxCecDesktop(sCTk):
 
         names = {"cw_tone": "tone", "cw_delay_tx_ms": "delay to TX",
                  "cw_delay_rx_ms": "delay to RX", "cw_wpm": "speed",
-                 "cw_key_type": "keyer"}
+                 "cw_key_type": "keyer", "master_cal": "master calibration",
+                 "ssb_bfo": "SSB BFO", "cw_bfo": "CW BFO"}
         notes = []
         if m.cw_pending:
             which = " and ".join(names[k] for k in sorted(m.cw_pending))
@@ -3580,7 +3634,7 @@ class UbitxCecDesktop(sCTk):
         """
         if self.model.locked or not self.model.cw_pending:
             return
-        self.connection.reboot_ubitx()
+        self.connection.restart_rig()   # FIX (2026-11-06): the preset again too
 
     def _build_setup(self, page):
         """
@@ -4683,6 +4737,66 @@ class UbitxCecDesktop(sCTk):
         sCTkButtonSecondary(body, text="Close", width=80,
                             command=win.destroy).pack(anchor="w", pady=(14, 0))
 
+    # FIX (2026-11-06): THE BACKUP TABLE'S ROWS, real ones. Each: a label,
+    # the factory value's EEPROM name (or None -- the rig keeps no factory
+    # copy), where the radio's value comes from, and the configuration
+    # file's getter and setter. FACTORY VALUES ARE READ ONLY: nothing in the
+    # app writes them (Mark).
+    BACKUP_ROWS = (
+        ("Master calibration", "factory_master_cal", ("eeprom", "master_cal"),
+         "get_Master_Cal", "set_Master_Cal"),
+        ("SSB BFO", "factory_ssb_bfo", ("eeprom", "ssb_bfo"), "get_SSB_BFO", "set_SSB_BFO"),
+        ("CW BFO", None, ("eeprom", "cw_bfo"), "get_CW_BFO", "set_CW_BFO"),
+        ("Key type", None, ("model", "cw_key_type"), "get_Keytype", "set_Keytype"),
+        ("CW speed (wpm)", "factory_cw_wpm", ("model", "cw_wpm"), "get_CW_Speed", "set_CW_Speed"),
+        ("Sidetone (Hz)", "factory_cw_sidetone", ("model", "cw_tone"), "get_CW_Tone", "set_CW_Tone"),
+        ("Delay to TX (ms)", None, ("model", "cw_delay_tx_ms"),
+         "get_CW_Delay_Before_TX", "set_CW_Delay_Before_TX"),
+        ("Delay to RX (ms)", None, ("model", "cw_delay_rx_ms"),
+         "get_CW_Delay_Returning_to_RX", "set_CW_Delay_Returning_to_RX"),
+    )
+
+    def _backup_values(self):
+        """
+        Each row's (factory, radio, config file) values, None where not known.
+        Key types as the rig's words (STRAIGHT ...) whatever the file holds.
+        """
+        m = self.model
+        rows = []
+        for label, factory, (where, name), getter, _ in self.BACKUP_ROWS:
+            f = m.eeprom_settings.get(factory) if factory else None
+            if where == "eeprom":
+                r = m.eeprom_settings.get(name)
+            elif name == "cw_tone":
+                r = m.cw_tone if m.cw_tone_reported else None
+            else:
+                r = getattr(m, name)
+            try:
+                c = getattr(gv.config, getter)()
+            except Exception:                   # not in the file at all
+                c = None
+            rows.append((f, r, self._backup_normal(name, c)))
+        return rows
+
+    def _backup_normal(self, name, value):
+        """A config file value in the radio's terms, so the two compare."""
+        if value in (None, ""):
+            return None
+        if name == "cw_key_type":
+            text = str(value).strip().upper().replace(" ", "")
+            return {"0": "STRAIGHT", "1": "IAMBICA", "2": "IAMBICB"}.get(text, text)
+        try:
+            return int(str(value).strip())
+        except ValueError:
+            return str(value)
+
+    def _backup_text(self, name, value):
+        if value is None:
+            return "—"
+        if name == "cw_key_type":
+            return self.CW_KEYERS.get(value, str(value))
+        return str(value)
+
     def _eeprom_backup(self):
         """
         Compare and copy the radio's stored settings.
@@ -4691,78 +4805,220 @@ class UbitxCecDesktop(sCTk):
         radio now, and what is in the configuration file -- shown side by side
         so the differences are visible before anything is written.
 
-        THE DIRECTION IS ABOVE THE COLUMNS, not below them in two dropdowns.
-        Source and destination pickers under the table mean reading the
-        values, then looking away to work out which way "Copy" goes. Putting
-        the arrow in the header keeps it where the eye already is, and the
-        two columns it names are the two being compared.
+        FIX (2026-11-06): REAL VALUES, both directions. The table was a
+        mock-up of made-up numbers. The radio's calibration, BFOs and factory
+        values are read from its EEPROM as the dialog opens (they fill in
+        over a second or so); its CW values are the ones it reported at
+        connect; the file's are the file's. COPY: the radio into the config
+        file (a backup), or the config file into the radio (a restore --
+        shown old -> new and confirmed first, the rig's word changing the
+        radio column, a restart offered for what the rig reads only as it
+        boots). The FACTORY column is never written (Mark).
         """
         win = sCTkToplevel(self)
         win.title("Radio settings — compare and copy")
-        self._over_app(win, 700, 420)
+        self._over_app(win, 700, 440)
         win.transient(self)
 
         body = sCTkFrame(win, fg_color="transparent", border_width=0)
         body.pack(fill="both", expand=True, padx=16, pady=14)
 
+        # THE DIRECTION IS ABOVE THE COLUMNS, where the eye already is. The
+        # two this table can do, as one choice -- not two drop-downs that
+        # could name the factory column as a destination.
+        # FIX (2026-11-06): Mark's wording.
+        TO_FILE, TO_RADIO = "From the radio  →  Config file", "Config file  →  To the radio"
         direction = sCTkFrame(body, fg_color="transparent", border_width=0)
         direction.pack(anchor="w", pady=(0, 8))
         sCTkLabelTertiary(direction, text="copy").pack(side="left", padx=(0, 6))
-        sCTkComboBox(direction, values=["Config file", "Factory", "Radio"],
-                     width=130).pack(side="left")
-        sCTkLabelPrimary(direction, text="  →  ").pack(side="left")
-        sCTkComboBox(direction, values=["Radio", "Config file"],
-                     width=130).pack(side="left")
+        way = sCTkSegmentedButton(direction, values=[TO_FILE, TO_RADIO],
+                                  command=lambda _v: repaint())
+        way.set(TO_FILE)
+        way.pack(side="left")
         sCTkLabelTertiary(direction, text="   differences are marked").pack(side="left", padx=8)
 
         table = sCTkFrame(body, border_width=1, corner_radius=6)
         table.pack(fill="both", expand=True)
-
         head = sCTkFrame(table, fg_color="transparent", border_width=0)
         head.pack(fill="x", padx=8, pady=(6, 2))
         for text, width in (("", 30), ("Setting", 150), ("Factory", 120),
                             ("In the radio", 130), ("Config file", 130)):
-            sCTkLabelTertiary(head, text=text, width=width,
-                              anchor="w").pack(side="left")
+            sCTkLabelTertiary(head, text=text, width=width, anchor="w").pack(side="left")
+        rows_frame = sCTkFrame(table, fg_color="transparent", border_width=0)
+        rows_frame.pack(fill="x")
 
-        rows = (
-            ("Master calibration", "85351", "148711", "—"),
-            ("SSB BFO", "11056992", "11056342", "—"),
-            ("CW BFO", "—", "11056042", "—"),
-            ("Key type", "—", "Straight", "Straight"),
-            ("CW speed (wpm)", "15", "5", "10"),
-            ("Sidetone (Hz)", "600", "600", "600"),
-            ("Delay to TX (ms)", "—", "0", "500"),
-            ("Delay to RX (ms)", "—", "600", "5000"),
-        )
-        for name, factory, radio_value, config in rows:
-            line = sCTkFrame(table, fg_color="transparent", border_width=0)
-            line.pack(fill="x", padx=8, pady=1)
-            # A CHECKBOX, not a switch. A switch says "this setting is on";
-            # picking rows out of a table is selection, and a tick reads as
-            # selected at a glance where a coloured track does not.
-            sCTkCheckBox(line, text="", width=30).pack(side="left")
-            sCTkLabelTertiary(line, text=name, width=150, anchor="w").pack(side="left")
-            sCTkLabelTertiary(line, text=factory, width=120, anchor="w").pack(side="left")
-            # A value that differs from the one beside it is the whole reason
-            # for looking at this table, so it is the thing that stands out.
-            differs = radio_value != config and "—" not in (radio_value, config)
-            # FIX: the TIER marks it -- Secondary against Tertiary -- with
-            # no font of its own; the bold it also had is gone with the
-            # sizes (see _build_operate).
-            cell = sCTkLabelSecondary if differs else sCTkLabelTertiary
-            cell(line, text=radio_value, width=130,
-                 anchor="w").pack(side="left")
-            cell(line, text=config, width=130,
-                 anchor="w").pack(side="left")
+        # The ticks, kept across repaints -- rows are rebuilt as values arrive.
+        ticks = [tk.BooleanVar(value=False) for _ in self.BACKUP_ROWS]
+        state = {"shown": None}
+
+        status_line = sCTkFrame(body, fg_color="transparent", border_width=0)
+        status_line.pack(anchor="w", pady=(8, 0))
+        status = sCTkLabelTertiary(status_line, text="", wraplength=560, justify="left")
+        status.pack(side="left")
+        restart = sCTkButtonSecondary(status_line, text="Restart rig",
+                                      command=lambda: self.connection.restart_rig())
+
+        def to_radio():
+            return way.get() == TO_RADIO
+
+        def radio_live():
+            return self.rig_state == "connected" and not self.model.locked
+
+        def repaint():
+            state["shown"] = None
+            paint()
+
+        def paint():
+            values = self._backup_values()
+            m = self.model
+            pending = sorted(set(m.settings_pending) | set(m.cw_pending))
+            shown = (tuple(values), m.settings_state, tuple(m.settings_failed),
+                     self.rig_state, m.locked, to_radio(), tuple(pending),
+                     m.cw_write_failed)
+            if shown == state["shown"]:
+                return
+            state["shown"] = shown
+            for child in rows_frame.winfo_children():
+                child.destroy()
+            for i, ((label, _, (_, name), _, _), (f, r, c)) in enumerate(
+                    zip(self.BACKUP_ROWS, values)):
+                line = sCTkFrame(rows_frame, fg_color="transparent", border_width=0)
+                line.pack(fill="x", padx=8, pady=1)
+                # A CHECKBOX, not a switch: picking rows is selection. Only
+                # a row with a value to copy FROM can be ticked -- and copying
+                # into the radio needs a radio to write to, unlocked.
+                box = sCTkCheckBox(line, text="", width=30, variable=ticks[i])
+                box.pack(side="left")
+                source = c if to_radio() else r
+                if source is None or (to_radio() and not radio_live()):
+                    ticks[i].set(False)
+                    box.configure(state="disabled")
+                sCTkLabelTertiary(line, text=label, width=150, anchor="w").pack(side="left")
+                sCTkLabelTertiary(line, text=self._backup_text(name, f), width=120,
+                                  anchor="w").pack(side="left")
+                # A value that differs from the one beside it is the reason
+                # for looking at this table: the TIER marks it, no font.
+                differs = r is not None and c is not None and r != c
+                cell = sCTkLabelSecondary if differs else sCTkLabelTertiary
+                cell(line, text=self._backup_text(name, r), width=130,
+                     anchor="w").pack(side="left")
+                cell(line, text=self._backup_text(name, c), width=130,
+                     anchor="w").pack(side="left")
+            notes = []
+            if self.rig_state != "connected":
+                # FIX (2026-11-06): WHY, from the connection's own note --
+                # "no radio" covered a port that would not open and a rig
+                # that did not answer alike.
+                notes.append(f"Radio not available ({self.rig_note}) -- only the "
+                             f"file's values are shown.")
+            elif m.settings_state == "reading":
+                notes.append("Reading the radio's calibration and factory values…")
+            elif m.settings_failed:
+                notes.append("The radio did not answer for: " + ", ".join(m.settings_failed))
+            if m.locked and to_radio():
+                notes.append(self.LOCKED_NOTE)
+            if pending:
+                labels = [lbl for lbl, _, (_, name), _, _ in self.BACKUP_ROWS if name in pending]
+                notes.append("Saved in the radio, used after a restart: " + ", ".join(labels) + ".")
+            if m.cw_write_failed:
+                notes.append("The radio did not confirm a write -- it may not be saved.")
+            status.configure(text="  ".join(notes))
+            if pending and radio_live():
+                restart.pack(side="left", padx=(10, 0))
+            else:
+                restart.pack_forget()
+
+        def watch():
+            if not win.winfo_exists():
+                return
+            paint()
+            win.after(250, watch)
+
+        def select_all():
+            on = every.get()
+            for i, (f, r, c) in enumerate(self._backup_values()):
+                source = c if to_radio() else r
+                ticks[i].set(on and source is not None
+                             and (not to_radio() or radio_live()))
+
+        def copy():
+            """The ticked rows, in the direction chosen."""
+            if to_radio():
+                restore()
+                return
+            # The radio's values into the configuration file.
+            values = self._backup_values()
+            copied = []
+            for i, ((label, _, (_, name), _, setter), (f, r, c)) in enumerate(
+                    zip(self.BACKUP_ROWS, values)):
+                if ticks[i].get() and r is not None:
+                    getattr(gv.config, setter)(r)
+                    copied.append(label)
+                    ticks[i].set(False)
+            state["shown"] = None
+            paint()
+            status.configure(text=("Copied to the config file: " + ", ".join(copied))
+                             if copied else "Nothing ticked.")
+
+        def restore():
+            """
+            The ticked rows' config file values into the radio -- after
+            showing old -> new and asking: these can put the rig off
+            frequency or silence it. Rows already the same are left out.
+            Sent through the link's writers, which refuse a value out of
+            range; the radio column changes when the rig acknowledges.
+            """
+            if not radio_live():
+                return
+            changes = []
+            for i, ((label, _, (_, name), _, _), (f, r, c)) in enumerate(
+                    zip(self.BACKUP_ROWS, self._backup_values())):
+                if ticks[i].get() and c is not None and c != r:
+                    changes.append((label, name, r, c))
+            if not changes:
+                status.configure(text="Nothing to write: the ticked rows already match.")
+                return
+            lines = "\n".join(f"{label}:  {self._backup_text(name, r)}  →  "
+                               f"{self._backup_text(name, c)}"
+                               for label, name, r, c in changes)
+            sure = sCTkMessagebox.askyesno(
+                "Write to the radio",
+                f"Write these to the radio's EEPROM?\n\n{lines}\n\n"
+                "Calibration, BFOs, tone and delays take effect after a restart.",
+                yes_text="Write", no_text="Cancel", master=win)
+            if not sure:
+                return
+            refused = []
+            for label, name, r, c in changes:
+                try:
+                    if name in uBITX_Link.STORED_LIMITS:
+                        self.connection.set_stored(name, c)
+                    else:
+                        self.connection.set_cw(name, c)
+                except (ValueError, KeyError):
+                    refused.append(label)
+            for t in ticks:
+                t.set(False)
+            repaint()
+            if refused:
+                status.configure(text="Not written (out of range, or a place the "
+                                      "rig cannot be written): " + ", ".join(refused))
 
         footer = sCTkFrame(body, fg_color="transparent", border_width=0)
         footer.pack(anchor="w", pady=(10, 0))
-        sCTkCheckBox(footer, text="Select all").pack(side="left", padx=(0, 16))
+        every = tk.BooleanVar(value=False)
+        sCTkCheckBox(footer, text="Select all", variable=every,
+                     command=select_all).pack(side="left", padx=(0, 16))
         sCTkButtonPrimary(footer, text="Copy selected", width=120,
-                          command=win.destroy).pack(side="left", padx=(0, 6))
-        sCTkButtonSecondary(footer, text="Cancel", width=80,
+                          command=copy).pack(side="left", padx=(0, 6))
+        sCTkButtonSecondary(footer, text="Close", width=80,
                             command=win.destroy).pack(side="left")
+
+        # Read the radio as the dialog opens: the values may have changed
+        # since the last time, and the read costs a second at most.
+        if self.rig_state == "connected":
+            self.connection.read_settings()
+        watch()
 
     def _over_app(self, win, width, height):
         """
@@ -4843,6 +5099,8 @@ class UbitxCecDesktop(sCTk):
             return
 
         s = self.model
+
+        self._rig_answered_late()
 
         # The two frequency panels re-read themselves.
         self.panel_rx.update_view(s)

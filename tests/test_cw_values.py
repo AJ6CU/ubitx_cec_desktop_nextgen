@@ -203,7 +203,8 @@ def tab(rig_state="connected", **model):
                               _cw_fields={k: Entry() for k in ("cw_tone", "cw_wpm", "cw_delay_tx_ms", "cw_delay_rx_ms")},
                               _cw_keyer=Seg(), _cw_note=Note(), _cw_restart=Note())
     w.connection = types.SimpleNamespace(set_cw=lambda k, v: asked.append((k, v)),
-                                         reboot_ubitx=lambda: asked.append("reboot"))
+                                         reboot_ubitx=lambda: asked.append("reboot"),
+                                         restart_rig=lambda: asked.append("reboot"))
     base = dict(cw_tone=600, cw_tone_reported=False, cw_key_type=None, cw_wpm=None,
                 cw_delay_tx_ms=None, cw_delay_rx_ms=None, cw_pending={}, cw_write_failed=None, locked=False)
     base.update(model); w.model = types.SimpleNamespace(**base)

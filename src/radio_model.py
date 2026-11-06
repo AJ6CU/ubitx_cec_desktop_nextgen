@@ -169,6 +169,16 @@ class RadioModel:
         # as it boots -- {key: value} until the rig restarts and reports them.
         self.cw_pending = {}
         self.cw_write_failed = None    # the setting whose write went unconfirmed
+
+        # FIX (2026-11-06): the radio's stored settings that it does not
+        # report -- calibration, BFOs and the factory copies -- read from
+        # EEPROM for backup (ubitx_link.read_settings). {name: value}; a name
+        # absent is not read (yet), None is read but empty.
+        self.eeprom_settings = {}
+        self.settings_state = "unread"      # "unread", "reading" or "read"
+        self.settings_failed = []
+        # Calibration and BFOs written and acknowledged, in use after a restart.
+        self.settings_pending = {}
         # Added to the tone to give the full offset. Reported by the rig from
         # its EEPROM (vh_); zero unless the operator has trimmed it.
         self.cw_tweak = 0
