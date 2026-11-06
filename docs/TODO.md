@@ -298,7 +298,12 @@ rig and SDR++. Still to do, roughly in order of value:
   (it used to be retried twice and given up on, with no reason). The same
   limit explains the "broken tenth label slot": 0xFD + 2 + 5 = 260.
   test_eeprom_backup.py 14/14 (11/14 on the old files). CONFIRMED at the
-  station 2026-11-06: the CW BFO restores and sticks. Backup and restore DONE. FACTORY VALUES ARE
+  station 2026-11-06: the CW BFO restores and sticks. Backup and restore DONE.
+  Added 2026-11-06 (factory_to_radio.zip): a third direction, FACTORY ->
+  TO THE RADIO (Mark) -- master cal, SSB BFO, CW speed and sidetone, the
+  rows the rig keeps a factory copy of; same confirm and restart. No
+  factory -> file: factory -> radio then radio -> file does it. The factory
+  copy is still never written. FACTORY VALUES ARE
   NEVER WRITTEN from the app (Mark) -- read only. A full EEPROM image is out
   of scope: other tools do that.
   *To check:* the formats the config file keeps (defaultubitx_cec_desktop.py

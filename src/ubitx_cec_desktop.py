@@ -4828,10 +4828,15 @@ class UbitxCecDesktop(sCTk):
         # could name the factory column as a destination.
         # FIX (2026-11-06): Mark's wording.
         TO_FILE, TO_RADIO = "From the radio  →  Config file", "Config file  →  To the radio"
+        # FIX (2026-11-06): THE FACTORY VALUES BACK INTO THE RADIO (Mark) --
+        # read from the factory copy, written to the radio's own settings;
+        # the factory copy itself is still never written. No factory -> file:
+        # factory -> radio, then radio -> file, does that.
+        FROM_FACTORY = "Factory  →  To the radio"
         direction = sCTkFrame(body, fg_color="transparent", border_width=0)
         direction.pack(anchor="w", pady=(0, 8))
         sCTkLabelTertiary(direction, text="copy").pack(side="left", padx=(0, 6))
-        way = sCTkSegmentedButton(direction, values=[TO_FILE, TO_RADIO],
+        way = sCTkSegmentedButton(direction, values=[TO_FILE, TO_RADIO, FROM_FACTORY],
                                   command=lambda _v: repaint())
         way.set(TO_FILE)
         way.pack(side="left")
@@ -4859,7 +4864,11 @@ class UbitxCecDesktop(sCTk):
                                       command=lambda: self.connection.restart_rig())
 
         def to_radio():
-            return way.get() == TO_RADIO
+            return way.get() in (TO_RADIO, FROM_FACTORY)
+
+        def source_of(f, r, c):
+            """The column the chosen direction copies FROM."""
+            return {TO_FILE: r, TO_RADIO: c, FROM_FACTORY: f}[way.get()]
 
         def radio_live():
             return self.rig_state == "connected" and not self.model.locked
@@ -4873,7 +4882,7 @@ class UbitxCecDesktop(sCTk):
             m = self.model
             pending = sorted(set(m.settings_pending) | set(m.cw_pending))
             shown = (tuple(values), m.settings_state, tuple(m.settings_failed),
-                     self.rig_state, m.locked, to_radio(), tuple(pending),
+                     self.rig_state, m.locked, way.get(), tuple(pending),
                      m.cw_write_failed)
             if shown == state["shown"]:
                 return
@@ -4889,7 +4898,7 @@ class UbitxCecDesktop(sCTk):
                 # into the radio needs a radio to write to, unlocked.
                 box = sCTkCheckBox(line, text="", width=30, variable=ticks[i])
                 box.pack(side="left")
-                source = c if to_radio() else r
+                source = source_of(f, r, c)
                 if source is None or (to_radio() and not radio_live()):
                     ticks[i].set(False)
                     box.configure(state="disabled")
@@ -4937,7 +4946,7 @@ class UbitxCecDesktop(sCTk):
         def select_all():
             on = every.get()
             for i, (f, r, c) in enumerate(self._backup_values()):
-                source = c if to_radio() else r
+                source = source_of(f, r, c)
                 ticks[i].set(on and source is not None
                              and (not to_radio() or radio_live()))
 
@@ -4962,7 +4971,8 @@ class UbitxCecDesktop(sCTk):
 
         def restore():
             """
-            The ticked rows' config file values into the radio -- after
+            The ticked rows' config file -- or factory -- values into the
+            radio, whichever direction is chosen -- after
             showing old -> new and asking: these can put the rig off
             frequency or silence it. Rows already the same are left out.
             Sent through the link's writers, which refuse a value out of
@@ -4973,8 +4983,9 @@ class UbitxCecDesktop(sCTk):
             changes = []
             for i, ((label, _, (_, name), _, _), (f, r, c)) in enumerate(
                     zip(self.BACKUP_ROWS, self._backup_values())):
-                if ticks[i].get() and c is not None and c != r:
-                    changes.append((label, name, r, c))
+                source = source_of(f, r, c)
+                if ticks[i].get() and source is not None and source != r:
+                    changes.append((label, name, r, source))
             if not changes:
                 status.configure(text="Nothing to write: the ticked rows already match.")
                 return
