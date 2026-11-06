@@ -156,6 +156,19 @@ class RadioModel:
         self.channels_write_failed = []
 
         self.cw_tone = 600             # Hz. The TX offset in a CW mode.
+        # FIX (2026-11-06): THE REST OF THE KEYER, as the rig reports it from
+        # EEPROM at connect -- None until reported, so the CW tab can say
+        # "not reported" rather than show a made-up value. In the operator's
+        # units: the rig's own are converted where they arrive (ubitx_link).
+        self.cw_tone_reported = False  # cw_tone above is a default until then
+        self.cw_key_type = None        # "STRAIGHT", "IAMBICA" or "IAMBICB"
+        self.cw_wpm = None             # words per minute
+        self.cw_delay_tx_ms = None     # from key down to the first element
+        self.cw_delay_rx_ms = None     # from the last element back to receive
+        # Written to EEPROM and acknowledged, but read by the firmware only
+        # as it boots -- {key: value} until the rig restarts and reports them.
+        self.cw_pending = {}
+        self.cw_write_failed = None    # the setting whose write went unconfirmed
         # Added to the tone to give the full offset. Reported by the rig from
         # its EEPROM (vh_); zero unless the operator has trimmed it.
         self.cw_tweak = 0

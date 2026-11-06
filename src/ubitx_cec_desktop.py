@@ -68,7 +68,7 @@ from scanner import Scanner
 import sdr_programs
 import sdr_controls
 from app_paths import config_path, shown as shown_path
-from sdr_programs import profile_for, choices as sdr_choices
+from sdr_programs import profile_for, choices as sdr_choices, MUTE
 from ubitx_link import uBITX_Link
 
 from scustomtkinter import (
@@ -447,6 +447,71 @@ class SmallKnob(sCTkFrame):
         self.caption.configure(text=text)
 
 
+class HoverNote:
+    """
+    FIX (2026-11-06): a short note shown under a widget while the pointer
+    rests on it -- the app had none. A borderless sCTkToplevel with one
+    tertiary label, so it takes the theme like everything else; shown after
+    HOVER_DELAY_MS and gone as the pointer leaves or the widget is pressed.
+    """
+    HOVER_DELAY_MS = 600
+
+    def __init__(self, widget, text):
+        self.widget, self.text = widget, text
+        self._timer = self._window = None
+        widget.bind("<Enter>", self._arm, add="+")
+        widget.bind("<Leave>", self._hide, add="+")
+        widget.bind("<ButtonPress>", self._hide, add="+")
+
+    def _arm(self, _event=None):
+        self._cancel()
+        self._timer = self.widget.after(self.HOVER_DELAY_MS, self._show)
+
+    def _cancel(self):
+        if self._timer is not None:
+            try:
+                self.widget.after_cancel(self._timer)
+            except Exception:
+                pass
+            self._timer = None
+
+    def _show(self):
+        self._timer = None
+        if self._window is not None or not self.widget.winfo_exists():
+            return
+        window = sCTkToplevel(self.widget)
+        # FIX (2026-11-06): it never showed on the Mac. An overrideredirect
+        # window made after the main one opens BEHIND it there, so the note
+        # was drawn out of sight. Given the Mac's help-window style (what
+        # IDLE's tooltips use: floats on top, takes no focus), placed, then
+        # raised and kept on top.
+        try:
+            window.tk.call("::tk::unsupported::MacWindowStyle", "style",
+                           window._w, "help", "noActivates")
+        except Exception:
+            pass                                      # not a Mac
+        window.overrideredirect(True)
+        sCTkLabelTertiary(window, text=self.text, justify="left",
+                          wraplength=320).pack(padx=8, pady=6)
+        window.geometry(f"+{self.widget.winfo_rootx()}"
+                        f"+{self.widget.winfo_rooty() + self.widget.winfo_height() + 4}")
+        try:
+            window.attributes("-topmost", True)
+        except Exception:
+            pass
+        window.lift()
+        self._window = window
+
+    def _hide(self, _event=None):
+        self._cancel()
+        if self._window is not None:
+            try:
+                self._window.destroy()
+            except Exception:
+                pass
+            self._window = None
+
+
 class AidPopup(sCTkToplevel):
     """
     One listening aid's controls -- AGC, NR, ... -- in a small window of its
@@ -689,6 +754,14 @@ class RolePanel(sCTkFrame):
             app.tx_off_button = sCTkButtonSecondary(
                 under, text="TX off", command=lambda: app._toggle("tx_inhibit"), **size)
             app.tx_off_button.pack(side="left", padx=(0, 4))
+            # FIX (2026-11-06): what it really is. KD8CEC's TX OFF keeps the
+            # T/R relays in receive and lets the rest of transmit happen --
+            # its startTx() skips only digitalWrite(TX_RX, 1) -- so it is a
+            # practice mode: checked on the rig, no relay click with it on.
+            HoverNote(app.tx_off_button,
+                      "Practice mode: the rig keys and the sidetone sounds, "
+                      "but its relays stay in receive -- nothing goes to the "
+                      "antenna. (KD8CEC's TX OFF.)")
         self.note = sCTkLabelTertiary(under, text="")
         self.note.pack(side="left", padx=(4, 0))
 
@@ -1265,9 +1338,7 @@ class UbitxCecDesktop(sCTk):
             self.sdr_status.set_alarm_state(True)
 
         # What the SDR cannot do is GREYED, not left to fail when pressed.
-        has_filter = "filter" in self.sdr.capabilities
-        for btn in self.filter_buttons:
-            btn.state("normal" if has_filter else "disabled")
+        self._show_filter_buttons()
         # The listening aids: every lamp repainted afresh, and each open
         # pop-up rebuilt -- another SDR, or another demodulator, has other
         # controls for the same function.
@@ -1291,6 +1362,12 @@ class UbitxCecDesktop(sCTk):
         if connected and self._listen_source == "Rig" and not self._listen_chosen:
             self.receiver_picker.set("SDR")
             self._set_listen_source("SDR")
+        elif connected:
+            # FIX: an SDR connecting while you listen through the rig is
+            # silenced -- see _sdr_quiet_for_rig. A fresh connection, so
+            # whatever was remembered from the last one is forgotten first.
+            self._sdr_muted_before = None
+            self._sdr_quiet_for_rig()
 
         self.audio_note.configure(
             text="Listening through the SDR quiets the rig's speaker. "
@@ -1353,8 +1430,9 @@ class UbitxCecDesktop(sCTk):
         return bool(self.sdr.dsp_on(key))
 
     def _aid_live(self, key):
-        """Whether a function can be used just now -- see SDR_Link.dsp_blocked."""
-        return not self.sdr.dsp_blocked(key)
+        """Whether a function can be used just now -- see SDR_Link.dsp_blocked.
+        FIX: and not while the rig is locked -- see _show_lock."""
+        return not self.model.locked and not self.sdr.dsp_blocked(key)
 
     def _show_lamps(self):
         """
@@ -1423,7 +1501,8 @@ class UbitxCecDesktop(sCTk):
         note = self._dsp_notes.get(key)
         if note is None:
             return
-        text = self.sdr.dsp_blocked(key) or ""
+        text = (self.LOCKED_NOTE if self.model.locked
+                else self.sdr.dsp_blocked(key) or "")
         note.configure(text=text)
         if text:
             note.pack(side="left", padx=(4, 0))
@@ -1437,7 +1516,8 @@ class UbitxCecDesktop(sCTk):
         pressed while on -- see _show_lamps.
         """
         on = value not in (0, False, "0", "off", "", None)
-        self.sdr.set_dsp(function, on)
+        if not self.model.locked:           # FIX: see _show_lock
+            self.sdr.set_dsp(function, on)
         # The switch put back to what the SDR reports: if it refused the
         # change, the switch would otherwise stay where the click left it.
         switch = self.dsp_switches[function]
@@ -1646,7 +1726,8 @@ class UbitxCecDesktop(sCTk):
                     knob.set_position(value)
                 # Shown either way; turnable only where the SDR takes it --
                 # the SSB demodulator's NR scheme is SDRangel's to set.
-                knob.set_live(self.sdr.dsp_adjustable(function, name))
+                knob.set_live(self.sdr.dsp_adjustable(function, name)
+                              and not self.model.locked)    # FIX: _show_lock
                 knob.show(self.sdr.dsp_setting_text(function, name, value))
             else:
                 knob.set_live(False)
@@ -1660,7 +1741,7 @@ class UbitxCecDesktop(sCTk):
         (SDR_Link.rf_gain_toward); the pointer is put there. Shown at once and
         sent when the knob settles.
         """
-        if self.sdr.rf_gain_blocked():
+        if self.sdr.rf_gain_blocked() or self.model.locked:
             return
         shown = self._knob_values.get("rf_gain", self.sdr.rf_gain)
         target = self.sdr.rf_gain_toward(shown, value)
@@ -1694,7 +1775,7 @@ class UbitxCecDesktop(sCTk):
             self._knob_values.pop("rf_gain", None)
             self.rf_gain_knob.show("")
         reason = self.sdr.rf_gain_blocked()
-        self.rf_gain_knob.set_live(reason is None)
+        self.rf_gain_knob.set_live(reason is None and not self.model.locked)
         self._set_rf_gain_note(reason or "")
 
     # How much decoded text the strip keeps -- more than the widest window
@@ -1792,6 +1873,10 @@ class UbitxCecDesktop(sCTk):
         SDR_Link.set_volume). The level before is kept a moment, so a
         double-click -- whose first click steps the knob -- can put it back.
         """
+        if self.model.locked:               # FIX: see _show_lock
+            self._volume_shown = None
+            self._show_volume()             # the pointer back where it was
+            return
         self._volume_before = (time.monotonic(), self._volume_level)
         self._volume_level = value
         self.sdr.set_volume(value)
@@ -1802,6 +1887,8 @@ class UbitxCecDesktop(sCTk):
         Double-click on the volume knob: mute, or unmute. Its first click has
         already stepped the knob down one; that step is undone.
         """
+        if self.model.locked:               # FIX: see _show_lock
+            return
         before = self._volume_before
         if before and time.monotonic() - before[0] < 0.8:
             self._volume_level = before[1]
@@ -2168,8 +2255,9 @@ class UbitxCecDesktop(sCTk):
             return btn
 
         self._toggles["split"] = tx_button("Split", lambda: self._toggle("split"), 0)
-        tx_button("A \u21c4 B", self._swap, 1)
-        tx_button("A\u2192B", self._copy_AtoB, 2)
+        # FIX: kept, so the lock can grey them -- see _show_lock.
+        self._vfo_buttons = [tx_button("A \u21c4 B", self._swap, 1),
+                             tx_button("A\u2192B", self._copy_AtoB, 2)]
         # Log QSO at the end of the row: what you do when a contact ends.
         log = sCTkButtonPrimary(self.offset_row, text="Log QSO", height=26, command=self._log_qso)
         log.grid(row=0, column=3, columnspan=3, padx=(10, 2), pady=2, sticky="ew")
@@ -3253,6 +3341,9 @@ class UbitxCecDesktop(sCTk):
         if self.scanner.running:
             self.scanner.stop("stopped")
             return
+        if self.model.locked:               # FIX: see _show_lock
+            self._notify(self.LOCKED_NOTE)
+            return
         self._read_dwell()
         name = self.set_picker.get()
         self._scan_set_name = name
@@ -3296,6 +3387,9 @@ class UbitxCecDesktop(sCTk):
 
         Tuning by hand ends a scan: the operator has chosen a channel.
         """
+        if self.model.locked:               # FIX: see _show_lock
+            self._notify(self.LOCKED_NOTE)
+            return
         if self.scanner.running:
             self.scanner.stop("stopped -- you chose a channel")
         entries = self._set_entries(self.set_picker.get())
@@ -3336,26 +3430,157 @@ class UbitxCecDesktop(sCTk):
                  "speed and tone while operating, sometimes mid-QSO.",
             wraplength=640, justify="left").pack(anchor="w", pady=(2, 12))
 
-        for label, value in (("Tone (Hz)", "500"), ("Speed (wpm)", "10"),
-                             ("Delay to TX (ms)", "250"),
-                             ("Delay to RX (ms)", "1000")):
+        # FIX (2026-11-06): THE RIG'S VALUES, read from its EEPROM at connect
+        # (vt_, vs_, ve_, vy_, ck_) -- the fields were typed-in placeholders
+        # and the keyer button was not even kept. "--" until the rig has
+        # reported. EDITABLE: Return (or leaving the field) sends a number,
+        # choosing a key sends it -- see _cw_entered and _cw_keyer_chosen.
+        self._cw_fields = {}
+        for key, label in (("cw_tone", "Tone (Hz)"), ("cw_wpm", "Speed (wpm)"),
+                           ("cw_delay_tx_ms", "Delay to TX (ms)"),
+                           ("cw_delay_rx_ms", "Delay to RX (ms)")):
             line = sCTkFrame(wrap, fg_color="transparent", border_width=0)
             line.pack(anchor="w", pady=3)
             sCTkLabelSecondary(line, text=label, width=130).pack(side="left")
             entry = sCTkEntryPrimary(line, width=80)
             entry.pack(side="left")
-            entry.insert(0, value)
+            entry.bind("<Return>", lambda _e, k=key: self._cw_entered(k))
+            entry.bind("<FocusOut>", lambda _e, k=key: self._cw_entered(k))
+            low, high = uBITX_Link.CW_LIMITS[key]
+            sCTkLabelTertiary(line, text=f"{low}-{high}").pack(side="left", padx=(8, 0))
+            self._cw_fields[key] = entry
 
         line = sCTkFrame(wrap, fg_color="transparent", border_width=0)
         line.pack(anchor="w", pady=3)
         sCTkLabelSecondary(line, text="Keyer", width=130).pack(side="left")
-        sCTkSegmentedButton(line, values=["Straight", "Iambic A",
-                                          "Iambic B"]).pack(side="left")
+        self._cw_keyer = sCTkSegmentedButton(line, values=list(self.CW_KEYERS.values()),
+                                             command=self._cw_keyer_chosen)
+        self._cw_keyer.pack(side="left")
+
+        # What the edits have done: saved and waiting for a restart, or not
+        # confirmed. Tone and the delays are read by the rig only as it boots,
+        # so the restart is OFFERED here, never done on its own -- it takes
+        # the rig off the air for a few seconds.
+        line = sCTkFrame(wrap, fg_color="transparent", border_width=0)
+        line.pack(anchor="w", pady=(10, 0))
+        self._cw_note = sCTkLabelTertiary(line, text="", wraplength=520, justify="left")
+        self._cw_note.pack(side="left")
+        self._cw_restart = sCTkButtonSecondary(line, text="Restart rig",
+                                               command=self._cw_restart_rig)
+        self._cw_shown = None
+        self._show_cw()
 
         # FIX: the "Practice mode" switch is gone -- TX off on Operate does
         # that job, and two controls for one rig setting can disagree.
         # FIX: the "Decoder" button and "awaiting a backend that decodes" are
         # gone: decoding is DEC on Operate, through the SDR.
+
+    # The rig's key types, as the keyer button names them.
+    CW_KEYERS = {"STRAIGHT": "Straight", "IAMBICA": "Iambic A", "IAMBICB": "Iambic B"}
+
+    def _show_cw(self):
+        """
+        FIX (2026-11-06): the CW tab shows what the rig reported -- tone,
+        speed, the two delays and the key type. Repainted only when one of
+        them changes. A value not reported shows "--", and no key is chosen,
+        rather than a default that looks like the rig's.
+        """
+        if not hasattr(self, "_cw_fields"):
+            return                                  # the tab not built yet
+        values = self._cw_values()
+        m = self.model
+        # Editable only with a rig to send to, and not while it is locked.
+        live = self._ready and self.rig_state == "connected" and not m.locked
+        shown = (values, m.cw_key_type, tuple(sorted(m.cw_pending.items())),
+                 m.cw_write_failed, live)
+        if shown == self._cw_shown:
+            return
+        self._cw_shown = shown
+        for key, entry in self._cw_fields.items():
+            # A field waiting on a restart shows the value saved, since that
+            # is what the operator set and what the rig will use.
+            value = m.cw_pending.get(key, values[key])
+            entry.configure(state="normal")
+            entry.delete(0, "end")
+            entry.insert(0, "--" if value is None else str(value))
+            entry.configure(state="normal" if live else "readonly")
+        self._cw_keyer.set(self.CW_KEYERS.get(m.cw_key_type, ""))
+        self._cw_keyer.configure(state="normal" if live else "disabled")
+
+        names = {"cw_tone": "tone", "cw_delay_tx_ms": "delay to TX",
+                 "cw_delay_rx_ms": "delay to RX", "cw_wpm": "speed",
+                 "cw_key_type": "keyer"}
+        notes = []
+        if m.cw_pending:
+            which = " and ".join(names[k] for k in sorted(m.cw_pending))
+            notes.append(f"New {which} saved in the rig -- it uses them after "
+                         f"a restart, which takes it off the air for a few seconds.")
+        if m.cw_write_failed:
+            notes.append(f"The rig did not confirm the new {names[m.cw_write_failed]}"
+                         f" -- it may not be saved.")
+        if m.locked:
+            notes.append(self.LOCKED_NOTE)
+        self._cw_note.configure(text="  ".join(notes))
+        if m.cw_pending and live:
+            self._cw_restart.pack(side="left", padx=(10, 0))
+        else:
+            self._cw_restart.pack_forget()
+
+    def _cw_values(self):
+        """The rig's keyer numbers as reported, None where not yet."""
+        m = self.model
+        return {"cw_tone": m.cw_tone if m.cw_tone_reported else None,
+                "cw_wpm": m.cw_wpm, "cw_delay_tx_ms": m.cw_delay_tx_ms,
+                "cw_delay_rx_ms": m.cw_delay_rx_ms}
+
+    def _cw_entered(self, key):
+        """
+        FIX (2026-11-06): a number typed on the CW tab goes to the rig. One
+        not a number, or out of range, is refused and the field put back.
+        Unchanged, nothing is sent -- leaving the field calls this too.
+        """
+        if not self._cw_shown or not self._cw_shown[-1]:
+            return                                # not live: see _show_cw
+        entry = self._cw_fields[key]
+        text = entry.get().strip()
+        current = self.model.cw_pending.get(key, self._cw_values()[key])
+        low, high = uBITX_Link.CW_LIMITS[key]
+        try:
+            value = int(text)
+        except ValueError:
+            value = None
+        if value is not None and value == current:
+            return
+        if value is None or not low <= value <= high:
+            if text not in ("", "--"):
+                self._cw_note.configure(text=f"{text!r} is not between {low} and {high}.")
+            self._cw_shown = None                        # put the field back
+            self._show_cw()
+            return
+        self.connection.set_cw(key, value)
+
+    def _cw_keyer_chosen(self, label):
+        """FIX (2026-11-06): choosing a key sends it; the rig's word sets the button."""
+        word = next((w for w, name in self.CW_KEYERS.items() if name == label), None)
+        if not self._cw_shown or not self._cw_shown[-1] or word is None:
+            self._cw_shown = None
+            self._show_cw()
+            return
+        if word != self.model.cw_key_type:
+            self.connection.set_cw("cw_key_type", word)
+        # Shown as the rig has it until the write is acknowledged.
+        self._cw_shown = None
+        self._show_cw()
+
+    def _cw_restart_rig(self):
+        """
+        FIX (2026-11-06): restarts the rig so it reads the saved tone and
+        delays. Asked for by the operator, never done on its own. The rig
+        reports everything as it boots, which clears the waiting values.
+        """
+        if self.model.locked or not self.model.cw_pending:
+            return
+        self.connection.reboot_ubitx()
 
     def _build_setup(self, page):
         """
@@ -3917,7 +4142,7 @@ class UbitxCecDesktop(sCTk):
         """
         win = sCTkToplevel(self)
         win.title("SDR settings")
-        win.geometry("470x440")
+        self._over_app(win, 470, 440)
         win.transient(self)
 
         body = sCTkFrame(win, fg_color="transparent", border_width=0)
@@ -4073,10 +4298,67 @@ class UbitxCecDesktop(sCTk):
             self.sdr.connect_when_ready()
 
     # -- behaviour --------------------------------------------------------
+    # FIX (2026-11-06): what a control says while the rig is locked.
+    LOCKED_NOTE = "locked -- unlock to change"
+    # The latched controls that stay live under lock: Lock itself, and TX off
+    # -- practice mode is wanted most when nothing else may move.
+    LIVE_WHEN_LOCKED = ("locked", "tx_inhibit")
+
+    def _show_lock(self):
+        """
+        FIX (2026-11-06): THE RIG'S LOCK REACHES EVERY CONTROL HERE. It froze
+        only the frequency dials; the band and mode, the VFO buttons, split,
+        RIT, the filter, the listening aids and their knobs, volume, RF gain,
+        the span and the receiver choice all went on working. Now they are
+        greyed while locked, and their handlers refuse as well, for anything
+        that slips past. Lock and TX off stay live. What changes IN THE SDR
+        still shows here -- the SDR cannot be locked from here.
+        Repainted only when the lock changes.
+        """
+        locked = bool(self.model.locked)
+        if locked == getattr(self, "_lock_shown", None):
+            return
+        self._lock_shown = locked
+        state = "disabled" if locked else "normal"
+        self._show_filter_buttons()
+        widgets = [btn for key, btn in self._toggles.items()
+                    if key not in self.LIVE_WHEN_LOCKED]
+        widgets += list(getattr(self, "_vfo_buttons", []))
+        for name in ("band_picker", "mode_picker", "receiver_picker"):
+            if getattr(self, name, None) is not None:
+                widgets.append(getattr(self, name))
+        for widget in widgets:
+            try:
+                widget.configure(state=state)
+            except Exception:
+                try:
+                    widget.state(state)
+                except Exception:
+                    pass
+        self.volume_knob.set_live(self._listen_source == "SDR" and not locked)
+        self._offset_state = None           # the split offsets: see refresh
+        self._lamp_live.clear()             # lamps, pop-up switches and notes
+        self._switch_states.clear()
+        self._bandwidth_shown = None
+        self._show_rf_gain()
+        self._draw_dsp_knobs()
+
+    def _show_filter_buttons(self):
+        """
+        FIX (2026-11-06): wide, narrow and reset live only where the SDR has a
+        filter AND the rig is not locked -- one place for both, so connecting
+        (the SDR status button) no longer brought them back under lock.
+        """
+        live = "filter" in self.sdr.capabilities and not self.model.locked
+        for btn in getattr(self, "filter_buttons", []):
+            btn.state("normal" if live else "disabled")
+
     def _toggle(self, key):
         """
         Sends a command. Does NOT change the state -- the reply does that.
         """
+        if self.model.locked and key not in self.LIVE_WHEN_LOCKED:
+            return                          # FIX: see _show_lock
         # Through the CONNECTION, not the stub. Both were live and writing
         # to the same model, which is how a mode set by one and confirmed by
         # the other ends up arguing with itself.
@@ -4112,6 +4394,9 @@ class UbitxCecDesktop(sCTk):
         The command is a TOGGLE, so it is sent only when the rig is not
         already where it needs to be, judged by model.muted.
         """
+        if by_operator and self.model.locked:   # FIX: see _show_lock
+            self.receiver_picker.set(self._listen_source)
+            return
         self._listen_source = source
         if by_operator:
             self._listen_chosen = True
@@ -4121,8 +4406,34 @@ class UbitxCecDesktop(sCTk):
         # startup would cancel the first.
         if self._ready and self.model.muted != rig_should_be_muted:
             self.connection.Toggle_Speaker()
-        self.volume_knob.set_live(source == "SDR")
+        self.volume_knob.set_live(source == "SDR" and not self.model.locked)
+        # FIX (2026-11-06): THE SDR IS SILENCED WHILE LISTENING THROUGH THE
+        # RIG, and given back as it was -- its own mute, or not -- when the
+        # SDR is chosen again. Only the rig's speaker was switched before, so
+        # in rig mode both were heard. Only an SDR with a mute of its own:
+        # without one, muting means the COMPUTER's output, which is not ours
+        # to silence for a choice of receiver.
+        self._sdr_quiet_for_rig()
         self.refresh()
+
+    def _sdr_quiet_for_rig(self):
+        """
+        Mutes the SDR in rig mode, remembering whether it was muted; in SDR
+        mode puts that back. Safe to call again: each side acts once.
+        """
+        if not (self._ready and self.sdr.connected
+                and MUTE in self.sdr.capabilities):
+            return
+        if self._listen_source == "Rig":
+            if getattr(self, "_sdr_muted_before", None) is None:
+                self._sdr_muted_before = bool(self.sdr.muted)
+                if not self.sdr.muted:
+                    self.sdr.set_muted(True)
+        else:
+            before = getattr(self, "_sdr_muted_before", None)
+            self._sdr_muted_before = None
+            if before is not None and bool(self.sdr.muted) != before:
+                self.sdr.set_muted(before)
 
     def _split_offset(self, khz):
         """
@@ -4163,6 +4474,8 @@ class UbitxCecDesktop(sCTk):
         looked right for a moment and then reverted, because the rig's own
         reports say where the frequencies actually are.
         """
+        if self.model.locked:               # FIX: see _show_lock
+            return
         self.connection.toggle_vfo()
 
     def _copy_AtoB(self):
@@ -4177,6 +4490,8 @@ class UbitxCecDesktop(sCTk):
         borrow the transmit write uses: the rig only writes to whichever VFO
         is primary, so the other one is made primary for a moment.
         """
+        if self.model.locked:               # FIX: see _show_lock
+            return
         self.connection.copy_active_to_other()
 
     def _on_mode(self, value):
@@ -4188,6 +4503,9 @@ class UbitxCecDesktop(sCTk):
         #
         # set_mode_everywhere, not set_mode: in split the transmit VFO needs
         # the new mode as well, or it goes on transmitting in the old one.
+        if self.model.locked:               # FIX: see _show_lock
+            self.mode_picker.set(self.model.mode)
+            return
         self.connection.set_mode_everywhere(value)
 
     # What the band picker shows out of every ham band.
@@ -4212,6 +4530,9 @@ class UbitxCecDesktop(sCTk):
         self.band_picker._current_index = below - 1
 
     def _on_band(self, *_):
+        if self.model.locked:               # FIX: see _show_lock
+            self.band_picker.set(self.model.band_name() or self.OFF_BAND)
+            return
         label = self.band_picker.get()
         # From out of band, DOWN arrives one band too low -- see
         # _aim_band_arrows -- and is put on the band just below instead.
@@ -4253,11 +4574,11 @@ class UbitxCecDesktop(sCTk):
     def _bandwidth_moved(self, value):
         """The bandwidth slider moved: the width shown at once, sent when it settles."""
         choices = self.sdr.bandwidth_choices()
-        if not choices:
+        if not choices or self.model.locked:    # FIX: locked -- see _show_lock
             return
         width = choices[max(0, min(len(choices) - 1, int(round(value))))]
         self.bandwidth_label.configure(text=self._width_text(width))
-        self._bandwidth_shown = (tuple(choices), width, True)
+        self._bandwidth_shown = (tuple(choices), width, True, False)
         # Held while it is sent: the SDR reports the old width until then,
         # and the slider would jump back mid-drag.
         self._bandwidth_held_until = time.monotonic() + 1.5
@@ -4270,13 +4591,15 @@ class UbitxCecDesktop(sCTk):
             return
         choices = tuple(self.sdr.bandwidth_choices())
         width = self.sdr.bandwidth if choices else None
-        shown = (choices, width, bool(choices))
+        locked = bool(self.model.locked)
+        shown = (choices, width, bool(choices), locked)
         if shown == self._bandwidth_shown:
             return
         self._bandwidth_shown = shown
         if choices:
             steps = max(1, len(choices) - 1)
-            slider.configure(from_=0, to=steps, number_of_steps=steps, state="normal")
+            slider.configure(from_=0, to=steps, number_of_steps=steps,
+                             state="disabled" if locked else "normal")
             nearest = min(range(len(choices)), key=lambda i: abs(choices[i] - (width or 0)))
             slider.set(nearest)
             self.bandwidth_label.configure(text=self._width_text(width or choices[nearest]))
@@ -4288,7 +4611,8 @@ class UbitxCecDesktop(sCTk):
         """Back to the configured default width for the current mode."""
         # The SDR's, not the rig's -- the uBITX has no filter command. The
         # defaults come from the configuration, so they match the Setup page.
-        self.sdr.reset_filter()
+        if not self.model.locked:           # FIX: see _show_lock
+            self.sdr.reset_filter()
 
     # How far one press of "wide" or "narrow" moves the filter.
     #
@@ -4305,6 +4629,8 @@ class UbitxCecDesktop(sCTk):
 
     def _filter(self, direction):
         """One step wider (+1) or narrower (-1), sized for the mode and width."""
+        if self.model.locked:               # FIX: see _show_lock
+            return
         width = int(self.model.filter_hz or 0)
         mode = str(self.model.mode_of(self.model.rx_vfo)).upper()
         if not mode.startswith("CW"):
@@ -4331,7 +4657,7 @@ class UbitxCecDesktop(sCTk):
         """
         win = sCTkToplevel(self)
         win.title("About")
-        win.geometry("520x300")
+        self._over_app(win, 520, 300)
         win.transient(self)
 
         body = sCTkFrame(win, fg_color="transparent", border_width=0)
@@ -4373,7 +4699,7 @@ class UbitxCecDesktop(sCTk):
         """
         win = sCTkToplevel(self)
         win.title("Radio settings — compare and copy")
-        win.geometry("700x420")
+        self._over_app(win, 700, 420)
         win.transient(self)
 
         body = sCTkFrame(win, fg_color="transparent", border_width=0)
@@ -4438,6 +4764,20 @@ class UbitxCecDesktop(sCTk):
         sCTkButtonSecondary(footer, text="Cancel", width=80,
                             command=win.destroy).pack(side="left")
 
+    def _over_app(self, win, width, height):
+        """
+        FIX (2026-11-06): the app's dialogs -- Log QSO, About, SDR settings,
+        the radio-settings compare -- opened at the top left of the screen,
+        since only their size was given. Now centred over the app's window,
+        kept on the screen it is on.
+        """
+        self.update_idletasks()
+        x = self.winfo_rootx() + (self.winfo_width() - width) // 2
+        y = self.winfo_rooty() + (self.winfo_height() - height) // 3
+        x = max(0, min(x, self.winfo_screenwidth() - width))
+        y = max(0, min(y, self.winfo_screenheight() - height))
+        win.geometry(f"{width}x{height}+{x}+{y}")
+
     def _log_qso(self):
         """
         The log dialog: everything known is filled in, and the only field
@@ -4445,7 +4785,7 @@ class UbitxCecDesktop(sCTk):
         """
         win = sCTkToplevel(self)
         win.title("Log QSO")
-        win.geometry("340x300")
+        self._over_app(win, 340, 300)
         win.transient(self)
 
         body = sCTkFrame(win, fg_color="transparent", border_width=0)
@@ -4507,6 +4847,8 @@ class UbitxCecDesktop(sCTk):
         # The two frequency panels re-read themselves.
         self.panel_rx.update_view(s)
         self.panel_tx.update_view(s)
+        self._show_lock()
+        self._show_cw()          # FIX (2026-11-06): the keyer, as reported
 
         # Latched controls read as lit or unlit.
         # FIX: PRESSED, not recoloured. Setting fg_color was overwritten
@@ -4533,10 +4875,12 @@ class UbitxCecDesktop(sCTk):
 
         # The split offsets are live only in split. state() repaints, so it
         # is called only when the answer changes.
-        if self._offset_state != s.split:
-            self._offset_state = s.split
+        # FIX: and not while locked -- see _show_lock.
+        live = bool(s.split) and not s.locked
+        if self._offset_state != live:
+            self._offset_state = live
             for btn in self._offset_buttons:
-                btn.state("normal" if s.split else "disabled")
+                btn.state("normal" if live else "disabled")
 
         if s.split:
             delta = s.split_delta_hz()

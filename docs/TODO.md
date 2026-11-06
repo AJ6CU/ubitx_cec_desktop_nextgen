@@ -68,6 +68,20 @@ back into an interface that did not exist yet. It now stays quiet and only
 user-driven paths emit, matching CustomTkinter. `sCTkDialRange.set()`,
 `sCTkDialSelector.set()` and `sCTkSelector` are worth the same check.
 
+**`sCTkOptionMenu*`'s border redraw forces a whole-window layout** (found
+2026-11-06, cProfile of the app's startup). `sctk_optionmenu_border_mixin.
+_redraw_border` calls `update_idletasks()`, so one `configure()` of an option
+menu lays out the entire window there and then -- 2.2 s at the app's startup,
+almost all of it CustomTkinter scrollbars redrawing. Redraw on `<Configure>`
+instead, or measure without forcing a layout. The app now avoids it at
+startup (the Channels tab's set menu is set only once the tab is shown), but
+any configure while the layout is stale pays it.
+
+**Labelled frames are scrollable frames, and those are expensive to build.**
+Each `CTkScrollableFrame` costs ~0.18 s, mostly its scrollbar -- the Setup
+tab's five labelled boxes, whose scrollbars are hidden anyway, are most of its
+1.7 s. A labelled frame that does not scroll could skip the scrollable frame.
+
 **Should `sCTkTextboxSecondary` have a border?** It has `border_width: 0` and
 no `border_color`, which is deliberate -- it is how it differs from Primary,
 which has a visible frame. Setting a border colour in the Designer therefore
@@ -221,11 +235,10 @@ rig and SDR++. Still to do, roughly in order of value:
   * **"Copy VFO A to B on split" is a SETTING, not the rig's** -- it belongs
     with the configuration, not on this tab's rig controls.
 * **The RX tab** -- ATT (`vf_`) and IFS (`ci_`, `vi_`), the same way.
-* **Lock, mute and TX-stop are handled as toggles.** RIT and split turned out
-  to report their state (`1`/`0`); these probably do too. Press each and read
-  the console. Mute matters most: choosing SDR++ as the receiver silences the
-  rig by toggling it, judged by `model.muted`, which starts out assuming the
-  speaker is on.
+* ~~Lock, mute and TX-stop are handled as toggles.~~ DONE 2026-11-06: all
+  three report their STATE, checked on the rig -- lock 1/0, TX off 1/0,
+  speaker 1 in SDR mode (muted) and 0 in speaker mode. The handlers read it
+  now, as split and RIT do (rig_states.zip, test_rig_states.py 6/6).
 * ~~The CW offset switch (`ch_`)~~ -- DROPPED 2026-09-27: not needed with
   receive and transmit shown side by side; each panel says what it is.
 * **Log QSO, the Setup tab, EEPROM backup and restore.** Setup's fields do
@@ -822,8 +835,8 @@ TWO SPECIAL CASES KEPT, both drawn sizes rather than label tiers (Mark's
 decision): the frequency display's `FREQ_FONT_SIZE` (56) and the dials'
 end labels, `RANGE_KNOB_LABEL_FONT` -- which `_range_canvas_size` also uses to
 measure the room a dial needs.
-*To look at:* About and Log QSO's value labels are Secondary; Tertiary if
-they look large.
+About and Log QSO's value labels stay Secondary -- checked, fine (Mark,
+2026-11-06).
 Setup reworked the same day: the bottom row in halves, Logbook (two fields
 a line, Format and Backup in one column) and "Other Settings" (three
 buttons a line); a CW port line in the SDR group (see SDR settings, 1).
@@ -855,7 +868,8 @@ buttons a line); a CW port line in the SDR group (see SDR settings, 1).
   below 160 m or above 10 m, to that end band). The spinbox steps from the
   position of the last value it showed from its list, so the application
   sets that position (_aim_band_arrows) and corrects DOWN in _on_band --
-  the library is unchanged. *To check at the station.*
+  the library is unchanged. CONFIRMED 2026-11-06: "—" shown off-band, and
+  the arrows go to a real band.
   (Library idea, not needed: a way to tell sCTkSpinbox where stepping
   starts, instead of the application setting its _current_index.)
 - DONE: a **Defaults** button in each listening-aid pop-up that has known
@@ -889,7 +903,8 @@ choice when its list changes -- notes, "The Morse decoder"). The decoder's
 window still shows stopped, UDP off and its own source: it is not told of
 REST changes. FIX: the strip now fills from the left and scrolls left once
 full, holding as much as its width allows.
-*Still to check:* resizing the window.
+CONFIRMED 2026-11-06: resizing the window -- the strip refits to its new
+width.
 FIX (2026-11-05): the strip's Courier went with the other fonts, so the line
 is now FITTED BY MEASURING the text in the label's own font
 (`_decode_tail`), not by counting characters -- a count from one letter's
@@ -1173,8 +1188,8 @@ Five PRs prepared 2026-09-28/29 (sdroxide_prs_bundle.zip, with instructions):
    ways and whether Brown draws a TX marker in split (its manual says only
    XIT does).
    *RIT display:* Brown draws the RIT offset on its panadapter (a dashed dial
-   line and a labelled bracket) whenever its RIT is on -- which our `J`
-   already turns on. To look at next time RIT is used.
+   line and a labelled bracket) whenever its RIT is on, which our `J` turns
+   on. CONFIRMED 2026-11-06: it shows with RIT on at the rig.
    *A second receiver (Mark, 2026-11-05):* Brown's SUB is a second receiver
    in the same dongle's stream, in the right ear -- in split, the TX side
    while the main listens to the DX. Not reachable over rigctl ("SUB" there
@@ -1183,6 +1198,32 @@ Five PRs prepared 2026-09-28/29 (sdroxide_prs_bundle.zip, with instructions):
    sits -- asked in an issue first, like #491. A second DONGLE is a second
    radio tab in Brown, its own waterfall and audio; nothing for the app to
    drive there yet.
+   *Startup speed (2026-11-06):* the rig's start-up values arrived ~7 s after
+   connecting though the rig sends them at ~2 s: they sat in the serial
+   buffer while the window's constructor ran (UBITX_RIG_TIMING in
+   ubitx_link.py prints when). Fixed in the app (channels_lazy.zip): the
+   channel table, its editable columns and its set menu are set only while
+   the Channels tab shows. Opening Channels the first time now pays the
+   table's fill. CONFIRMED 2026-11-06: first byte read at +2.64 s, was
+   +6.85. Library causes in "Library code" above.
+   *Lock, TX off and rig mode (2026-11-06, lock_quiet.zip):* the rig's LOCK
+   now greys every control in the app that changes the rig or the SDR --
+   band, mode, A/B, A->B, split, RIT and the offsets, the filter, the lamps
+   and their pop-up knobs, volume, RF gain, the span, the receiver choice,
+   channel tuning and scans -- and their handlers refuse too; Lock and TX off
+   stay live. THE SDR RULES (Mark): a tune, mode or RIT change made in the SDR
+   still goes to the rig while locked -- what is received has changed -- and
+   everything changed in the SDR shows. TX OFF is KD8CEC's PRACTICE MODE (its startTx() skips only the T/R
+   relay; confirmed, no relay click): a hover says so, name kept. RIG MODE now
+   mutes an SDR that has its own mute, and SDR mode gives its mute back as it
+   was. Checked at the station 2026-11-06; three fixes after
+   (lock_fixes.zip): the SDR status button no longer brings the filter
+   buttons back under lock (one place, _show_filter_buttons, for capability
+   and lock); the TX off hover was drawn behind the window on the Mac -- now
+   a help-style window, raised; Log QSO, About, SDR settings and the
+   radio-settings compare open centred over the app, not at the screen's
+   top left (_over_app). Log QSO stays live while locked (Mark: right).
+   test_lock_and_quiet.py 10/10, test_dialog_place.py 4/4.
    *Document (Mark, 2026-11-05):* the settings that stay in SDRoxide's own
    window because rigctl cannot reach them -- the APF lift, the NR engine,
    and the rest -- collected in one place in the user documentation. App side once it exists:
@@ -1301,15 +1342,10 @@ upstream's. Checked in the source only, not yet against the two programs.
    SDR settings box should say so, so users know to check the advanced
    setting -- otherwise a program that starts from an unexpected place, or
    will not start, has no visible cause.
-4. **SDRoxide started muted: the app shows it unmuted.** Found 2026-11-04.
-   If SDRoxide is already muted when the app connects, the app assumes it
-   is not, and the two are out of step until the mute is changed from one
-   side. Not yet traced. Where to look first: `discover()` reads `u MUTE`
-   into `RigctlSDR.muted` without calling `on_mute`, and the poll reports
-   only a CHANGE from that -- so if nothing redraws the audio controls after
-   connecting (`SDR_Link.connect` calls `follow()`, not `_audio_changed()`),
-   the window keeps its own starting assumption. Check the same for volume,
-   squelch and the DSP switches, which are read the same way.
+4. ~~SDRoxide started muted: the app shows it unmuted.~~ CLOSED 2026-11-06:
+   not reproduced with brown v2.2.3.6.5 -- started muted, the app showed it
+   muted. (The code path was right all along: discover reads `u MUTE` and the
+   connect redraw shows it.)
 
 ### Waiting on SDRangel -- workarounds to remove when fixed
 

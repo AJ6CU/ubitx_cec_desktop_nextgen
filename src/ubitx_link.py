@@ -1,4 +1,5 @@
-from time import sleep
+import os
+from time import sleep, monotonic
 from timeit import default_timer as timer
 import serial
 
@@ -6,6 +7,12 @@ import EEPROM
 from scustomtkinter import sCTkMessagebox
 
 MODES = ("DFT", "ERR", "LSB", "USB", "CWL", "CWU")
+
+# FIX (2026-11-06): UBITX_RIG_TIMING=1 in the environment prints how long after
+# the reboot command each step of the start-up arrives -- the first byte, and
+# every report -- to find where the ~5 s between connecting and the values
+# goes, when the rig itself is up in about 2 s from power on.
+RIG_TIMING = os.environ.get("UBITX_RIG_TIMING") == "1"
 
 # How long a borrow-write-return step waits for its confirmation before the
 # sequence is abandoned. Generous: the rig is effectively synchronous and
@@ -330,6 +337,11 @@ class uBITX_Link:
                     break
                 taken += 1
 
+                if RIG_TIMING and not getattr(self._radio_link, "_t_first_byte", None):
+                    self._radio_link._t_first_byte = monotonic()
+                    print(f"[rig timing] first byte {in_byte!r} at "
+                          f"+{self._radio_link._since_reboot():.2f} s")
+
                 if in_byte == b'\x00' and not self._buffer:
                     self._zero_run += 1
                     if self._zero_run == READER_ZERO_RUN:
@@ -395,6 +407,8 @@ class uBITX_Link:
 
         def _process_radio_command(self, buffer):
             command = buffer[3] + buffer[4]
+            if RIG_TIMING:
+                print(f"[rig timing] +{self._radio_link._since_reboot():.2f} s  {command}")
             # Every report passes here, so this is where "we have seen one"
             # belongs -- see uBITX_Link.check_expected_reports().
             self._radio_link.seen_reports.add(command)
@@ -1103,7 +1117,11 @@ class uBITX_Link:
         def cl_UX_Lock_Screen(self, buffer):
             value = self._extract_value(buffer, 10, len(buffer) - 3)
             print("cl_UX_Lock_Screen: ", value)
-            self._model.locked = not self._model.locked
+            # FIX (2026-11-06): READ, not toggled -- the rig reports the
+            # state, 1 locked and 0 unlocked (checked on the rig), as it does
+            # for split and RIT. Flipping a flag on every report would invert
+            # for good after one missed or repeated report.
+            self._model.locked = str(value).strip() == "1"
 
             # if (self.lock_Button_On):
             #     self.lock_Button_On = False
@@ -1177,7 +1195,11 @@ class uBITX_Link:
         def cj_UX_Speaker_Toggle(self, buffer):
             value = self._extract_value(buffer, 10, len(buffer) - 3)
             print("cj_UX_Speaker_Toggle: ", value)
-            self._model.muted = not self._model.muted
+            # FIX (2026-11-06): READ, not toggled -- the rig reports the
+            # state: 1 in SDR mode (its speaker muted), 0 in speaker mode
+            # (checked on the rig). Matters most of the three: choosing the
+            # SDR as the receiver goes by model.muted.
+            self._model.muted = str(value).strip() == "1"
 
             # if (self.speaker_Button_On):
             #     self.speaker_Button_On = False
@@ -1370,7 +1392,9 @@ class uBITX_Link:
         def cx_UX_TX_Stop_Toggle(self, buffer):
             value = int(self._extract_value(buffer, 10, len(buffer) - 3))
             print("cx_UX_TX_Stop_Toggle: ", value)
-            self._model.tx_inhibit = not self._model.tx_inhibit
+            # FIX (2026-11-06): READ, not toggled -- 1 with transmit off, 0
+            # with it back on (checked on the rig).
+            self._model.tx_inhibit = value == 1
             # self.theVFO_Object.toggleStopButtonState()
 
         #
@@ -1525,6 +1549,8 @@ class uBITX_Link:
             # so the model needs it -- without this the offset used whatever
             # RadioModel defaulted to rather than what the rig reported.
             self._model.cw_tone = int(value)
+            self._model.cw_tone_reported = True   # FIX (2026-11-06): for the CW tab
+            self._model.cw_pending.pop("cw_tone", None)   # in effect now: reported
 
         #
         #   The "ck" command stores which cw key is being used
@@ -1532,9 +1558,11 @@ class uBITX_Link:
         def ck_UX_Set_CW_Key_Type(self, buffer):
             value = self._extract_value(buffer, 10, len(buffer) - 3)
             print("ck_UX_Set_CW_Key_Type: ", value)
-            # if value == '':
-            #     print("ck_UX_Set_CW_Key_Type error, buffer:", buffer)
-            # self.key_type_value_Label['text'] = gv.CW_KeyType[value]
+            # FIX (2026-11-06): stored, for the CW tab -- it printed only.
+            # 0 straight, 1 iambic A, 2 iambic B (globalvars.CW_KeyType); taken as a
+            # word too, in case the rig sends one. Anything else is left
+            # unknown rather than guessed.
+            self._model.cw_key_type = self._cw_key_word(value)
 
         #
         #   The "vs" command stores words/minute
@@ -1542,7 +1570,9 @@ class uBITX_Link:
         def vs_UX_Set_CW_Speed(self, buffer):
             value = self._extract_value(buffer, 10, len(buffer) - 3)
             print("vs_UX_Set_CW_Speed: ", value)
-            # self.key_speed_value_Label['text'] = str(int(1200 / int(value)))
+            # FIX (2026-11-06): stored. The rig reports the DOT LENGTH in ms,
+            # 1200 / wpm, so 20 wpm arrives as 60.
+            self._model.cw_wpm = self._cw_number(value, lambda v: round(1200 / v))
 
         #
         #   The "vy" command stores delay returning after last cw character
@@ -1550,7 +1580,9 @@ class uBITX_Link:
         def vy_UX_Set_CW_Delay_Returning_to_RX(self, buffer):
             value = self._extract_value(buffer, 10, len(buffer) - 3)
             print("vy_UX_Set_CW_Delay_Returning_to_RX: ", value)
-            # self.delay_returning_to_rx_value_Label['text'] = str(int(value) * 10)
+            # FIX (2026-11-06): stored, in ms -- the rig counts in 10 ms.
+            self._model.cw_delay_rx_ms = self._cw_number(value, lambda v: v * 10, zero_ok=True)
+            self._model.cw_pending.pop("cw_delay_rx_ms", None)   # in effect now: reported
 
         #
         #   The "ve" command stores delay prior to TX 1st cw character
@@ -1558,7 +1590,29 @@ class uBITX_Link:
         def ve_UX_Set_CW_Delay_Starting_TX(self, buffer):
             value = self._extract_value(buffer, 10, len(buffer) - 3)
             print("ve_UX_Set_CW_Delay_Starting_TX: ", value)
-            # self.delay_starting_tx_value_Label['text'] = str(int(value) * 2)
+            # FIX (2026-11-06): stored, in ms -- the rig counts in 2 ms.
+            self._model.cw_delay_tx_ms = self._cw_number(value, lambda v: v * 2, zero_ok=True)
+            self._model.cw_pending.pop("cw_delay_tx_ms", None)   # in effect now: reported
+
+        @staticmethod
+        def _cw_key_word(value):
+            """The rig's key type as a word (globalvars.CW_KeyType's), or None."""
+            words = {"0": "STRAIGHT", "1": "IAMBICA", "2": "IAMBICB"}
+            text = str(value).strip().upper()
+            if text in words:
+                return words[text]
+            return text if text in words.values() else None
+
+        @staticmethod
+        def _cw_number(value, convert, zero_ok=False):
+            """A reported number in the operator's units, or None if not one."""
+            try:
+                number = int(str(value).strip())
+            except ValueError:
+                return None
+            if number < 0 or (number == 0 and not zero_ok):
+                return None                       # 1200 / 0 is no speed
+            return convert(number)
 
         #
         #   Returns active VFO, VFO-A=0, VFO-B=1
@@ -2623,142 +2677,121 @@ class uBITX_Link:
         command = [self.toRadioCommandDict["TS_CMD_IFSVALUE"], encodedBytes[0], encodedBytes[1], encodedBytes[2], 0]
         self.sendCommandToMCU(bytes(command))
 
-    def Set_CW_Tone(self, tone):
-        print("setting CW_Tone")
+    # ------------------------------------------------------------------
+    # The keyer's settings
+    # ------------------------------------------------------------------
+    # FIX (2026-11-06): THE CW TAB'S EDITS REACH THE RIG. The five Set_CW_*
+    # methods this replaces were never called and had their EEPROM writes
+    # commented out; Set_CW_Speed's one live command was a byte short of the
+    # five every other command sends.
+    #
+    # Per setting: its EEPROM entry, the operator's value -> the bytes
+    # stored, the command that applies it AT ONCE (or None), and whether the
+    # firmware reads it only as it boots. Addresses from EEPROM.py, checked
+    # against what the rig reports at connect (2026-11-06).
+    #
+    #   key type  0x166, 1 byte, 0/1/2           TS_CMD_KEYTYPE -- at once
+    #   speed     0x01C, 4 bytes, the DOT LENGTH  TS_CMD_WPM     -- at once
+    #             in ms (1200 / wpm), low first; the live command takes one
+    #             byte, so 5 wpm (240 ms) is the slowest
+    #   tone      0x018, 4 bytes, Hz, low first                  -- at boot
+    #   to TX     0x103, 1 byte, ms / 2                          -- at boot
+    #   to RX     0x102, 1 byte, ms / 10                         -- at boot
+    CW_KEY_VALUES = {"STRAIGHT": 0, "IAMBICA": 1, "IAMBICB": 2}
+    CW_LIMITS = {"cw_wpm": (5, 60), "cw_tone": (100, 2000),
+                 "cw_delay_tx_ms": (0, 500), "cw_delay_rx_ms": (0, 2550)}
 
-        #
-        #   Now have to write it to EEPROM as this is not one of the values that are automatically saved to EEPROM
-        #   This requires reboot to take effect
-        #
+    def _cw_setting(self, key, value):
+        """
+        (EEPROM name, bytes to store, command applying it now or None, needs
+        a reboot, the value as the rig will report it). The last because the
+        rig keeps whole units: 25 ms to TX is stored as 12 and reads back 24,
+        45 wpm as a 27 ms dot that reads back 44 -- the tab shows that.
+        """
+        if key == "cw_key_type":
+            code = self.CW_KEY_VALUES[value]
+            return ("cw_key_type", bytes([code]),
+                    [self.toRadioCommandDict["TS_CMD_KEYTYPE"], code, 0, 0, 0], False, value)
+        low, high = self.CW_LIMITS[key]
+        value = int(value)
+        if not low <= value <= high:
+            raise ValueError(f"{key} {value} outside {low}-{high}")
+        if key == "cw_wpm":
+            dot = round(1200 / value)
+            return ("cw_wpm", bytes(self.Freq_Encode(dot)),
+                    [self.toRadioCommandDict["TS_CMD_WPM"], dot, 0, 0, 0], False,
+                    round(1200 / dot))
+        if key == "cw_tone":
+            return ("cw_sidetone", bytes(self.Freq_Encode(value)), None, True, value)
+        if key == "cw_delay_tx_ms":
+            return ("cw_Delay_Starting_TX", bytes([value // 2]), None, True, value // 2 * 2)
+        return ("cw_Delay_Returning_to_RX", bytes([value // 10]), None, True, value // 10 * 10)
 
-        # checksum = (EEPROM.Mem_Address["cw_sidetone"][EEPROM.lsb] + EEPROM.Mem_Address["cw_sidetone"][EEPROM.msb]
-        #             + EEPROM.Mem_Address["cw_sidetone"][EEPROM.memLength]) % 256
-        #
-        # fourBytes = self.Freq_Encode(str(tone))
-        #
-        # command = [self.toRadioCommandDict["TS_CMD_WRITEMEM"],
-        #            EEPROM.Mem_Address["cw_sidetone"][EEPROM.lsb],
-        #            EEPROM.Mem_Address["cw_sidetone"][EEPROM.msb],
-        #            EEPROM.Mem_Address["cw_sidetone"][EEPROM.memLength],
-        #            checksum,
-        #            fourBytes[0],
-        #            fourBytes[1],
-        #            fourBytes[2],
-        #            fourBytes[3]
-        #            ]
-        # self.sendCommandToMCU(bytes(command))
+    def set_cw(self, key, value):
+        """
+        Sets one keyer setting: applied at once where the rig has a command
+        for it, and written to EEPROM so it stays.
 
-    def Set_CW_Keytype(self, keyType):
-        print("setting CW_Keytype")
-        #
-        #   first send command to officially change the keytype
-        #
-        # command = [self.toRadioCommandDict["TS_CMD_KEYTYPE"], gv.CW_KeyValue[keyType], 0, 0, 0]
-        # self.sendCommandToMCU(bytes(command))
-        #
-        #   Now have to write it to EEPROM as this is not one of the values that are automatically saved to EEPROM
-        #
+        THE MODEL CHANGES ON THE RIG'S WORD, not on sending: when the EEPROM
+        write is acknowledged -- the acknowledgement names the address, as for
+        channels. Speed and key type then show the new value, since the
+        command has applied it. Tone and the delays are only READ AS THE RIG
+        BOOTS, so until a restart the rig still uses the old ones: the new
+        value goes in model.cw_pending, and the live one (cw_tone sets the CW
+        transmit offset) is left alone until the rig reports it after booting.
+        """
+        name, data, now, reboot, value = self._cw_setting(key, value)
+        if now is not None:
+            self.sendCommandToMCU(bytes(now))
+        address, command = self._eeprom_write(EEPROM.Mem_Address[name], 0, data)
+        queue = self.__dict__.setdefault("_cw_writes", [])
+        queue[:] = [w for w in queue if w[0] != key]     # the latest wins
+        queue.append((key, value, address, command, reboot))
+        self._model.cw_write_failed = None
+        if len(queue) == 1:
+            self._cw_write_attempts = 0
+            self._send_cw_write()
 
-        # checksum = (EEPROM.Mem_Address["cw_key_type"][EEPROM.lsb] + EEPROM.Mem_Address["cw_key_type"][EEPROM.msb]
-        #             + EEPROM.Mem_Address["cw_key_type"][EEPROM.memLength]) % 256
-        #
-        # command = [self.toRadioCommandDict["TS_CMD_WRITEMEM"],
-        #            EEPROM.Mem_Address["cw_key_type"][EEPROM.lsb],
-        #            EEPROM.Mem_Address["cw_key_type"][EEPROM.msb],
-        #            EEPROM.Mem_Address["cw_key_type"][EEPROM.memLength],
-        #            checksum,
-        #            gv.CW_KeyValue[keyType]
-        #            ]
-        # self.sendCommandToMCU(bytes(command))
+    def _send_cw_write(self):
+        queue = getattr(self, "_cw_writes", [])
+        if not queue:
+            return
+        self.sendCommandToMCU(bytes(queue[0][3]))
+        self._cw_write_timer = self.root.after(CHANNEL_WRITE_TIMEOUT_MS,
+                                               self._cw_write_timed_out)
 
-    def Set_CW_Speed(self, keySpeed):
-        print("setting CW_Speed")
+    def _cw_write_timed_out(self):
+        self._cw_write_timer = None
+        self._cw_write_attempts += 1
+        if self._cw_write_attempts <= CHANNEL_READ_RETRIES:
+            print(f"[cw] write to {self._cw_writes[0][2]} not acknowledged; retrying")
+            self._send_cw_write()
+            return
+        key = self._cw_writes.pop(0)[0]
+        print(f"[cw] giving up on the write of {key}")
+        self._model.cw_write_failed = key
+        self._model.changed()
+        self._cw_write_attempts = 0
+        self.root.after(STEP_SETTLE_MS, self._send_cw_write)
 
-        #
-        #
-        #   first send command to officially change the key speed
-        #   wpm directly saved. It is the dot length which is 1200/wpm
-        #
-
-        dotLength_ms = int(1200 / int(keySpeed))
-        command = [self.toRadioCommandDict["TS_CMD_WPM"], dotLength_ms, 0, 0]
-        self.sendCommandToMCU(bytes(command))
-
-        #
-        #   Now have to write it to EEPROM as this is not one of the values that are automatically saved to EEPROM
-        #
-
-        # checksum = (EEPROM.Mem_Address["cw_wpm"][EEPROM.lsb] + EEPROM.Mem_Address["cw_wpm"][EEPROM.msb]
-        #             + EEPROM.Mem_Address["cw_wpm"][EEPROM.memLength]) % 256
-        #
-        # command = [self.toRadioCommandDict["TS_CMD_WRITEMEM"],
-        #            EEPROM.Mem_Address["cw_wpm"][EEPROM.lsb],
-        #            EEPROM.Mem_Address["cw_wpm"][EEPROM.msb],
-        #            EEPROM.Mem_Address["cw_wpm"][EEPROM.memLength],
-        #            checksum,
-        #            dotLength_ms,  # Eeprom allows up to two bytes for adjusted key,
-        #            # but keychage without reboot only 1 byte
-        #            0, 0, 0
-        #            ]
-        #
-        # self.sendCommandToMCU(bytes(command))
-
-    def Set_CW_Delay_Starting_TX(self, startTXDelay):
-        print("setting CW_Delay_Starting_TX")
-        #
-        #   Requires reboot to take effect
-        #
-        #
-        # adjust the wpm speed to format of EEPROM
-        #
-        # adjustedStartTXDelay = int(int(startTXDelay) / 2)
-
-        #
-        #   write it to EEPROM as will be picked up on next reboot
-        #
-
-        # checksum = (EEPROM.Mem_Address["cw_Delay_Starting_TX"][EEPROM.lsb] + EEPROM.Mem_Address["cw_Delay_Starting_TX"][
-        #     EEPROM.msb]
-        #             + EEPROM.Mem_Address["cw_Delay_Starting_TX"][EEPROM.memLength]) % 256
-        #
-        # command = [self.toRadioCommandDict["TS_CMD_WRITEMEM"],
-        #            EEPROM.Mem_Address["cw_Delay_Starting_TX"][EEPROM.lsb],
-        #            EEPROM.Mem_Address["cw_Delay_Starting_TX"][EEPROM.msb],
-        #            EEPROM.Mem_Address["cw_Delay_Starting_TX"][EEPROM.memLength],
-        #            checksum,
-        #            adjustedStartTXDelay
-        #            ]
-        #
-        # self.sendCommandToMCU(bytes(command))
-
-    def Set_CW_Delay_Returning_To_RX(self, returnRXDelay):
-        print("setting CW_Delay_Returning_To_RX")
-        # value stored to eeprom needs to divided by 10
-        #
-        #   Requires reboot to take effect
-        #
-        #
-        # adjust the wpm speed to format of EEPROM
-        #
-        # adjustedReturnToRXDelay = int(int(returnRXDelay) / 10)
-
-        #
-        #   write it to EEPROM as will be picked up on next reboot
-        #
-
-        # checksum = (EEPROM.Mem_Address["cw_Delay_Returning_to_RX"][EEPROM.lsb] +
-        #             EEPROM.Mem_Address["cw_Delay_Returning_to_RX"][EEPROM.msb]
-        #             + EEPROM.Mem_Address["cw_Delay_Returning_to_RX"][EEPROM.memLength]) % 256
-        #
-        # command = [self.toRadioCommandDict["TS_CMD_WRITEMEM"],
-        #            EEPROM.Mem_Address["cw_Delay_Returning_to_RX"][EEPROM.lsb],
-        #            EEPROM.Mem_Address["cw_Delay_Returning_to_RX"][EEPROM.msb],
-        #            EEPROM.Mem_Address["cw_Delay_Returning_to_RX"][EEPROM.memLength],
-        #            checksum,
-        #            adjustedReturnToRXDelay
-        #            ]
-        #
-        # self.sendCommandToMCU(bytes(command))
+    def _on_cw_written(self, address):
+        """True if this acknowledgement was the keyer write outstanding."""
+        queue = getattr(self, "_cw_writes", [])
+        if not queue or queue[0][2] != address:
+            return False
+        if getattr(self, "_cw_write_timer", None) is not None:
+            self.root.after_cancel(self._cw_write_timer)
+            self._cw_write_timer = None
+        key, value, _, _, reboot = queue.pop(0)
+        model = self._model
+        if reboot:
+            model.cw_pending[key] = value
+        else:
+            setattr(model, key, value)
+        model.changed()
+        self._cw_write_attempts = 0
+        self.root.after(STEP_SETTLE_MS, self._send_cw_write)
+        return True
 
     # ------------------------------------------------------------------
     # Writing memory channels
@@ -2886,12 +2919,16 @@ class uBITX_Link:
         acknowledgement of a retried write, or a setting written elsewhere --
         and is ignored rather than allowed to advance the sequence.
         """
-        writes = getattr(self, "_channel_writes", None)
-        if not writes:
-            return
         try:
             address = int(str(value).strip())
         except ValueError:
+            return
+        # FIX (2026-11-06): a keyer setting's write is acknowledged the same
+        # way, by its address -- see set_cw.
+        if self._on_cw_written(address):
+            return
+        writes = getattr(self, "_channel_writes", None)
+        if not writes:
             return
         _, expected, _ = writes[0]
         if address != expected:
@@ -3043,6 +3080,8 @@ class uBITX_Link:
         about either.
         """
         print("reboot_ubitx")
+        self._t_reboot = monotonic()
+        self._t_first_byte = None
 
         # To reboot need to send key 1497712748  (5945486C)
 
@@ -3055,6 +3094,11 @@ class uBITX_Link:
 
         command = [self.toRadioCommandDict["TS_CMD_UBITX_REBOOT"], lsb1, lsb2, lsb3, lsb4, checksum]
         self.sendCommandToMCU(bytes(command))
+
+    def _since_reboot(self):
+        """Seconds since the reboot command -- for UBITX_RIG_TIMING."""
+        t0 = getattr(self, "_t_reboot", None)
+        return monotonic() - t0 if t0 is not None else -1.0
 
     def sendCommandToMCU(self, commandList):
         currentTime = timer()

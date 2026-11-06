@@ -11,7 +11,6 @@ The short list. Detail for each is in TODO.md.
 - **RX tab:** ATT and IFS aren't wired.
 - **Lock, mute and TX off:** check on the rig that these report on/off and aren't just toggles.
 - **Setup, Log QSO, EEPROM backup and restore:** check what's still not read or saved. The MCU headroom is hard-coded in the link.
-- **SDRoxide started muted:** the app shows it unmuted. Not traced yet.
 - **Values that don't arrive at connect:** the app prints which ones are missing but doesn't ask the rig for them yet.
 - **The SDR connection can stall the window** for half a second when the SDR stops answering. A thread would fix it.
 - **SDRoxide VFO A/B:**
@@ -19,10 +18,7 @@ The short list. Detail for each is in TODO.md.
   - split itself probably deferred.
 - **SDRoxide vs. SDRoxide Brown on the Mac:** they have the same app name, so the app can start or attach to the wrong one. Pick one of the three options in TODO.
 - **Small station checks:**
-  - the decode strip when the window is resized;
-  - the band spinbox's arrows outside the ham bands;
-  - whether About and Log QSO's value labels should go to the smaller tier;
-  - brown's RIT bracket on its panadapter with RIT on.
+  - the decode strip when the window is resized.
 - **Low priority:**
   - `socket://` doesn't take an IPv6 address;
   - there's no way to give a command line for rigctld;
@@ -36,7 +32,7 @@ The short list. Detail for each is in TODO.md.
 
 ## Waiting on others
 
-- **brown #491 (CW peak):** review, then try the next pre-release.
+- **brown #491 (CW peak): merged.** Try the next pre-release on the station; if APF is missing or wrong, open a ticket (brown asks for a revert if it fails).
 - **brown `spectrum_spans`:** then drop the 20 MHz guess.
 - **brown's view refit** when the span changes.
 - **brown SUB over rigctl:** a second receiver for split listening. Ask in an issue first.
