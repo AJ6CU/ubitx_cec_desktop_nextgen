@@ -229,13 +229,24 @@ def _check(key, entry, where):
     return True
 
 
+def _json_file(path):
+    """
+    FIX (2026-11-06): a JSON file's contents -- an EMPTY file read as {}.
+    Emptying one (`cat /dev/null > it`) is how an operator clears it, and
+    json.load() refused that as "Expecting value", so it was reported
+    unreadable and the Setup page could not save into it.
+    """
+    with open(path, "r", encoding="utf-8") as handle:
+        text = handle.read()
+    return json.loads(text) if text.strip() else {}
+
+
 def _read_raw(path, where):
     """One file's entries as written, unchecked -- or nothing if it cannot be read."""
     if not os.path.exists(path):
         return {}
     try:
-        with open(path, "r", encoding="utf-8") as handle:
-            data = json.load(handle)
+        data = _json_file(path)
     except Exception as err:
         print(f"[sdr] {where} ({path}) could not be read: {err}")
         return {}
@@ -331,8 +342,7 @@ def set_user_setting(key, name, value):
     data = {}
     if os.path.exists(USER_FILE):
         try:
-            with open(USER_FILE, "r", encoding="utf-8") as handle:
-                data = json.load(handle)
+            data = _json_file(USER_FILE)
         except Exception as err:
             print(f"[sdr] your programs file ({USER_FILE}) could not be read, so it "
                   f"was not changed: {err}")

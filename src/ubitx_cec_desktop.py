@@ -2456,6 +2456,10 @@ class UbitxCecDesktop(sCTk):
         self._shown_rows = []           # the rows it is showing, as text
         self._shown_editable = None     # the editable columns last set
         self._selected_channel = None   # index into the current set
+        # FIX: the tab showing, so the channel table is filled only when it
+        # can be seen -- see _refresh_channels. Operate is where the window
+        # opens; _on_tab keeps it current.
+        self._current_tab = "Operate"
 
         actions = sCTkFrame(page, fg_color="transparent", border_width=0)
         actions.grid(row=3, column=0, sticky="ew", padx=10, pady=(6, 10))
@@ -2679,6 +2683,16 @@ class UbitxCecDesktop(sCTk):
 
         self._update_channel_buttons()
 
+        # FIX: THE TABLE ONLY WHILE IT CAN BE SEEN (2026-11-06). Filling it
+        # took 4.2 s at startup -- all of it inside the window's constructor,
+        # before the main loop, so the rig's start-up values sat in the
+        # serial buffer for ~7 s though the rig had sent them at ~2 s
+        # (UBITX_RIG_TIMING). Hidden, it is left as it is; opening the
+        # Channels tab fills it, and later changes reach it on the next
+        # refresh -- only the rows that changed, as below.
+        if getattr(self, "_current_tab", "Channels") != "Channels":
+            return
+
         rows = [[str(e["number"]), e["label"],
                  self.model.formatted(e["freq"]) if e["freq"] else "",
                  e["mode"], e["note"]]
@@ -2691,6 +2705,10 @@ class UbitxCecDesktop(sCTk):
         if chosen_set != self._shown_set or len(rows) != len(self._shown_rows):
             self.channel_table.load_dataset(rows)
             self._shown_set = chosen_set
+            # FIX: a row chosen while the table was hidden -- a scan that
+            # reached a channel, say -- shown now it is filled.
+            if self._selected_channel is not None and self._selected_channel < len(rows):
+                self.channel_table.select_row(self._selected_channel)
         else:
             for index, (new, old) in enumerate(zip(rows, self._shown_rows)):
                 if new != old:
@@ -2702,8 +2720,18 @@ class UbitxCecDesktop(sCTk):
         self._selected_channel = index
         # From code, so it does not call back here; harmless if the table
         # already has this row selected, as it does after a click.
-        self.channel_table.select_row(index)
+        self._select_table_row(index)
         self._update_channel_buttons()
+
+    def _select_table_row(self, index):
+        """
+        FIX: selects a row in the channel table -- only once the table has
+        been filled. Until then the choice is kept in _selected_channel and
+        shown when it is (see _refresh_channels): a scan running from Operate
+        reaches channels before the table was ever opened.
+        """
+        if self._shown_set is not None and index is not None:
+            self.channel_table.select_row(index)
 
     # -- editing the rig's set -------------------------------------------
     def _radio_channel(self, slot):
@@ -2768,7 +2796,7 @@ class UbitxCecDesktop(sCTk):
             remaining = len(self.channel_sets.channels(name))
             self._selected_channel = (min(self._selected_channel, remaining - 1)
                                       if remaining else None)
-            self.channel_table.select_row(self._selected_channel)
+            self._select_table_row(self._selected_channel)
             self.refresh()
             return
         if not self._can_edit_radio():
@@ -2793,7 +2821,7 @@ class UbitxCecDesktop(sCTk):
                                      "bandwidth": m.filter_hz})
         self._selected_channel = len(self.channel_sets.channels(name)) - 1
         self.refresh()
-        self.channel_table.select_row(self._selected_channel)
+        self._select_table_row(self._selected_channel)
 
     # -- the set menu ------------------------------------------------------
     def _on_set_menu(self, choice):
@@ -3153,7 +3181,14 @@ class UbitxCecDesktop(sCTk):
         # The set menu offers what applies to the set on show. Saving the
         # rig's memories as a set needs them read first.
         menu_kind = (kind, self.model.channels_state == "read")
-        if menu_kind != self._menu_kind_shown:
+        # FIX: only while the Channels tab is showing (2026-11-06). The
+        # option menu's configure() redraws its border through
+        # update_idletasks(), which forces Tk to lay out THE WHOLE WINDOW --
+        # at startup the first such layout, 2.2 s of it (cProfile), inside
+        # the constructor and ahead of the rig's reader. Opening the tab
+        # comes back here and sets it.
+        if (menu_kind != self._menu_kind_shown
+                and getattr(self, "_current_tab", "Channels") == "Channels"):
             if in_set:
                 items = ["New set…", "Duplicate…", "Rename…", "Delete set…"]
             else:
@@ -3191,7 +3226,12 @@ class UbitxCecDesktop(sCTk):
             editable = [CHANNEL_LABEL_COLUMN, CHANNEL_FREQ_COLUMN, CHANNEL_MODE_COLUMN]
         else:
             editable = []
-        if editable != self._shown_editable:
+        # FIX: only while the table can be seen, as its rows (2026-11-06):
+        # configuring the table's editable columns re-draws it, which cost
+        # 2.2 s at startup on a table nobody was looking at. Opening the
+        # Channels tab comes back here with the tab current, and applies it.
+        if (editable != self._shown_editable
+                and getattr(self, "_current_tab", "Channels") == "Channels"):
             self.channel_table.configure(editable_columns=editable)
             self._shown_editable = editable
 
@@ -3234,7 +3274,7 @@ class UbitxCecDesktop(sCTk):
     def _scan_reached(self, index):
         """The scan arrived at a channel: show it."""
         self._selected_channel = index
-        self.channel_table.select_row(index)
+        self._select_table_row(index)
         self.refresh()
 
     def _scan_stopped(self, reason):
@@ -3277,8 +3317,12 @@ class UbitxCecDesktop(sCTk):
         startup -- the startup dump is already long, and this adds 38 replies
         for something you may not look at.
         """
+        self._current_tab = name
         if name == "Channels" and self.model.channels_state == "unread":
             self.connection.read_channels()
+        # FIX: the table is filled now it can be seen -- see _refresh_channels.
+        if name == "Channels":
+            self._refresh_channels()
 
     def _build_cw(self, page):
         wrap = sCTkFrame(page, fg_color="transparent", border_width=0)
@@ -3788,7 +3832,7 @@ class UbitxCecDesktop(sCTk):
         self.sdr_port_entry.insert(0, str(profile.default_port))
 
     def _show_sdr_path(self):
-        """'custom path' under Connect while SDR settings holds a path."""
+        """'(custom path)' under Connect while SDR settings holds a path."""
         note = getattr(self, "sdr_path_note", None)
         if note is not None:
             note.configure(text="(custom path)" if gv.config.get_sdr_path() else "")
