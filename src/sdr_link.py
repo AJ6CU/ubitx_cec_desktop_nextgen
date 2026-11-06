@@ -987,6 +987,11 @@ class SDR_Link:
         reason = self.OFF_IN_CW.get(function)
         if reason and in_cw:
             return reason
+        # FIX: what the transport can set only in CW -- SDRoxide Brown's CW
+        # peak filter (APF), which it refuses in any other mode.
+        reason = getattr(self.controller, "cw_only", {}).get(function)
+        if reason and not in_cw:
+            return reason
         if function == "decode" and not in_cw:
             return "CW only -- the decoder reads Morse"
         return None

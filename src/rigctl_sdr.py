@@ -26,7 +26,7 @@ import globalvars as gv
 from rigctl_client import RigctlClient, ConnectionLost
 from sdr_programs import (FREQUENCY, MODE, FILTER, SIGNAL, VOLUME, SQUELCH, MUTE,
                           NB, NR, NOTCH, AGC, DECODER, RF_GAIN, RIT, SPLIT,
-                          BANDWIDTH)
+                          BANDWIDTH, CW_PEAK)
 
 POLL_MS = 200
 
@@ -53,7 +53,19 @@ SPAN_SETTLE_SECONDS = 2.0
 # rigctl has no way to reach their adjustments, so their pop-ups hold just
 # the switch. Found at connect by reading each and sending the state back
 # (SDRoxide answers all three; SDR++ none).
-SWITCHES = (("nb", NB, "NB"), ("nr", NR, "NR"), ("notch", NOTCH, "ANF"))
+SWITCHES = (("nb", NB, "NB"), ("nr", NR, "NR"), ("notch", NOTCH, "ANF"),
+            ("cw", CW_PEAK, "APF"))
+
+# FIX: Hamlib names a program accepts a SET of only in CW -- SDRoxide Brown's
+# APF (its CW peak filter, PR for #468): it answers `u APF` / `l APF` in any
+# mode but refuses `U` / `L` outside CW, since the setting is kept per mode.
+# So discovery takes a value it can READ as found, rather than sending it
+# back, which in USB would be refused and leave the lamp greyed for the
+# session. The window keeps them CW-only -- see CW_ONLY_FUNCTIONS.
+CW_ONLY = frozenset({"APF"})
+# The window's names for the same functions: greyed outside CW, saying why
+# (SDR_Link.dsp_blocked).
+CW_ONLY_FUNCTIONS = {"cw": "CW only -- it peaks the CW pitch"}
 
 # The listening aids' ADJUSTMENTS rigctl can reach, as Hamlib levels -- one
 # choice knob each. Found at connect like everything else (read, and the
@@ -74,6 +86,16 @@ LEVEL_KNOBS = {
     "nr": {"level": "NR", "knob": "strength", "caption": "Strength",
            "labels": ("Low", "Med", "High"), "values": (1 / 3, 2 / 3, 1.0),
            "flag": "rigctl_nr_strength", "switch": False},
+    # FIX: the CW peak filter's WIDTH -- SDRoxide Brown's APF level, 0.0 its
+    # widest bell (200 Hz) to 1.0 its narrowest (20 Hz), linear in Hz. A
+    # RANGE knob in whole Hz, not a choice: the width is continuous in
+    # SDRoxide too (Mark, 2026-11-05). Its lift is set in SDRoxide's own APF
+    # pop-up. The switch is the APF function above.
+    "cw": {"level": "APF", "knob": "width", "caption": "Width", "kind": "range",
+           "low": 20, "high": 200, "default": 100, "unit": "Hz",
+           "to_level": lambda hz: (200 - hz) / 180,
+           "from_level": lambda level: 200 - 180 * level,
+           "flag": "rigctl_apf", "switch": False, "cap": CW_PEAK},
 }
 # How each Hamlib AGC value reads, where it is not one of ours.
 AGC_READS_AS = {1: 2, 4: 5, 6: 5}
@@ -82,6 +104,24 @@ AGC_READS_AS = {1: 2, 4: 5, 6: 5}
 def _nearest(values, read):
     """The index of the value nearest a reading."""
     return min(range(len(values)), key=lambda i: abs(values[i] - read))
+
+
+def _is_range(knob):
+    """FIX: a knob with a span of whole values (APF's width), not a list of choices."""
+    return knob.get("kind") == "range"
+
+
+def _clamp(knob, value):
+    """A range knob's value kept to its span."""
+    return max(knob["low"], min(knob["high"], int(round(float(value)))))
+
+
+def _knob_from_read(knob, read):
+    """A level as read, as the knob's value: its position for a range knob,
+    the nearest choice's index otherwise."""
+    if _is_range(knob):
+        return _clamp(knob, knob["from_level"](read))
+    return _nearest(knob["values"], read)
 
 
 def _percent(level):
@@ -193,6 +233,8 @@ class RigctlSDR:
         self.squelch = None          # its squelch threshold, in its own units
         self.dsp_on = {}             # {"nb": True, ...} -- the switches it has
         self.dsp_settings = {}       # {"agc": {"speed": 1}} -- the knobs, as indexes
+        # FIX: functions settable only in CW, and why -- SDR_Link.dsp_blocked.
+        self.cw_only = CW_ONLY_FUNCTIONS
         self._levels_found = set()   # the LEVEL_KNOBS functions it answered
         # FIX: the front-end gain, from Hamlib's RF level (0..1), as a whole
         # percentage of the SDR's own gain range -- rigctl says nothing of dB.
@@ -353,7 +395,9 @@ class RigctlSDR:
                 continue
             reply = client.query(f"u {name}")
             state = reply.values[0].strip() if reply.ok and reply.values else None
-            if state in ("0", "1") and client.command(f"U {name} {state}").ok:
+            # FIX: a CW-only function is found by reading it -- see CW_ONLY.
+            if state in ("0", "1") and (name in CW_ONLY
+                                        or client.command(f"U {name} {state}").ok):
                 caps.add(cap)
                 self.dsp_on[function] = state == "1"
 
@@ -364,9 +408,15 @@ class RigctlSDR:
                 continue
             if knob["switch"] and AGC in known_missing:
                 continue
+            if knob.get("cap") in known_missing:
+                continue
             reply = client.query(f"l {knob['level']}")
             read = _number(reply.values[0]) if reply.ok and reply.values else None
-            if read is None or not client.command(f"L {knob['level']} {reply.values[0].strip()}").ok:
+            if read is None:
+                continue
+            # FIX: a CW-only level is found by reading it -- see CW_ONLY.
+            if (knob["level"] not in CW_ONLY and not
+                    client.command(f"L {knob['level']} {reply.values[0].strip()}").ok):
                 continue
             self._levels_found.add(function)
             self._take_level(function, read)
@@ -447,14 +497,17 @@ class RigctlSDR:
             self.dsp_on[function] = on
         else:
             self.dsp_settings.setdefault(function, {})[knob["knob"]] = \
-                _nearest(knob["values"], read)
+                _knob_from_read(knob, read)
         return before != (self.dsp_on.get(function), self.dsp_settings.get(function, {}))
 
     def _level_value(self, function, index=None):
         """The Hamlib value for a knob position -- the one held, by default."""
         knob = LEVEL_KNOBS[function]
         if index is None:
-            index = self.dsp_settings.get(function, {}).get(knob["knob"], 1)
+            index = self.dsp_settings.get(function, {}).get(knob["knob"],
+                                                            knob.get("default", 1))
+        if _is_range(knob):
+            return f"{knob['to_level'](_clamp(knob, index)):.6f}"
         value = knob["values"][max(0, min(len(knob["values"]) - 1, int(index)))]
         return value if knob["switch"] else f"{value:.6f}"
 
@@ -765,12 +818,18 @@ class RigctlSDR:
         knob = self._knob(function, name)
         if knob is None:
             return None
+        if _is_range(knob):
+            return {"caption": knob["caption"], "kind": "range", "low": knob["low"],
+                    "high": knob["high"], "labels": None, "short": None,
+                    "unit": knob.get("unit", "")}
         return {"caption": knob["caption"], "kind": "choice", "low": 0,
                 "high": len(knob["labels"]) - 1, "labels": knob["labels"],
                 "short": knob["labels"], "unit": ""}
 
     def dsp_range(self, function, name):
         knob = self._knob(function, name)
+        if knob and _is_range(knob):
+            return (knob["low"], knob["high"])
         return (0, len(knob["labels"]) - 1) if knob else (0, 0)
 
     def dsp_adjustable(self, function, name):
@@ -780,6 +839,8 @@ class RigctlSDR:
         knob = self._knob(function, name)
         if knob is None:
             return str(value)
+        if _is_range(knob):
+            return f"{_clamp(knob, value)} {knob.get('unit', '')}".strip()
         index = int(round(float(value)))
         return knob["labels"][index] if 0 <= index < len(knob["labels"]) else str(value)
 
@@ -791,7 +852,10 @@ class RigctlSDR:
         knob = self._knob(function, name)
         if knob is None:
             return False
-        index = max(0, min(len(knob["labels"]) - 1, int(round(float(value)))))
+        if _is_range(knob):
+            index = _clamp(knob, value)
+        else:
+            index = max(0, min(len(knob["labels"]) - 1, int(round(float(value)))))
         if knob["switch"] and not self.dsp_on.get(function):
             self.dsp_settings.setdefault(function, {})[name] = index
             return True
@@ -1084,7 +1148,7 @@ class RigctlSDR:
                 if knob["switch"] and self._stale(function, int(round(read)) != 0):
                     continue
                 if not knob["switch"] and self._stale(
-                        f"{function}.{knob['knob']}", _nearest(knob["values"], read)):
+                        f"{function}.{knob['knob']}", _knob_from_read(knob, read)):
                     continue
                 if knob["switch"] and int(round(read)) != 0 and self._stale(
                         f"{function}.{knob['knob']}",

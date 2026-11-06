@@ -1101,7 +1101,22 @@ Five PRs prepared 2026-09-28/29 (sdroxide_prs_bundle.zip, with instructions):
    for brown: fit the view when the span changes over rigctl, or expose the
    zoom (Hamlib has SPECTRUM_EDGE_LOW/HIGH in fixed mode). ASKED 2026-11-05
    on #479, with the device rate (and how he would like it -- `\dump_state`
-   or otherwise); asked whether he does them or we send a PR. Waiting.
+   or otherwise); asked whether he does them or we send a PR.
+   ANSWERED 2026-11-05: no new `\dump_state` line (hand-written, parsed line
+   by line by Hamlib's netrigctl -- a line for one feature risks every
+   client); he will add `spectrum_spans`, the protocol's own place for the
+   device's real spans. And he will look at refitting the view on a span
+   change. He asked what we expect; REPLIED 2026-11-05: the waterfall -- a
+   span change over rigctl resets the view to the whole new span, widening
+   or narrowing, and the operator re-zooms; changes made in SDR Oxide itself
+   unchanged. Offered a PR for either. Waiting.
+   *App side when `spectrum_spans` lands:* read the spans from `\dump_state`
+   at connect -- exact slider steps; remove MAX_SPAN_HZ and the 2 s pause
+   at the top (SPAN_SETTLE_SECONDS' trim). None of our PRs added a
+   `\dump_state` line -- #452 and #454 set bits in the existing level masks.
+   RELEASED in brown pre-release v2.2.3.6.5_brown (2026-11-05, tag on main
+   35a6c197) -- no build from main needed for the span. #491 (APF) is NOT in
+   that tag; it comes in the next pre-release.
    Upstream SDRoxide: offer #479's change there too, later.
    *NEXT, once it works on the station:* ask brown to make the DEVICE RATE
    readable over rigctl -- #479 already carries it in RigState
@@ -1119,7 +1134,58 @@ Five PRs prepared 2026-09-28/29 (sdroxide_prs_bundle.zip, with instructions):
    state field (wire change: PROTO_VERSION + round-trip test), a chip and
    pop-up in eleven languages, and Hamlib `APF` over rigctl. ASK FIRST: issue
    drafted, sdroxide/brown/brown_issue_cw_peak.md; SUBMITTED 2026-11-04
-   (number: fill in), no reply yet as of 2026-11-05. App side once it exists:
+   (issue #468). ANSWERED 2026-11-05: a
+   cautious go-ahead -- we write it, built so it can be REVERTED cleanly.
+   WRITTEN 2026-11-05 (brown_cw_peak.zip, branch brown-cw-peak, one commit on
+   brown main a132702f): RxState.cw_peak (on, width 20-200 Hz, lift 1-20 dB),
+   per mode; SetCwPeak, wire 268 -> 269; filter after the decoder tap and ahead
+   of the AGC, CW only, centred on the passband middle (the pitch); rigctl
+   U/u APF switch, L/l APF width (0 widest .. 1 narrowest), only where the
+   filter runs, refused outside CW; APF chip greyed where the rig supplies
+   the audio; 8 messages x 11 languages; manual; brown's TODO.md; PR text with
+   git revert + manual rollback. NOT COMPILED here -- build, tests and fail
+   checks on the Mac -- all green. PR #491 OPENED and MERGED 2026-11-05, on brown main
+   35a6c197 (v2.2.3.6.5_brown). App side once released: the CW lamp found at
+   connect through `U APF` / `L APF`.
+   APP SIDE BUILT 2026-11-05 (app_apf.zip): APF a switch beside NB/NR/notch
+   (the CW lamp), found by READING it (Brown refuses a set outside CW, so
+   sending it back would have greyed it when connected in USB); its pop-up a
+   continuous Width knob, 20-200 Hz; the lamp greyed outside CW, saying why.
+   test_apf.py 6/6. CONFIRMED at the station 2026-11-05: the lamp switches
+   Brown's APF, the knob sets its width and follows a width set in Brown.
+   *Upstream SDRoxide too (Mark, 2026-11-05):* brown is CB- and listening-
+   focused; the ham CW peak belongs in dividebysandwich/sdroxide as well. Once
+   #491 has been reviewed and merged (so brown's review points are folded in),
+   port it as its own branch off upstream main -- upstream's PROTO_VERSION,
+   its own languages and rules, the same rigctl APF -- with the span (#479)
+   as a separate PR beside it. Ask upstream first in a short issue, as for
+   brown.
+   *VFO A/B and split with SDRoxide (Mark, 2026-11-05):* today the app uses
+   only SDRoxide's current VFO (F, M, J); its VFO B, A/B selection and SPLIT
+   are never read or set -- the poll's split check is an empty placeholder
+   and SDR_Link._from_sdr_split does nothing. Over rigctl Brown has all of
+   it: V VFOA/VFOB, S/s (split and the TX VFO), I/i (the TX VFO's
+   frequency). FIRST: wire VFO A/B so an action in SDRoxide is KNOWN -- the
+   poll reads which VFO is active (and B's frequency), and reports a change
+   made there, the rig leading as for RIT. SPLIT ITSELF probably DEFERRED:
+   mirroring the rig's split into SDRoxide (TX frequency on the other VFO,
+   SPLIT lit) is display only, and open questions are whether it goes both
+   ways and whether Brown draws a TX marker in split (its manual says only
+   XIT does).
+   *RIT display:* Brown draws the RIT offset on its panadapter (a dashed dial
+   line and a labelled bracket) whenever its RIT is on -- which our `J`
+   already turns on. To look at next time RIT is used.
+   *A second receiver (Mark, 2026-11-05):* Brown's SUB is a second receiver
+   in the same dongle's stream, in the right ear -- in split, the TX side
+   while the main listens to the DX. Not reachable over rigctl ("SUB" there
+   is only another name for VFO B). Would need a Brown rigctl addition --
+   Hamlib's DUAL_WATCH function for the switch, the other VFO for where it
+   sits -- asked in an issue first, like #491. A second DONGLE is a second
+   radio tab in Brown, its own waterfall and audio; nothing for the app to
+   drive there yet.
+   *Document (Mark, 2026-11-05):* the settings that stay in SDRoxide's own
+   window because rigctl cannot reach them -- the APF lift, the NR engine,
+   and the rest -- collected in one place in the user documentation. App side once it exists:
    the CW lamp found at connect through `U APF` / `L APF`.
 Step by step in SDROXIDE_UPGRADE.md.
 
@@ -1218,13 +1284,20 @@ upstream's. Checked in the source only, not yet against the two programs.
    over UDP.** Only a program whose entry has a `decoder_udp_port` (SDRoxide,
    SDRoxide Brown) can use it; for the others it should be shown greyed,
    with the reason, as other unavailable controls are.
-2. **The SDR path in the advanced dialog overrides the SDR program chosen --
+2. BUILT 2026-11-05 (sdr_path.zip), to check on the station: choosing a
+   DIFFERENT program on Setup clears the custom location (the same program
+   again keeps it; a console line says so), and SDR settings' button is
+   "Save", not "Keep". Per-program paths not done -- clearing was Mark's
+   choice. 4 tests.
+   Was: **The SDR path in the advanced dialog overrides the SDR program chosen --
    even when a different one is selected.** The "SDR Path" setting
    (`gv.config.get_sdr_path()`, handed to `sdr_launcher.start`) is one
    setting for every program, so a path set for one is used to start any
    other. It should belong to the program it was set for (keyed by the
    program in the settings), or at least be ignored for a different one.
-3. **Say when the standard location is overridden.** If a path is set, the
+3. BUILT 2026-11-05 (sdr_path.zip): "custom location set" beside Connect
+   on Setup's Software line while a path is set.
+   Was: **Say when the standard location is overridden.** If a path is set, the
    SDR settings box should say so, so users know to check the advanced
    setting -- otherwise a program that starts from an unexpected place, or
    will not start, has no visible cause.
