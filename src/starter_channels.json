@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "about": "Starter channel sets, shipped with ubitx_cec_desktop. Put into an operator's channels.json once, when they have no sets yet. Frequencies are the dial frequency; FT8 is the band's standard dial frequency in USB.",
+  "sets": {
+    "Time signals": [
+      {"freq_hz": 5000000,  "mode": "USB", "label": "WWV 5",     "name": "WWV / WWVH 5 MHz time signal", "bandwidth": 2600},
+      {"freq_hz": 10000000, "mode": "USB", "label": "WWV 10",    "name": "WWV / WWVH 10 MHz time signal", "bandwidth": 2600},
+      {"freq_hz": 15000000, "mode": "USB", "label": "WWV 15",    "name": "WWV / WWVH 15 MHz time signal", "bandwidth": 2600},
+      {"freq_hz": 20000000, "mode": "USB", "label": "WWV 20",    "name": "WWV 20 MHz time signal", "bandwidth": 2600},
+      {"freq_hz": 25000000, "mode": "USB", "label": "WWV 25",    "name": "WWV 25 MHz time signal", "bandwidth": 2600},
+      {"freq_hz": 3330000,  "mode": "USB", "label": "CHU 3330",  "name": "CHU (Canada) 3.330 MHz time signal", "bandwidth": 2600},
+      {"freq_hz": 7850000,  "mode": "USB", "label": "CHU 7850",  "name": "CHU (Canada) 7.850 MHz time signal", "bandwidth": 2600},
+      {"freq_hz": 14670000, "mode": "USB", "label": "CHU 14670", "name": "CHU (Canada) 14.670 MHz time signal", "bandwidth": 2600}
+    ],
+    "CW calling": [
+      {"freq_hz": 3560000,  "mode": "CWL", "label": "80M QRP",  "name": "80 m QRP CW calling", "bandwidth": 500},
+      {"freq_hz": 7030000,  "mode": "CWL", "label": "40M QRP",  "name": "40 m QRP CW calling", "bandwidth": 500},
+      {"freq_hz": 10106000, "mode": "CWU", "label": "30M QRP",  "name": "30 m QRP CW calling", "bandwidth": 500},
+      {"freq_hz": 14060000, "mode": "CWU", "label": "20M QRP",  "name": "20 m QRP CW calling", "bandwidth": 500},
+      {"freq_hz": 18096000, "mode": "CWU", "label": "17M QRP",  "name": "17 m QRP CW calling", "bandwidth": 500},
+      {"freq_hz": 21060000, "mode": "CWU", "label": "15M QRP",  "name": "15 m QRP CW calling", "bandwidth": 500},
+      {"freq_hz": 24906000, "mode": "CWU", "label": "12M QRP",  "name": "12 m QRP CW calling", "bandwidth": 500},
+      {"freq_hz": 28060000, "mode": "CWU", "label": "10M QRP",  "name": "10 m QRP CW calling", "bandwidth": 500}
+    ],
+    "FT8": [
+      {"freq_hz": 3573000,  "mode": "USB", "label": "80M FT8", "name": "80 m FT8", "bandwidth": 2600},
+      {"freq_hz": 7074000,  "mode": "USB", "label": "40M FT8", "name": "40 m FT8", "bandwidth": 2600},
+      {"freq_hz": 10136000, "mode": "USB", "label": "30M FT8", "name": "30 m FT8", "bandwidth": 2600},
+      {"freq_hz": 14074000, "mode": "USB", "label": "20M FT8", "name": "20 m FT8", "bandwidth": 2600},
+      {"freq_hz": 18100000, "mode": "USB", "label": "17M FT8", "name": "17 m FT8", "bandwidth": 2600},
+      {"freq_hz": 21074000, "mode": "USB", "label": "15M FT8", "name": "15 m FT8", "bandwidth": 2600},
+      {"freq_hz": 24915000, "mode": "USB", "label": "12M FT8", "name": "12 m FT8", "bandwidth": 2600},
+      {"freq_hz": 28074000, "mode": "USB", "label": "10M FT8", "name": "10 m FT8", "bandwidth": 2600}
+    ]
+  }
+}

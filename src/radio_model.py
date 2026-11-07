@@ -199,6 +199,7 @@ class RadioModel:
         # Held raw. The meters decide how to show them; nothing here knows
         # about S units or bar segments.
         self.s_value = 0.0             # S units, 0-9 then dB over
+        self.s_reported = False        # FIX (2026-11-06): has the rig sent one
         self.pwr = 0.0                 # watts
         self.swr = 1.0
 

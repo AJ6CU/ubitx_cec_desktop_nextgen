@@ -201,9 +201,27 @@ rig and SDR++. Still to do, roughly in order of value:
   fault from the other side -- it validated IPv6 and then rejected it. Worth
   fixing when somebody asks for it; nobody has.
 
-* **The meters.** `cp_`, `al_` (S-meter) and `vm_` (power and SWR) are
-  unwired, so both meters are empty. Wiring them also lets the scanner stop
-  on a signal, which it cannot do today.
+* **The meters.** *S-meter and scan-on-signal DONE 2026-11-06
+  (scan_signal.zip), to check at the station.* Mark: an A7 sensor is assumed
+  (the extra I2C Nano is not supported going forward); without an SDR the
+  rig's A7 reading is used, with one the SDR's signal report where it has
+  one (not SDR++). `cp_` now sets model.s_value through RIG_S_STEPS (KD8CEC
+  sends a STEP 0-8, only when it changes, only with the S-meter display
+  option on and outside SDR mode -- KD8CEC ubitx_lcd_nextion.ino idle_process).
+  The scanner (scanner.py) can HOLD on a signal: "hold on S[n]" beside the
+  dwell on the Channels tab -- a channel whose level reaches n is held as
+  long as it stays and left SIGNAL_HANG_MS (3 s) after it drops; a reading
+  is believed only SIGNAL_SETTLE_MS after arriving; unticked, or with no
+  reading (SDR++), it scans by time and the operator presses Stop.
+  test_scan_signal.py 10/10 (0/10 on the old files). The threshold is not
+  saved yet (ChannelSets keeps the dwell; scanner threshold to join it).
+  Left: `al_` (the malformed S-meter report) stays unwired; RIG_S_STEPS is a
+  first guess at what each step means. *Power/SWR (`vm_`):* no sensor yet --
+  a future Pico board will have one; the meter's other half stays empty.
+* **Machine and general settings dialogs (Mark, 2026-11-06).** The S-meter
+  calibration (sMeterLevels) and many other machine and general settings
+  need dialogs to set them -- they are in the original Main branch, to be
+  brought across. RIG_S_STEPS belongs with the S-meter calibration.
 * ~~**The CW tab**~~ DONE 2026-11-06, checked at the station (cw_edit.zip) -- key type (`ck_`), speed (`vs_`), sidetone, the two delays
   (`vy_`, `ve_`) and the offset switch (`ch_`). SEEN 2026-11-05: the Keyer
   segmented button is not set from EEPROM -- nothing on the tab is: its

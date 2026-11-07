@@ -1008,6 +1008,11 @@ class UbitxCecDesktop(sCTk):
         # tab edits them and the scanner will read them; nothing else keeps a
         # copy.
         self.channel_sets = ChannelSets()
+        # FIX (2026-11-06): WWV, CW calling and FT8 sets for an operator with
+        # none yet -- once; see ChannelSets.add_starter_sets.
+        added = self.channel_sets.add_starter_sets()
+        if added:
+            print(f"[channels] starter sets added: {', '.join(added)}")
 
         # on_change is _model_changed rather than refresh: the view redraws,
         # and the SDR is brought into step, from the same notification. schedule
@@ -1044,6 +1049,7 @@ class UbitxCecDesktop(sCTk):
         self.scanner = Scanner(self, self.model, self.connection)
         self.scanner.on_step = self._scan_reached
         self.scanner.on_stop = self._scan_stopped
+        self.scanner.on_hold = self._scan_held         # FIX (2026-11-06)
 
         #   initialize radio connection
         #
@@ -2639,12 +2645,30 @@ class UbitxCecDesktop(sCTk):
         self.scan_button = sCTkButtonPrimary(actions, text="▶ Scan", width=90,
                                              command=self._toggle_scan)
         self.scan_button.pack(side="left", padx=(24, 4))
+        # FIX (2026-11-06): SKIP -- on to the next channel, while scanning.
+        self.skip_button = sCTkButtonSecondary(actions, text="⏭ Skip", width=70,
+                                               command=self._skip_channel)
+        self.skip_button.pack(side="left", padx=(0, 8))
         self.dwell_entry = sCTkEntryPrimary(actions, width=48)
         self.dwell_entry.pack(side="left")
         self.dwell_entry.insert(0, str(self.channel_sets.dwell_seconds))
         self.dwell_entry.bind("<Return>", lambda e: self._read_dwell())
         self.dwell_entry.bind("<FocusOut>", lambda e: self._read_dwell())
         sCTkLabelTertiary(actions, text="seconds on each").pack(side="left", padx=4)
+        # FIX (2026-11-06): HOLD ON A SIGNAL -- or scan by time alone, the
+        # box unticked. The level from whichever receiver is heard; with
+        # none to read (SDR++), the box is greyed and the scan goes by time.
+        self._scan_on_signal = tk.BooleanVar(value=False)
+        self.scan_signal_box = sCTkCheckBox(actions, text="hold on S", width=20,
+                                            variable=self._scan_on_signal)
+        self.scan_signal_box.pack(side="left", padx=(12, 2))
+        self.scan_threshold_entry = sCTkEntryPrimary(actions, width=32)
+        self.scan_threshold_entry.pack(side="left")
+        self.scan_threshold_entry.insert(0, str(self.channel_sets.hold_level))
+        self.scan_threshold_entry.bind("<Return>", lambda e: self._read_scan_threshold())
+        self.scan_threshold_entry.bind("<FocusOut>", lambda e: self._read_scan_threshold())
+        self.scan_signal_note = sCTkLabelTertiary(actions, text="")
+        self.scan_signal_note.pack(side="left", padx=4)
         self._scan_set_name = None
 
 
@@ -3346,6 +3370,8 @@ class UbitxCecDesktop(sCTk):
 
         # Scan: Stop while running. Otherwise only with something to scan --
         # and for the rig's set, only once it is read and not being written.
+        # FIX (2026-11-06): Skip only while a scan runs.
+        self.skip_button.state("normal" if self.scanner.running else "disabled")
         if self.scanner.running:
             self.scan_button.configure(text="■ Stop")
             self.scan_button.state("normal")
@@ -3355,6 +3381,16 @@ class UbitxCecDesktop(sCTk):
             if not in_set and self.model.channels_state != "read":
                 scannable = False
             self.scan_button.state("normal" if scannable else "disabled")
+
+        # FIX (2026-11-06): holding on a signal needs one to read, and is
+        # chosen before a scan starts, not during it.
+        available = self._signal_available()
+        live = available and not self.scanner.running
+        self.scan_signal_box.configure(state="normal" if live else "disabled")
+        self.scan_threshold_entry.configure(state="normal" if live else "disabled")
+        note = "" if available else "(no signal reading -- by time)"
+        if self.scan_signal_note.cget("text") != note:
+            self.scan_signal_note.configure(text=note)
 
         # Set on the table itself, so a cell that may not be changed never
         # opens an editor at all -- rather than opening one and refusing.
@@ -3400,12 +3436,58 @@ class UbitxCecDesktop(sCTk):
         self._read_dwell()
         name = self.set_picker.get()
         self._scan_set_name = name
+        threshold = None
+        if self._scan_on_signal.get() and self._signal_available():
+            threshold = self._read_scan_threshold()
         # The channels are FETCHED at every step, not copied now, so an edit
         # made during the scan is honoured on the next pass.
         self.scanner.start(lambda: self._set_entries(name),
                            start_index=self._selected_channel or 0,
-                           dwell_seconds=self.channel_sets.dwell_seconds)
+                           dwell_seconds=self.channel_sets.dwell_seconds,
+                           signal=self._signal_level, threshold=threshold)
         self.refresh()
+
+    def _signal_level(self):
+        """
+        FIX (2026-11-06): the signal in S-units from the receiver being heard
+        -- the SDR's reading through the SDR (None where it has none, as
+        SDR++), the rig's S-meter (A7) through the rig. The rig sends its
+        meter only when the step changes, and never a first S0, so a rig not
+        yet heard from reads S0.
+        """
+        if self._listen_source == "SDR":
+            return self.sdr.s_units()
+        return self.model.s_value
+
+    def _signal_available(self):
+        """Is there a signal level to hold on? See _signal_level."""
+        if self._listen_source == "SDR":
+            return "signal" in self.sdr.capabilities
+        return self.rig_state == "connected"
+
+    def _read_scan_threshold(self):
+        """
+        The S-level to hold on, from its box: a whole S-unit, 1 to 9.
+        FIX (2026-11-06): saved with the sets, like the dwell -- it went back
+        to S5 at every start.
+        """
+        level = self.channel_sets.set_hold_level(
+            self.scan_threshold_entry.get().strip().lstrip("Ss"))
+        self.scan_threshold_entry.delete(0, "end")
+        self.scan_threshold_entry.insert(0, str(level))
+        return level
+
+    def _skip_channel(self):
+        """FIX (2026-11-06): the scan moves on to the next channel now."""
+        if self.scanner.running:
+            self.scanner.skip()
+
+    def _scan_held(self, index, level):
+        """FIX (2026-11-06): a signal is holding the scan -- or has let it go."""
+        if level is not None:
+            self._notify(f"scan holding -- signal S{level:.0f}", seconds=3600)
+        else:
+            self._notify("scan moving on -- the signal dropped")
 
     def _read_dwell(self):
         """Takes the time on each channel from its box, and saves it."""

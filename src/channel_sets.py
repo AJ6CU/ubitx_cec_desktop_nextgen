@@ -58,12 +58,21 @@ means nothing is ever lost to a crash or a forgotten save.
 
 import json
 import os
+import shutil
 import time
 
 from app_paths import config_path
 
 # Seconds on each channel when nothing has been set yet.
 DEFAULT_DWELL_SECONDS = 5
+# FIX (2026-11-06): the S-level a scan holds on, until the operator sets one.
+DEFAULT_HOLD_LEVEL = 5
+
+# FIX (2026-11-06): STARTER SETS, shipped beside the code -- WWV and CHU,
+# CW calling frequencies, FT8 -- put in for an operator who has no sets yet,
+# so the Channels tab shows what it can do from the first start (Mark).
+STARTER_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            "starter_channels.json")
 
 # Beside the settings file, in the application's folder -- see app_paths.
 DEFAULT_PATH = config_path("channels.json")
@@ -93,7 +102,8 @@ def _clean_channel(raw):
     except (TypeError, ValueError):
         freq = 0
     try:
-        bandwidth = int(raw.get("bandwidth", 0))
+        # FIX (2026-11-06): some old entries name the width "filter_hz".
+        bandwidth = int(raw.get("bandwidth", raw.get("filter_hz", 0)))
     except (TypeError, ValueError):
         bandwidth = 0
     return {"freq_hz": freq,
@@ -113,8 +123,17 @@ class ChannelSets:
                 home; given one, a test can use a scratch file.
         """
         self.path = path or DEFAULT_PATH
+        # FIX (2026-11-06): ONE BACKUP, channels.json.bak -- the file as it
+        # was before this session changed anything. Made just before the
+        # first save of the session, so an edit or a delete regretted later
+        # can be put back by hand. Only one is kept (Mark): each session's
+        # first change replaces it. A session that changes nothing leaves the
+        # last one alone.
+        self.backup_path = self.path + ".bak"
+        self._backed_up = False
         self._sets = {}
-        self._scan = {"dwell_seconds": DEFAULT_DWELL_SECONDS}
+        self._scan = {"dwell_seconds": DEFAULT_DWELL_SECONDS,
+                      "hold_level": DEFAULT_HOLD_LEVEL}
         self.load()
 
     # ------------------------------------------------------------------
@@ -142,6 +161,12 @@ class ChannelSets:
                 if isinstance(scan, dict):
                     self._scan["dwell_seconds"] = self._clean_dwell(
                         scan.get("dwell_seconds"), self._scan["dwell_seconds"])
+                    self._scan["hold_level"] = self._clean_hold(
+                        scan.get("hold_level"), self._scan["hold_level"])
+                    # Whether the starter sets were given -- see
+                    # add_starter_sets. Kept as it was found.
+                    if scan.get("starter_sets_given"):
+                        self._scan["starter_sets_given"] = True
                 return
             except (OSError, ValueError, AttributeError) as err:
                 kept = f"{self.path}.damaged-{time.strftime('%Y%m%d-%H%M%S')}"
@@ -174,6 +199,50 @@ class ChannelSets:
     def dwell_seconds(self):
         """Seconds the scan spends on each channel."""
         return self._scan["dwell_seconds"]
+
+    @staticmethod
+    def _clean_hold(value, fallback):
+        """An S-level to hold a scan on: whole S-units, 1 to 9, or `fallback`."""
+        try:
+            return max(1, min(9, int(round(float(value)))))
+        except (TypeError, ValueError):
+            return fallback
+
+    @property
+    def hold_level(self):
+        """FIX (2026-11-06): the S-level a scan holds on -- kept, like the dwell."""
+        return self._scan["hold_level"]
+
+    def set_hold_level(self, level):
+        """Sets the S-level a scan holds on, 1 to 9, and saves."""
+        self._scan["hold_level"] = self._clean_hold(level, self._scan["hold_level"])
+        self.save()
+        return self._scan["hold_level"]
+
+    # ------------------------------------------------------------------
+    # The starter sets
+    # ------------------------------------------------------------------
+    # FIX (2026-11-06): THE STARTER SETS, ONCE. Put in when the operator has
+    # no sets at all -- the first start, or a file with none in it -- and
+    # then never again: "starter_sets_given" is kept in the file, so sets
+    # the operator deletes do not come back. A set of the same name already
+    # there is left alone.
+    def add_starter_sets(self, path=None):
+        """Adds the shipped starter sets if they are due. Returns the names added."""
+        if self._scan.get("starter_sets_given") or self._sets:
+            return []
+        try:
+            with open(path or STARTER_PATH, "r", encoding="utf-8") as handle:
+                starter = self._from_registry(json.load(handle).get("sets", {}))
+        except (OSError, ValueError, AttributeError) as err:
+            print(f"[channels] no starter sets ({err})")
+            return []
+        added = [name for name in starter if name not in self._sets]
+        for name in added:
+            self._sets[name] = starter[name]
+        self._scan["starter_sets_given"] = True
+        self.save()
+        return added
 
     def set_dwell_seconds(self, seconds):
         """Sets the time on each channel, 1 to 120 seconds, and saves."""
@@ -285,6 +354,18 @@ class ChannelSets:
         if self._sets.pop(set_name, None) is not None:
             self.save()
 
+    def _back_up_once(self):
+        """Copies the file to channels.json.bak, the first time a session saves."""
+        if self._backed_up:
+            return
+        self._backed_up = True
+        if not os.path.exists(self.path):
+            return                          # nothing yet to keep
+        try:
+            shutil.copy2(self.path, self.backup_path)
+        except OSError as err:
+            print(f"[channels] could not back up {self.path}: {err}")
+
     def save(self):
         """
         Writes every set to the channel file.
@@ -295,6 +376,7 @@ class ChannelSets:
         part-way through leaves the previous file intact, not a truncated
         one that would lose every set.
         """
+        self._back_up_once()
         data = {"version": FILE_VERSION,
                 "sets": {set_name: [dict(ch) for ch in channels]
                          for set_name, channels in self._sets.items()},

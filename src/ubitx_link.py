@@ -708,8 +708,26 @@ class uBITX_Link:
 
         def cp_UX_S_Meter_Value(self, buffer):
             value = self._extract_value(buffer, 10, len(buffer) - 3)
-            print("S_Meter_Value: ", value)
-            # self.s_meter_Progressbar_VAR.set(int(value))
+            # FIX (2026-11-06): THE RIG'S S-METER, wired -- it only printed.
+            # KD8CEC sends it from the A7 sensor as a STEP, 0 to 8: which of
+            # the eight levels calibrated in the rig (sMeterLevels) the
+            # reading has passed. Sent only when it changes, only with the
+            # S-meter display option on, and only OUTSIDE SDR mode -- in SDR
+            # mode the SDR's own reading is the one used. Shown on the
+            # meter's S-unit scale through RIG_S_STEPS; anything else ignored.
+            try:
+                step = int(str(value).strip())
+            except ValueError:
+                return
+            if 0 <= step < len(self.RIG_S_STEPS):
+                self._model.s_value = self.RIG_S_STEPS[step]
+                self._model.s_reported = True
+
+        # Each rig S-meter step on the S-unit scale -- S0, then the eight
+        # levels spread to S9. A first guess: what each step means is set by
+        # the calibration in the rig, and belongs with that calibration's
+        # dialog when it is built.
+        RIG_S_STEPS = (0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.5, 8.0, 9.0)
 
         #
         #   This is a hack fix for a bug in CEC (at least v2.0, perhaps in 1.x too)
