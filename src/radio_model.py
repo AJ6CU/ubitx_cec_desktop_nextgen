@@ -125,6 +125,12 @@ class RadioModel:
         # receives on the sum, which is this VFO.
         #
         self.rit_base_hz = 0
+        # FIX (2026-11-08): the VFO RIT was switched on in -- see
+        # uBITX_Link._rit_cleared_by_switch.
+        self.rit_vfo = None
+        # FIX (2026-11-08): RIT kept by the APP, not the firmware -- in split
+        # only. See uBITX_Link._start_virtual_rit.
+        self.rit_virtual = False
 
         self.locked = False
         self.muted = False
@@ -366,7 +372,9 @@ class RadioModel:
         """
         if not self.rit or not self.rit_base_hz:
             return 0
-        return self.frequency(self.rx_vfo) - self.rit_base_hz
+        # FIX (2026-11-08): the VFO RIT was set on, where known -- in split the
+        # firmware swaps VFOs to transmit, and the offset is still A's.
+        return self.frequency(self.rit_vfo or self.rx_vfo) - self.rit_base_hz
 
     def role_vfo(self, role):
         """

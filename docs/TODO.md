@@ -105,6 +105,26 @@ since the structure changed.
 see [Things worth not relearning](#things-worth-not-relearning) below. Four
 were hit in a single session and each cost a debugging round.
 
+**User documentation tidbits -- ubitx_cec_desktop.** Things to put in the
+operator's guide when it is written, collected here as they come up:
+
+* *Undoing a session's channel edits* (Mark, 2026-11-06). Edits to the app's
+  channel sets save at once, with no undo. Before a session's first change
+  the app keeps the file as it was in
+  `~/.ubitx_cec_desktop/channels.json.bak` -- one copy, replaced by each
+  session's first change. To go back: quit the app, copy
+  `channels.json.bak` over `channels.json`, start again. To keep or move
+  channels, copy `channels.json`.
+* *Terminology* (Mark, 2026-11-06): the rig's S-meter input is the "radio
+  S-meter sensor" -- never "A7", the Nano pin it is wired to.
+* *S-meter levels*: stored in the rig's EEPROM; never calibrated they are
+  useless (all 0 reads everything as S9, all 255 always S0). Set them in
+  EEPROM settings if listening through the radio's sensor; the SDR's meter
+  is scaled in the app instead. The sensor is used only when listening
+  through the radio -- never through an SDR, even one without a reading.
+* *Settings that stay in SDRoxide's own window* -- the APF lift, the NR
+  engine and the rest rigctl cannot reach; see the SDRoxide section below.
+
 **Anchors: `id` rather than `name`.** Some renderers ignore `name` on an empty
 anchor, so a table of contents entry silently fails. Where the heading text
 matches the link, the auto-generated slug works without an explicit anchor at
@@ -202,7 +222,7 @@ rig and SDR++. Still to do, roughly in order of value:
   fixing when somebody asks for it; nobody has.
 
 * **The meters.** *S-meter and scan-on-signal DONE 2026-11-06
-  (scan_signal.zip), to check at the station.* Mark: an A7 sensor is assumed
+  (scan_signal.zip; Skip, hold level kept), working at the station.* Mark: an A7 sensor is assumed
   (the extra I2C Nano is not supported going forward); without an SDR the
   rig's A7 reading is used, with one the SDR's signal report where it has
   one (not SDR++). `cp_` now sets model.s_value through RIG_S_STEPS (KD8CEC
@@ -213,15 +233,100 @@ rig and SDR++. Still to do, roughly in order of value:
   long as it stays and left SIGNAL_HANG_MS (3 s) after it drops; a reading
   is believed only SIGNAL_SETTLE_MS after arriving; unticked, or with no
   reading (SDR++), it scans by time and the operator presses Stop.
-  test_scan_signal.py 10/10 (0/10 on the old files). The threshold is not
-  saved yet (ChannelSets keeps the dwell; scanner threshold to join it).
+  test_scan_signal.py 12/12 (0/10 on the old files). A SKIP button beside
+  Scan (Mark, 2026-11-06): on to the next channel now, held or not. The threshold is
+  kept in channels.json beside the dwell (starter_sets.zip).
   Left: `al_` (the malformed S-meter report) stays unwired; RIG_S_STEPS is a
   first guess at what each step means. *Power/SWR (`vm_`):* no sensor yet --
   a future Pico board will have one; the meter's other half stays empty.
+* ~~**Settings dialogs**~~ -- DONE 2026-11-06, checked at the station (Mark),
+  final zip smeter_when.zip. From the Main branch's Machine and General dialogs, only
+  what still does something: (a) the STATION CALLSIGN on Setup is the rig's
+  (sc report; never the model's seed) and a changed one is written to EEPROM
+  -- 780: key 0x59, bit 7 show-at-start + length, text, one write (Mark:
+  "can we update it in eeprom?" -- yes); (b) EEPROM SETTINGS (Other
+  Settings): show the callsign at start-up, the S-METER REPORTS switch
+  (display option 361, bit 0x08 -- off, the rig sends no `cp` at all) and
+  the 8 S-METER LEVELS (230-237), read on opening, Apply lists old -> new
+  and asks, restart offered; (c) MACHINE SETTINGS: the COMMAND HEADROOM,
+  Main's 40-200 ms list, used at once and saved -- the link no longer
+  hardcodes 0.04 (40 ms is the floor); PWR/SWR switch and factors shown
+  greyed until the Pico sensor. Dropped as doing nothing now: MCU Update
+  Period and Read Wait (the old polling loop), Number delimiter, Virtual
+  keyboard, VFO touch-optimized. Addresses from KD8CEC's ubitx_eemap.h,
+  read in C byte order (flag 0x59); every write under the checksum limit.
+  NOTE: Mark's settings file holds a headroom of 0.09 from the old app --
+  now in use; set 40 in Machine settings to go back to the old pacing.
+  test_rig_settings.py 10/10 (0/8 on the old files). FIXED same day (Mark:
+  "being forced to set levels"): the levels were checked on every Apply, so
+  a rig whose stored levels do not rise (never set, or erased) refused any
+  change -- now checked only when changed; the dialog says when the rig's
+  levels cannot work.
+  ADVANCED TIMING (Mark, 2026-11-06; machine_timing.zip): Machine settings
+  also sets the link's Nano-speed timings -- step settle, follow-up delay,
+  frequency follow, frequency confirm / transmit write / EEPROM read and
+  write timeouts, EEPROM read pace, retries (ubitx_link.TIMING_SETTINGS,
+  ranges and defaults; apply_timing sets the module's constants, applied at
+  connect, saved under "Link Timing"; Reset timing). Defaults unchanged.
+  CALLSIGN FIX: the show-at-start-up flag shares a byte with the length, so
+  the write now reads it first if not yet read -- before, writing from
+  Station without opening EEPROM settings would have turned it off.
+  test_rig_settings.py 12/12.
+  WARNING + WORDS (Mark, 2026-11-06; smeter_warning.zip): EEPROM settings
+  always shows that all-0 levels read every signal as about S9 and to
+  calibrate if listening through the radio's sensor; the status line says
+  which way the rig's own levels fail (all 0 -> S9, all 255 -> S0, not
+  rising). TERMINOLOGY: the operator sees "radio S-meter sensor", never
+  "A7" (the Nano's pin) -- for the docs too. test_rig_settings.py 14/14.
+  The dialog also says WHEN the sensor is used (Mark): only listening through
+  the radio; through an SDR the meter shows the SDR's reading (the rig sends
+  none in its SDR mode); an SDR without one (SDR++) leaves the meter empty --
+  no fall-back to the sensor.
+  ANSWERS for the docs: the Station callsign is the rig's sc report, which
+  the firmware sends from EEPROM at boot; a changed one goes to EEPROM, not
+  settings.json, and shows on the rig after a restart. All-zero S-meter
+  levels: any A7 reading above 0 passes every step, so the rig reports step
+  8 (about S9) almost always -- the meter pins and scan-on-signal holds on
+  every channel; the levels must be set for the meter to mean anything.
+  The SDR's S-meter is scaled in the app (sdr_link: S9_DBFS -44 dBFS, 6 dB
+  per S-unit -- a guess from the noise floor) unless the SDR reports
+  relative to S9 itself (SDRoxide's STRENGTH); the rig's levels calibrate
+  only the rig's A7 meter. To do: an S-meter calibration that sets S9_DBFS
+  from a known signal, and the rig's levels from the SDR's reading. Not done: a live A7
+  reading to calibrate against (the firmware's ADC command loops until the
+  next command, and its `vn` reports collide with the write acknowledgement);
+  the Appearance choice on Station is still a placeholder.
 * **Machine and general settings dialogs (Mark, 2026-11-06).** The S-meter
   calibration (sMeterLevels) and many other machine and general settings
   need dialogs to set them -- they are in the original Main branch, to be
   brought across. RIG_S_STEPS belongs with the S-meter calibration.
+  THE OLD APP'S FILE, ~/.ubitx_cec_desktop.ini (seen 2026-11-06), lists
+  what it kept. Already set somewhere in this app: Serial Port; SDR,
+  SDR Software, SDR Autostart, Radio IP/Port, SDR SSB/CW/Filter widths;
+  DSP; the Logbook five; Master Cal, SSB BFO, CW BFO and the five CW values
+  (backup dialog, CW tab). READ BUT NOT SETTABLE: MCU Command Headroom,
+  MCU Read Wait Period, MCU Update Period (the link hardcodes the headroom),
+  NUMBER DELIMITER, PWR SWR switch with PWR/SWR Factor (waits for the Pico
+  sensor). NOT IN THIS APP AT ALL -- keep, move, or drop, Mark to say:
+  Callsign, CW Copy VFOA to VFOB on Split, TXOffset ("EEPROM"), VFO Touch
+  Optimized, Virtual Keyboard Switch, Audio Gain Volume Level. State, not
+  settings: Last Active Frequency, SDR Current Mode. The old scanner's
+  Scan On Station Time and Scan Set Settings are replaced by channels.json.
+* **Starter channel sets (Mark, 2026-11-06) -- DONE (starter_sets.zip).**
+  Importing the old .ini's banks was dropped: they were dummies, so the
+  offer was no use. Instead the app ships starter_channels.json beside the
+  code -- "Time signals" (WWV 5/10/15/20/25 MHz, CHU 3330/7850/14670 kHz,
+  USB at the carrier), "CW calling" (the QRP CW calling frequencies 80-10 m,
+  CWL below 10 MHz) and "FT8" (the standard dial frequencies 80-10 m, USB) --
+  put into channels.json when the operator has NO sets (the first start, or
+  a file with none), ONCE: "starter_sets_given" is kept, so deleted starter
+  sets do not come back. ChannelSets.add_starter_sets, called at start-up.
+  Also: the scan's HOLD LEVEL is kept in channels.json beside the dwell.
+  test_starter_sets.py 10/10 (0/7 on the old files). Mark checked the sets at
+  the station 2026-11-06. ONE BACKUP (Mark): channels.json.bak, the file as
+  it was before the session's first change -- set edits save at once with no
+  undo, so this is the way back. Only one kept; a session that changes
+  nothing leaves it alone (channel_bak.zip).
 * ~~**The CW tab**~~ DONE 2026-11-06, checked at the station (cw_edit.zip) -- key type (`ck_`), speed (`vs_`), sidetone, the two delays
   (`vy_`, `ve_`) and the offset switch (`ch_`). SEEN 2026-11-05: the Keyer
   segmented button is not set from EEPROM -- nothing on the tab is: its

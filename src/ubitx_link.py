@@ -132,6 +132,61 @@ READER_REPEAT_WINDOW = 5.0
 READER_ZERO_RUN = 64
 
 MCU_COMMAND_HEADROOM = .04
+# FIX (2026-11-06): the headroom is a SETTING again -- Machine settings sets
+# uBITX_Link.command_headroom; this is the value until then, and the least
+# it may be (below it a fast spin overruns the Nano -- see above). The most:
+MCU_COMMAND_HEADROOM_MAX = .2
+# FIX (2026-11-08): how long a firmware "RIT off" waits to see whether split
+# going on caused it -- the firmware reports cr_ 0 just before cs_ 1.
+SPLIT_RIT_WAIT_MS = 300
+
+# FIX (2026-11-09): THE FIRMWARE'S SWAP TO TRANSMIT IN SPLIT is not the
+# operator choosing a VFO. startTx makes the other VFO primary and reports cv
+# BEFORE ct 1, so the app took it as A/B: receive and transmit panels traded
+# places for the whole transmission -- "TX at 7.075.800", the receive VFO's
+# frequency (Mark, D3b) -- and the app's RIT jumped to the transmit VFO. So
+# in split a VFO change waits this long for a transmit (as sdr_link's
+# SPLIT_TX_GRACE_SECONDS) with the roles held; no transmit, it was A/B.
+SPLIT_TX_GRACE_MS = 450
+# FIX (2026-11-08): the longest an exchange of VFOs waits for its borrow.
+EXCHANGE_TIMEOUT_S = 5.0
+
+# FIX (2026-11-06): THE TIMINGS AN OPERATOR MAY ADJUST -- Machine settings,
+# Advanced timing. Each: the constant above, its label, its default and the
+# range allowed. They depend on how fast the rig's Nano is; the defaults are
+# the values tuned at the station, and each constant's comment says why it is
+# where it is. Applied by setting the module's constants (apply_timing): the
+# code reads them where they are used, so a change takes effect on the next
+# use, with nothing else to change.
+TIMING_SETTINGS = (
+    ("STEP_SETTLE_MS", "Step settle (ms)", 150, 50, 1000),
+    ("FOLLOW_UP_DELAY_MS", "Follow-up delay (ms)", 250, 100, 1500),
+    ("FREQ_FOLLOW_MS", "Frequency follow (ms)", 40, 0, 500),
+    ("FREQ_CONFIRM_TIMEOUT_MS", "Frequency confirm timeout (ms)", 500, 200, 3000),
+    ("TX_WRITE_TIMEOUT_MS", "Transmit write timeout (ms)", 2000, 500, 10000),
+    ("CHANNEL_READ_TIMEOUT_MS", "EEPROM read timeout (ms)", 800, 200, 5000),
+    ("CHANNEL_READ_PACE_MS", "EEPROM read pace (ms)", 50, 0, 1000),
+    ("CHANNEL_WRITE_TIMEOUT_MS", "EEPROM write timeout (ms)", 1500, 500, 5000),
+    ("FREQ_RETRIES", "Frequency retries", 2, 0, 5),
+    ("CHANNEL_READ_RETRIES", "EEPROM retries", 2, 0, 5),
+)
+
+
+def apply_timing(values):
+    """
+    Sets the adjustable timings from {name: value} -- each kept in its range,
+    anything missing or unreadable at its default. Returns what is in use.
+    """
+    used = {}
+    for name, _, default, low, high in TIMING_SETTINGS:
+        try:
+            value = int(round(float(values.get(name, default))))
+        except (TypeError, ValueError, AttributeError):
+            value = default
+        value = max(low, min(high, value))
+        globals()[name] = value
+        used[name] = value
+    return used
 
 
 class uBITX_Link:
@@ -188,6 +243,14 @@ class uBITX_Link:
         self._tx_write_state = None
         self._tx_write_hz = None
         self._tx_write_timer = None
+        # FIX (2026-11-08): RIT kept per VFO across a switch -- see
+        # _rit_cleared_by_switch. {vfo: (base, receive)}; the restore under
+        # way, or None.
+        self._rit_saved = {}
+        self._rit_restore = None
+        # FIX (2026-11-09): an exchange with RIT on -- see exchange_vfos.
+        self._exchange_carry = None
+        self._exchange_rit_off = False
         # The most recent thing the dial asked for while a write was running.
         self._tx_write_next = None
         self._tx_write_mode = None
@@ -922,6 +985,11 @@ class uBITX_Link:
             # Carries its state, unlike the toggles above: the code this
             # replaces tested `value == "1"` rather than flipping a flag.
             self._model.transmitting = (str(value).strip() == "1")
+            # FIX (2026-11-09): a transmit during a held split VFO change makes
+            # it the firmware's swap to transmit -- see SPLIT_TX_GRACE_MS.
+            hold = getattr(self._radio_link, "_split_hold", None)
+            if hold is not None and self._model.transmitting:
+                hold["tx"] = True
             # if value == "1":  # going into transmit mode
             #     self.theVFO_Object.setTXButtonState()
             #     #
@@ -1289,7 +1357,11 @@ class uBITX_Link:
             # 1 when split goes on, which is a state rather than a
             # notification. The code this replaced flipped its own flag, and
             # would have inverted permanently after a single missed report.
+            was_split = self._model.split
             self._model.split = str(value).strip() == "1"
+            # FIX (2026-11-08): RIT and split -- see _rit_split_changed.
+            if self._model.split != was_split:
+                self._radio_link._rit_split_changed(self._model.split)
             # if (self.split_Button_On):
             #     self.split_Button_On = False
             #     self.split_Button.configure(style='Button1bRaised.TButton')
@@ -1340,14 +1412,46 @@ class uBITX_Link:
             # anywhere.
             was_on = self._model.rit
             now_on = str(value).strip() == "1"
+            # FIX (2026-11-08): THE APP'S OWN RIT (split) is not the firmware's,
+            # which stays off: its "off" reports say nothing about it. Its "on"
+            # -- RIT pressed on the rig's panel -- ends the app's, which is
+            # replaced by the firmware's without writing anything.
+            if self._model.rit_virtual:
+                if not now_on:
+                    return
+                self._radio_link._end_virtual_rit(write_base=False)
+                was_on = False
             self._model.rit = now_on
             if now_on and not was_on:
                 self._model.rit_base_hz = self._model.frequency(self._model.rx_vfo)
+                self._model.rit_vfo = self._model.rx_vfo     # FIX (2026-11-08)
                 # FIX: no seed. A RIT switched on from the SDR is followed by
                 # the SDR link asking for base + its offset, once this report
                 # has captured the base -- see SDR_Link._follow_rit.
+            elif was_on and not now_on and self._radio_link._exchange_rit_off:
+                # FIX (2026-11-09): turned off for an exchange -- the RIT goes
+                # with its VFO's contents (exchange_vfos), nothing to undo.
+                self._model.rit_base_hz = 0
+                self._model.rit_vfo = None
             elif was_on and not now_on:
-                self._radio_link._leave_rit()
+                # FIX (2026-11-08): turned off BY A VFO SWITCH, or by the
+                # operator? The firmware clears RIT whenever it switches VFO
+                # (menuVfoToggle calls ritDisable) and reports the switch
+                # first -- so a VFO already changed means the switch did it.
+                rit_vfo = self._model.rit_vfo
+                if rit_vfo and self._model.rx_vfo != rit_vfo:
+                    self._radio_link._rit_cleared_by_switch(rit_vfo)
+                    self._radio_link._maybe_restore_rit()
+                else:
+                    # FIX (2026-11-08): OR BY SPLIT GOING ON. The firmware's
+                    # split clears RIT without retuning, and reports cr_ 0
+                    # BEFORE cs_ 1 -- so this waits a moment to see which it
+                    # was: split -> the app keeps RIT itself (cs_ handler);
+                    # otherwise the operator turned it off.
+                    self._radio_link._rit_off_pending = (rit_vfo, self._model.rit_base_hz)
+                    self._model.rit = True          # until it is decided
+                    self._radio_link.root.after(SPLIT_RIT_WAIT_MS,
+                                                self._radio_link._decide_rit_off)
 
 
         def vf_UX_ATT_Level(self, buffer):
@@ -1656,7 +1760,43 @@ class uBITX_Link:
             print("cv_UX_VFO_Toggle: ", value)
             # WHICH IS PRIMARY, not an instruction to exchange the two.
             # 0 is A, 1 is B.
-            self._model.set_active("a" if int(value) == 0 else "b")
+            # FIX (2026-11-08): THE NEW VFO'S FREQUENCY, BEFORE THE FIRMWARE
+            # OVERWRITES IT. Switching with RIT on, menuVfoToggle selects the
+            # new VFO and then ritDisable() tunes to the OLD VFO's RIT base
+            # (setFrequency(ritTxFrequency)) -- so B took A's frequency (Mark).
+            # cv comes before the frequency reports, so B is still B's here;
+            # _rit_cleared_by_switch puts it back.
+            new = "a" if int(value) == 0 else "b"
+            # FIX (2026-11-09): A BORROW'S cv IS THE BORROW'S, checked first.
+            # The app's-RIT branch below took it in split -- set_active, return
+            # -- so the borrow never saw its confirmation, was abandoned after
+            # 2 s with the rig left on the other VFO, and the RIT carried by
+            # A<->B started there (+1800 from A's base, Mark, D2). Tuning the
+            # transmit VFO in split with the app's RIT on failed the same way.
+            # A borrow is not a VFO change the RIT has to follow: it comes back.
+            if self._radio_link._tx_write_state:
+                self._model.set_active(new)
+                self._radio_link._advance_tx_write("cv")
+                return
+            # FIX (2026-11-09): in split, held until it is known whether this
+            # is the transmit swap -- see SPLIT_TX_GRACE_MS.
+            if self._model.split and self._radio_link._split_vfo_hold(new):
+                return
+            if self._model.rit_virtual or (self._model.split and
+                                           getattr(self._radio_link, "_vrit_saved", None)):
+                # FIX (2026-11-08): the app's RIT stays with its VFO -- see
+                # _virtual_rit_vfo_changed. The firmware touches nothing.
+                self._model.set_active(new)
+                self._radio_link._virtual_rit_vfo_changed()
+                return
+            if self._model.rit and not self._radio_link._tx_write_state \
+                    and new != self._model.rx_vfo:
+                self._radio_link._rit_switch_to = (new, self._model.frequency(new))
+            self._model.set_active(new)
+            # FIX (2026-11-08): back on a VFO that had RIT -- see
+            # _maybe_restore_rit. Not during a split borrow, below.
+            if not self._radio_link._tx_write_state:
+                self._radio_link._maybe_restore_rit()
 
             # A transmit write borrows the primary slot; this is the step
             # that tells us the borrow happened. See set_role_frequency.
@@ -1986,6 +2126,93 @@ class uBITX_Link:
 
         self._begin_tx_write(hz)
 
+    # ------------------------------------------------------------------
+    # FIX (2026-11-08): RIT KEPT ACROSS A VFO SWITCH (Mark)
+    # ------------------------------------------------------------------
+    # The firmware keeps one RIT, and its VFO switch turns it off
+    # (menuVfoToggle: FrequencyToVFO, then ritDisable). The VFO left keeps
+    # the receive frequency -- base + offset -- and the base is lost. So the
+    # app remembers the base, and on coming back to that VFO puts RIT back:
+    # the VFO to the base, RIT on (the rig takes the base from where it is),
+    # then receive to where it was. Each step waits for the rig's report.
+    RIT_RESTORE_TIMEOUT_S = 3.0
+
+    def _rit_cleared_by_switch(self, vfo):
+        """
+        RIT turned off by switching away from `vfo`. Its base is remembered;
+        NOTHING IS WRITTEN -- before, _leave_rit ran here and sent the old
+        VFO's base to the NEW one, which was now primary.
+        """
+        base = self._model.rit_base_hz
+        if base:
+            # The receive frequency too -- the VFO left holds it, but a
+            # restore cut short moves that VFO to the base (see below).
+            self._rit_saved[vfo] = (base, self._model.frequency(vfo))
+            print(f"[rig] VFO switch cleared RIT on {vfo.upper()} -- kept, base {base}")
+        self._model.rit_base_hz = 0
+        self._model.rit = False
+        self._model.rit_vfo = None
+        # FIX (2026-11-08): undo the firmware's overwrite of the VFO switched
+        # TO -- see cv_UX_VFO_Toggle. Receive is that VFO now, so an ordinary
+        # write lands on it. Not if it has its own RIT to come back: that
+        # restore puts it where it belongs.
+        to = getattr(self, "_rit_switch_to", None)
+        self._rit_switch_to = None
+        if to is not None:
+            new_vfo, its_hz = to
+            if (new_vfo == self._model.rx_vfo and new_vfo not in self._rit_saved
+                    and its_hz and self._model.frequency(new_vfo) != its_hz):
+                print(f"[rig] the switch tuned {new_vfo.upper()} to the old RIT base "
+                      f"-- putting it back to {its_hz}")
+                self._request_frequency(its_hz)
+
+    def _maybe_restore_rit(self):
+        """Starts putting RIT back if the receive VFO is one that had it."""
+        m = self._model
+        vfo = m.rx_vfo
+        if m.rit or self._rit_restore is not None or vfo not in self._rit_saved:
+            return                 # still on (its "off" report to come), or busy
+        if m.split:
+            return     # FIX (2026-11-08): kept for when split goes off -- see _rit_split_changed
+        if m.transmitting or m.locked:
+            self._rit_saved.pop(vfo, None)      # not now: forgotten, not forced
+            return
+        base, rx = self._rit_saved.pop(vfo)
+        print(f"[rig] back on {vfo.upper()} -- RIT again: base {base}, receive {rx}")
+        self._rit_restore = {"vfo": vfo, "base": base, "rx": rx, "step": "base",
+                             "until": monotonic() + self.RIT_RESTORE_TIMEOUT_S}
+        if m.frequency(vfo) != base:
+            self._request_frequency(base)
+        self.root.after(STEP_SETTLE_MS, self._step_rit_restore)
+
+    def _step_rit_restore(self):
+        r = self._rit_restore
+        if r is None:
+            return
+        m = self._model
+        if (m.rx_vfo != r["vfo"] or m.transmitting
+                or monotonic() > r["until"]):
+            print("[rig] RIT not put back -- the rig moved on or did not answer")
+            self._rit_restore = None
+            # FIX (2026-11-08): KEPT, not lost -- switched away again before it
+            # was back (quick A/B/A), it is put back next time. Unless it did
+            # get back on: then the switch away saved it the usual way.
+            if not (m.rit and m.rit_vfo == r["vfo"]):
+                self._rit_saved[r["vfo"]] = (r["base"], r["rx"])
+                self._maybe_restore_rit()
+            return
+        if r["step"] == "base":
+            if m.frequency(r["vfo"]) == r["base"] and self._freq_sent is None:
+                r["step"] = "on"
+                self.Toggle_RIT()
+        elif r["step"] == "on":
+            if m.rit and m.rit_base_hz == r["base"]:
+                self._rit_restore = None
+                if r["rx"] != r["base"]:
+                    self._request_frequency(r["rx"])
+                return
+        self.root.after(STEP_SETTLE_MS, self._step_rit_restore)
+
     def _leave_rit(self):
         """
         Puts receive back where RIT started, then forgets the base.
@@ -2003,6 +2230,10 @@ class uBITX_Link:
         base = self._model.rit_base_hz
         self._model.rit_base_hz = 0
         self._model.rit = False
+        # FIX (2026-11-08): turned off by the operator: nothing to put back.
+        if self._model.rit_vfo:
+            self._rit_saved.pop(self._model.rit_vfo, None)
+        self._model.rit_vfo = None
         # FIX: no flag for the SDR. The offset is now 0 in the model, and the
         # SDR link's follow() gives the SDR that, as it gives it everything.
         if base and base != self._model.frequency(self._model.rx_vfo):
@@ -2213,7 +2444,27 @@ class uBITX_Link:
     # (model.cw_*); only their factory copies are read here. One read at a
     # time, paced, retried and given up on exactly as the channel reads are.
     SETTING_READS = ("master_cal", "ssb_bfo", "cw_bfo", "factory_master_cal",
-                     "factory_ssb_bfo", "factory_cw_wpm", "factory_cw_sidetone")
+                     "factory_ssb_bfo", "factory_cw_wpm", "factory_cw_sidetone",
+                     "callsign_head", "display_option1", "smeter_levels")
+
+    # FIX (2026-11-06): RIG SETTINGS NOT IN EEPROM.py, from KD8CEC's own map
+    # (ubitx_eemap.h), in EEPROM.py's layout. Read as raw bytes in order --
+    # flag 0x59, the firmware's "C order"; 0x48, used for the numbers, sends
+    # them reversed. Every one fits the firmware's checksum (see set_stored):
+    #   callsign_head  780 (0x30C): 0x59 when a callsign is set, then
+    #                  bit 7 "show at start-up" + its length; the text at 782
+    #   display_option1 361 (0x169): bit 3 (0x08) turns the S-meter reports on
+    #   smeter_levels  230 (0x0E6): the 8 levels A7/4 is compared with
+    RIG_EEPROM = {"callsign_head": [0x0C, 0x03, 2, 0x59, 0, 1],
+                  "display_option1": [0x69, 0x01, 1, 0x59, 0, 1],
+                  "smeter_levels": [0xE6, 0x00, 8, 0x59, 0, 1]}
+    CALLSIGN_KEY = 0x59
+    CALLSIGN_MAX = 18
+    SMETER_DISPLAY_BIT = 0x08
+
+    def _mem_spec(self, name):
+        """EEPROM.py's entry for a setting, or RIG_EEPROM's."""
+        return EEPROM.Mem_Address.get(name) or self.RIG_EEPROM[name]
 
     def read_settings(self):
         """Reads SETTING_READS into model.eeprom_settings."""
@@ -2223,7 +2474,7 @@ class uBITX_Link:
             return
         requests = []
         for name in self.SETTING_READS:
-            spec = EEPROM.Mem_Address[name]
+            spec = self._mem_spec(name)
             requests.append((name, [self.toRadioCommandDict["TS_CMD_READMEM"],
                                     spec[EEPROM.lsb], spec[EEPROM.msb],
                                     spec[EEPROM.memLength], spec[EEPROM.charFlag]]))
@@ -2293,6 +2544,9 @@ class uBITX_Link:
         factory speed is a dot length, like the live one (1200 / wpm); zero,
         or erased EEPROM (all ones), is no value.
         """
+        if name in uBITX_Link.RIG_EEPROM:
+            # FIX (2026-11-06): raw bytes, in order -- see RIG_EEPROM.
+            return list(bytes.fromhex(str(value).strip()))
         raw = int(str(value).strip(), 16)
         if name in ("master_cal", "factory_master_cal"):
             return raw - (1 << 32) if raw >= (1 << 31) else raw
@@ -2379,6 +2633,133 @@ class uBITX_Link:
         which = self._model.active
         self._begin_borrowed_write(self._model.frequency(which),
                                    mode=self._model.mode_of(which))
+
+    def exchange_vfos(self):
+        """
+        FIX (2026-11-08): EXCHANGES A AND B -- frequency and mode -- as an SDR's
+        swap does (Brown's A<->B). Not the app's A/B, which only makes the
+        other VFO primary. The firmware has no exchange either, so: the other
+        VFO is written with the active one's contents through the borrow, and
+        once the slot is handed back, the active one gets the other's old
+        contents with an ordinary write. Each step on the rig's reports.
+
+        FIX (2026-11-09): WITH RIT ON TOO (Mark). A RIT is part of its VFO's
+        contents, so it goes with them: the active VFO's RIT is taken off
+        first -- the firmware's turned off (it retunes to the base, which is
+        expected, not "the operator leaving RIT"), the app's just dropped --
+        and carried to the other VFO as a remembered RIT; the other VFO's,
+        if it had one, comes back on the active VFO at the end.
+        """
+        m = self._model
+        act = m.active
+        if m.rit and self._exchange_carry is None:
+            # The receive frequency is the RIT's -- base + offset -- and the
+            # base: both go with the contents.
+            self._exchange_carry = (m.rit_base_hz, m.frequency(m.rit_vfo or act))
+            if m.rit_virtual:
+                self._end_virtual_rit(write_base=False)
+            else:
+                self._exchange_rit_off = True
+                self._exchange_wait_until = monotonic() + EXCHANGE_TIMEOUT_S
+                self.Toggle_RIT()
+                self.root.after(STEP_SETTLE_MS, self._exchange_after_rit_off)
+                return
+        self._exchange_now()
+
+    def _exchange_after_rit_off(self):
+        """Waits for the firmware to say its RIT is off, then exchanges."""
+        if self._model.rit and monotonic() < self._exchange_wait_until:
+            self.root.after(STEP_SETTLE_MS, self._exchange_after_rit_off)
+            return
+        self._exchange_rit_off = False
+        if self._model.rit:
+            print("[rig] the rig kept its RIT -- no exchange")
+            self._exchange_carry = None
+            return
+        self._exchange_now()
+
+    def _exchange_now(self):
+        m = self._model
+        act = m.active
+        oth = "b" if act == "a" else "a"
+        carry = self._exchange_carry
+        self._exchange_carry = None
+        mine = (carry[1] if carry else m.frequency(act), m.mode_of(act))
+        theirs = (m.frequency(oth), m.mode_of(oth))
+        print(f"[rig] exchanging VFOs: {act.upper()} {mine} <-> {oth.upper()} {theirs}"
+              + (f" -- RIT base {carry[0]} goes with {act.upper()}'s" if carry else ""))
+        # Each VFO's remembered RIT goes with its contents.
+        a_saved, b_saved = self._rit_saved.pop("a", None), self._rit_saved.pop("b", None)
+        if a_saved:
+            self._rit_saved["b"] = a_saved
+        if b_saved:
+            self._rit_saved["a"] = b_saved
+        # FIX (2026-11-09): and the app's own (split) ones, the same way.
+        vsaved = self.__dict__.setdefault("_vrit_saved", {})
+        va, vb = vsaved.pop("a", None), vsaved.pop("b", None)
+        if va:
+            vsaved["b"] = va
+        if vb:
+            vsaved["a"] = vb
+        # FIX (2026-11-09): IN SPLIT, a RIT remembered as the rig's kind (set
+        # before split went on, on the VFO not receiving) becomes the app's,
+        # so it comes back on the receive VFO now -- not only once split goes
+        # off (Mark, D3b). Split off turns these back into the rig's kind.
+        if m.split:
+            for vfo, (base, _rx) in list(self._rit_saved.items()):
+                vsaved[vfo] = base
+            self._rit_saved.clear()
+        # The active VFO's live RIT, taken off above, is remembered for the
+        # VFO its contents go to -- the app's kind in split, the rig's else.
+        if carry:
+            if m.split:
+                vsaved[oth] = carry[0]
+            else:
+                self._rit_saved[oth] = carry
+        self._begin_borrowed_write(mine[0], mode=mine[1])
+        self._exchange = (theirs, monotonic() + EXCHANGE_TIMEOUT_S)
+        self.root.after(STEP_SETTLE_MS, self._exchange_step)
+
+    def _exchange_step(self):
+        """The second half of exchange_vfos, once the borrow is over."""
+        pending = getattr(self, "_exchange", None)
+        if pending is None:
+            return
+        (hz, mode), until = pending
+        if self._tx_write_state and monotonic() < until:
+            self.root.after(STEP_SETTLE_MS, self._exchange_step)
+            return
+        self._exchange = None
+        m = self._model
+        act = m.active
+        if mode and mode != m.mode_of(act):
+            self.set_mode(mode)
+        # FIX (2026-11-09): the contents that arrived may bring a RIT. The
+        # rig's kind: its restore puts the VFO at base, RIT on, receive back --
+        # so no separate write. The app's kind: written, then started.
+        if act in self._rit_saved and not m.split:
+            self._maybe_restore_rit()
+            return
+        self._request_frequency(hz)
+        vsaved = self.__dict__.setdefault("_vrit_saved", {})
+        if m.split and act in vsaved:
+            # FIX (2026-11-09): started once the rig reports the new frequency.
+            # Started at once, its offset came from the OLD one, and Brown was
+            # sent RIT -1700 for a moment before -200 (Mark).
+            self._exchange_rit_when_tuned(act, hz, vsaved.pop(act),
+                                          monotonic() + EXCHANGE_TIMEOUT_S)
+
+    def _exchange_rit_when_tuned(self, vfo, hz, base, until):
+        """The app's RIT for an exchange, once its VFO holds hz (or time's up)."""
+        m = self._model
+        if m.frequency(vfo) != hz and monotonic() < until:
+            self.root.after(STEP_SETTLE_MS, lambda: self._exchange_rit_when_tuned(
+                vfo, hz, base, until))
+            return
+        if m.split and m.rx_vfo == vfo and not m.rit:
+            self._start_virtual_rit(base)
+        else:
+            self.__dict__.setdefault("_vrit_saved", {})[vfo] = base
 
     def _begin_tx_write(self, vfo_hz):
         """Transmit's entry to the borrow. Carries no mode change."""
@@ -2795,6 +3176,156 @@ class uBITX_Link:
         command = [self.toRadioCommandDict["TS_CMD_SPLIT"], 0, 0, 0, 0]
         self.sendCommandToMCU(bytes(command))
 
+    # ------------------------------------------------------------------
+    # FIX (2026-11-08): THE APP'S OWN RIT, IN SPLIT (Mark)
+    # ------------------------------------------------------------------
+    # The firmware's RIT and its split do not mix: with RIT on, startTx sends
+    # on the RIT base and never reaches the split swap -- split is silently
+    # ignored on transmit. But in split the receive VFO's frequency is never
+    # used to transmit, so RIT there needs no help at the moment of keying:
+    # the app keeps it. The base is remembered, the receive VFO really tunes
+    # to base + offset, transmit stays on the other VFO; off, the base is
+    # written back. Out of split it becomes the firmware's real RIT, since
+    # transmit goes on the receive VFO again.
+    def toggle_rit_for_operator(self):
+        """RIT on or off as the operator means it -- the app's in split."""
+        m = self._model
+        if m.rit_virtual:
+            self._end_virtual_rit(write_base=True)
+        elif m.split and not m.rit:
+            self._start_virtual_rit()
+        else:
+            self.Toggle_RIT()
+
+    def _start_virtual_rit(self, base=None):
+        m = self._model
+        m.rit_base_hz = base or m.frequency(m.rx_vfo)
+        m.rit_vfo = m.rx_vfo
+        m.rit_virtual = True
+        m.rit = True
+        print(f"[rig] RIT in split, kept by the app -- base {m.rit_base_hz}")
+        m.changed()
+
+    def _end_virtual_rit(self, write_base):
+        m = self._model
+        base, vfo = m.rit_base_hz, m.rit_vfo
+        m.rit_virtual = False
+        m.rit = False
+        m.rit_base_hz = 0
+        m.rit_vfo = None
+        if write_base and base and vfo == m.rx_vfo and m.frequency(vfo) != base:
+            print(f"[rig] RIT off -- receive back to the base {base}")
+            self._request_frequency(base)
+        m.changed()
+
+    def _virtual_rit_vfo_changed(self):
+        """
+        The receive VFO changed with the app's RIT on: the firmware's swap to
+        transmit in split, or A/B. The RIT stays with its VFO -- remembered
+        while away, back on its return (nothing to write: the firmware moved
+        no frequency).
+        """
+        m = self._model
+        saved = self.__dict__.setdefault("_vrit_saved", {})
+        if m.rit_vfo and m.rx_vfo != m.rit_vfo:
+            saved[m.rit_vfo] = m.rit_base_hz
+            m.rit = False
+            m.rit_virtual = False
+            m.rit_base_hz = 0
+            m.rit_vfo = None
+        if not m.rit and m.split and m.rx_vfo in saved:
+            self._start_virtual_rit(saved.pop(m.rx_vfo))
+        m.changed()
+
+    def _split_vfo_hold(self, new):
+        """
+        A cv in split, not a borrow's. Returns True if it has been dealt with.
+
+        The first change is HELD: active follows the rig (frequency reports
+        go to the right VFO) but the roles stay frozen, so receive and
+        transmit keep their panels and the app's RIT its VFO. The change back
+        ends the hold with nothing to do -- the transmit swap, or a quick
+        A/B/A. No transmit within SPLIT_TX_GRACE_MS: it was A/B, decided by
+        _split_vfo_decide.
+        """
+        m = self._model
+        hold = getattr(self, "_split_hold", None)
+        if hold is None:
+            if new == m.active:
+                return False
+            self._split_hold_id = getattr(self, "_split_hold_id", 0) + 1
+            self._split_hold = {"from": m.active, "tx": False, "id": self._split_hold_id}
+            if m._frozen_active is None:
+                m._frozen_active = m.active
+            m.set_active(new)
+            self.root.after(SPLIT_TX_GRACE_MS,
+                            lambda i=self._split_hold_id: self._split_vfo_decide(i))
+            return True
+        if new == hold["from"]:
+            # Back where it was: the transmit swap ending, or A/B undone.
+            self._split_hold = None
+            m._frozen_active = None
+            m.set_active(new)
+            m.changed()
+            return True
+        m.set_active(new)
+        return True
+
+    def _split_vfo_decide(self, hold_id):
+        """The grace is over: a transmit means wait for the swap back; else A/B."""
+        m = self._model
+        hold = getattr(self, "_split_hold", None)
+        if hold is None or hold["id"] != hold_id:
+            return
+        if hold["tx"] or m.transmitting:
+            self.root.after(SPLIT_TX_GRACE_MS,
+                            lambda i=hold_id: self._split_vfo_decide(i))
+            return
+        self._split_hold = None
+        m._frozen_active = None
+        if m.rit_virtual or self.__dict__.get("_vrit_saved"):
+            self._virtual_rit_vfo_changed()
+        m.changed()
+
+    def _decide_rit_off(self):
+        """The firmware's RIT went off without a VFO switch, and no split came."""
+        pending = getattr(self, "_rit_off_pending", None)
+        self._rit_off_pending = None
+        if pending is None:
+            return
+        self._model.rit = False
+        self._leave_rit()
+        self._maybe_restore_rit()
+
+    def _rit_split_changed(self, split_on):
+        """
+        Split ON: the firmware's RIT, just cleared by it (cr_ 0 came first),
+        becomes the app's -- same base, receive left where it is.
+        Split OFF: the app's RIT becomes the firmware's real RIT (transmit is
+        on the receive VFO again, so only the firmware can move it in time):
+        the VFO to the base, RIT on, receive back -- as after a VFO switch.
+        """
+        m = self._model
+        pending = getattr(self, "_rit_off_pending", None)
+        if split_on and pending is not None:
+            self._rit_off_pending = None
+            vfo, base = pending
+            m.rit = False
+            if base and vfo == m.rx_vfo:
+                self._start_virtual_rit(base)
+            return
+        if not split_on:
+            saved = self.__dict__.setdefault("_vrit_saved", {})
+            if m.rit_virtual:
+                base, vfo = m.rit_base_hz, m.rit_vfo
+                self._end_virtual_rit(write_base=False)
+                if base and vfo:
+                    self._rit_saved[vfo] = (base, m.frequency(vfo))
+            for vfo, base in list(saved.items()):          # the other VFO's
+                self._rit_saved[vfo] = (base, m.frequency(vfo))
+            saved.clear()
+            self._maybe_restore_rit()
+
     def Toggle_RIT(self):
         print("[rig] toggling RIT")    # FIX: was "turning on RIT" -- it toggles
         command = [self.toRadioCommandDict["TS_CMD_RIT"], 0, 0, 0, 0]
@@ -2929,6 +3460,51 @@ class uBITX_Link:
             self._cw_write_attempts = 0
             self._send_cw_write()
 
+    def set_rig_bytes(self, name, data, shown=None):
+        """
+        FIX (2026-11-06): writes one of RIG_EEPROM's settings as raw bytes --
+        the S-meter levels or the display options. Same queue, same
+        acknowledgement as set_stored; the rig reads them as it boots, so they
+        wait in model.settings_pending. `shown`: what the radio column holds
+        after the write (the bytes, unless given).
+        """
+        spec = list(self._mem_spec(name))
+        data = bytes(data)
+        if len(data) != spec[EEPROM.memLength]:
+            raise ValueError(f"{name}: {len(data)} bytes, not {spec[EEPROM.memLength]}")
+        address, command = self._eeprom_write(spec, 0, data)
+        self._queue_stored(name, list(data) if shown is None else shown, address, command)
+
+    def set_callsign(self, callsign, show=False):
+        """
+        FIX (2026-11-06): the callsign into the rig's EEPROM -- key, length
+        with the show-at-start-up bit, then the text, in one write (780 +
+        20 bytes fits the firmware's checksum). An empty callsign clears the
+        key, so the rig has none. Upper case; letters, digits and / only,
+        up to 18. The rig reads it as it boots.
+        """
+        text = str(callsign or "").strip().upper()
+        if len(text) > self.CALLSIGN_MAX or any(not (c.isalnum() or c == "/") for c in text):
+            raise ValueError(f"callsign {text!r}: letters, digits and / only, "
+                             f"{self.CALLSIGN_MAX} at most")
+        if text:
+            head = [self.CALLSIGN_KEY, (0x80 if show else 0) | len(text)]
+        else:
+            head = [0, 0]
+        data = bytes(head) + text.encode("ascii")
+        spec = [0x0C, 0x03, len(data), 0x59, 0, 1]
+        address, command = self._eeprom_write(spec, 0, data)
+        self._queue_stored("callsign", (text, bool(show and text)), address, command)
+
+    def _queue_stored(self, name, value, address, command):
+        queue = self.__dict__.setdefault("_cw_writes", [])
+        queue[:] = [w for w in queue if w[0] != name]
+        queue.append((name, value, address, command, "stored"))
+        self._model.cw_write_failed = None
+        if len(queue) == 1:
+            self._cw_write_attempts = 0
+            self._send_cw_write()
+
     def _fit_firmware_checksum(self, name, spec, data):
         """
         (spec, data) shortened from the top until address + length < 256, as
@@ -2991,6 +3567,10 @@ class uBITX_Link:
             # after the next restart.
             model.eeprom_settings[key] = value
             model.settings_pending[key] = value
+            if key == "callsign":           # FIX (2026-11-06): its head too
+                text, show = value
+                model.eeprom_settings["callsign_head"] = (
+                    [self.CALLSIGN_KEY, (0x80 if show else 0) | len(text)] if text else [0, 0])
         elif reboot:
             model.cw_pending[key] = value
         else:
@@ -3358,8 +3938,10 @@ class uBITX_Link:
         currentTime = timer()
         timeDiff = currentTime - self.time_of_last_sent
 
-        if (timeDiff < MCU_COMMAND_HEADROOM):
-            sleep(MCU_COMMAND_HEADROOM - timeDiff)
+        # FIX (2026-11-06): the operator's headroom, set from Machine settings.
+        headroom = getattr(self, "command_headroom", MCU_COMMAND_HEADROOM)
+        if (timeDiff < headroom):
+            sleep(headroom - timeDiff)
         self.time_of_last_sent = timer()
 
         self.tx_to_mcu_preamble = b'\x59\x58\x68'  # all commands to MCU must start with these three bytes

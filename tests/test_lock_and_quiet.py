@@ -42,7 +42,7 @@ def window(locked=False, source="Rig"):
     w.model = types.SimpleNamespace(locked=locked, muted=False, mode="USB",
                                     band_name=lambda: "40m", BANDS=[("40m", 7000000, 7300000)])
     w.connection = types.SimpleNamespace(**{n: (lambda n=n: (lambda *a: sent.append(n)))()
-                                            for n in ("Toggle_Split", "Toggle_RIT", "Toggle_Lock",
+                                            for n in ("Toggle_Split", "Toggle_RIT", "toggle_rit_for_operator", "Toggle_Lock",
                                                       "Toggle_Stop", "Toggle_Speaker",
                                                       "set_mode_everywhere", "set_role_frequency",
                                                       "set_mode")})
@@ -154,7 +154,8 @@ def link(locked):
                                      mode_of=lambda v: "USB", default_sideband=lambda hz: "LSB")
     l._rig = types.SimpleNamespace(set_role_frequency=lambda r, hz: asked.append(("freq", hz)),
                                    set_mode_everywhere=lambda m: asked.append(("mode", m)),
-                                   Toggle_RIT=lambda: asked.append("rit"))
+                                   Toggle_RIT=lambda: asked.append("rit"),
+                                   toggle_rit_for_operator=lambda: asked.append("rit"))
     l.controller, l.profile = Ctl(), types.SimpleNamespace(to_sdr={"USB": "USB", "LSB": "LSB"},
                                                           from_sdr={"USB": "USB", "LSB": "LSB"}, name="x")
     l._sent_hz, l._sent_mode, l._sent_rit = 7030000, "USB", 0

@@ -43,7 +43,7 @@ from time import sleep, monotonic
 
 import sdr_launcher
 import system_audio
-from rigctl_sdr import RigctlSDR
+from rigctl_sdr import RigctlSDR, VFO_AB
 from rest_sdr import RestSDR
 from sdr_programs import (profile_for, CW_EITHER, FILTER, VOLUME, MUTE, SQUELCH, SIGNAL,
                           AGC, NR, NOTCH, NB, CW_PEAK, SQUELCH_SWITCH, RF_GAIN,
@@ -68,6 +68,28 @@ RIG_MODE_PENDING_SECONDS = 2.0
 # program holding it has gone. Claimed again too quickly, the new program
 # finds it still busy.
 DEVICE_RELEASE_SECONDS = 1.0
+
+# FIX (2026-11-06): a VFO chosen in the SDR waits this long for the rig to
+# switch with it. Past this the rig is taken as having said no (transmitting,
+# say) and the SDR is put back on the rig's VFO -- the rig leads.
+VFO_CONFIRM_SECONDS = 2.0
+
+# FIX (2026-11-08): IN SPLIT THE FIRMWARE SWAPS VFOs TO TRANSMIT. KD8CEC's
+# startTx makes the other VFO active while it transmits and swaps back after
+# (ubitx_20.ino), and it reports the swap BEFORE it reports transmitting.
+# Followed, the SDR jumped to the transmit VFO every time the key went down
+# (Mark). So with split on, a change of the rig's VFO waits this long for a
+# transmit to show; while transmitting in split the SDR stays where it was.
+SPLIT_TX_GRACE_SECONDS = 0.4
+
+# FIX (2026-11-08): RIT IS THE RIG'S AROUND A VFO SWITCH. Brown keeps ONE RIT
+# for both VFOs and leaves it on when its VFO changes; the rig turns RIT off
+# on a switch and the app puts back each VFO's own (uBITX_Link._rit_saved).
+# The SDR's RIT read in the meantime is its OLD VFO's -- pushed at the rig, it
+# put A's RIT on B (Mark). So for this long after the receive VFO changes, a
+# RIT -- or a frequency -- seen in the SDR is not asked of the rig; the SDR is
+# given the rig's.
+VFO_RIT_QUIET_SECONDS = 4.0
 
 
 class SDR_Link:
@@ -95,6 +117,9 @@ class SDR_Link:
         # not sent straight back once the rig confirms it.
         self._sent_hz = None
         self._sent_mode = None
+        self._sent_vfo = None           # FIX (2026-11-06): see _follow_vfos
+        self._sent_other_hz = None
+        self._vfo_pending = None
         self._rig_mode_asked = None     # see RIG_MODE_PENDING_SECONDS
         self._rig_mode_asked_at = 0.0
         # FIX: RIT. The offset last given the SDR, and a change the SDR asked
@@ -203,6 +228,8 @@ class SDR_Link:
         self.controller.on_rit = self._from_sdr_rit   # FIX: one hook, not five
         self.controller.on_bandwidth = lambda span: self._audio_changed()
         self.controller.on_split = self._from_sdr_split
+        self.controller.on_vfo = self._from_sdr_vfo      # FIX (2026-11-06)
+        self.controller.on_swap = self._from_sdr_swap    # FIX (2026-11-08)
         self.controller.on_volume = lambda level: self._audio_changed()
         self.controller.on_mute = lambda muted: self._audio_changed()
         self.controller.on_dsp = lambda function: self._audio_changed()
@@ -213,6 +240,9 @@ class SDR_Link:
         self.controller.on_disconnect = self._lost
         self._sent_hz = None            # FIX: was _sent_frequency, which nothing reads
         self._sent_mode = None
+        self._sent_vfo = None           # FIX (2026-11-06): see _follow_vfos
+        self._sent_other_hz = None
+        self._vfo_pending = None
         self._sent_rit = None
         self._rit_asked = None
         self._rit_rx_asked = None
@@ -263,6 +293,8 @@ class SDR_Link:
         self.controller.on_rit = self._from_sdr_rit   # FIX: one hook, not five
         self.controller.on_bandwidth = lambda span: self._audio_changed()
         self.controller.on_split = self._from_sdr_split
+        self.controller.on_vfo = self._from_sdr_vfo      # FIX (2026-11-06)
+        self.controller.on_swap = self._from_sdr_swap    # FIX (2026-11-08)
         self.controller.on_volume = lambda level: self._audio_changed()
         self.controller.on_mute = lambda muted: self._audio_changed()
         self.controller.on_dsp = lambda function: self._audio_changed()
@@ -286,6 +318,9 @@ class SDR_Link:
         # in full rather than compared against a previous connection.
         self._sent_hz = None
         self._sent_mode = None
+        self._sent_vfo = None           # FIX (2026-11-06): see _follow_vfos
+        self._sent_other_hz = None
+        self._vfo_pending = None
         self._sent_rit = None
         self._rit_asked = None
         self._rit_rx_asked = None
@@ -567,6 +602,19 @@ class SDR_Link:
         if not self.connected:
             return
 
+        # FIX (2026-11-08): note a change of the receive VFO, from wherever --
+        # see VFO_RIT_QUIET_SECONDS.
+        rx_vfo = self._model.rx_vfo
+        if rx_vfo != getattr(self, "_last_rx_vfo", None):
+            self._last_rx_vfo = rx_vfo
+            self._vfo_switch_at = monotonic()
+
+        # FIX (2026-11-06): THE SDR'S VFOs AS THE RIG'S -- see _follow_vfos.
+        # While a VFO chosen in the SDR waits for the rig, the rig's receive
+        # is still the OLD VFO's: sending it would undo the choice.
+        if not self._follow_vfos():
+            return
+
         hz = self._model.role_frequency("rx")
         if self._qsy_waiting():
             # FIX: a QSY from the SDR is under way. Until the rig is there,
@@ -633,6 +681,20 @@ class SDR_Link:
         that when the rig confirms it and follow() runs, it is not sent back.
         """
         hz = int(hz)
+        # FIX (2026-11-06): a VFO switch in the SDR changes its frequency
+        # too -- to the other VFO's. That is not a QSY: while the rig is
+        # switching, the reading is the other VFO's and is ignored.
+        if getattr(self, "_vfo_pending", None) is not None:
+            return
+        # FIX (2026-11-08): NOR JUST AFTER ONE. Switched from the SDR, its
+        # frequency moves several times as the rig switches and puts that
+        # VFO's RIT back (to the base, then to base + offset), and the SDR
+        # reports each a little late. Taken for a tune, it was a QSY -- and a
+        # QSY clears RIT, so RIT vanished after a switch made in Brown (Mark).
+        # Not believed for VFO_RIT_QUIET_SECONDS; the rig's is sent instead.
+        if monotonic() - getattr(self, "_vfo_switch_at", -1e9) < VFO_RIT_QUIET_SECONDS:
+            self._sent_hz = None
+            return
         if self._qsy is not None:
             # Moved again while RIT is being cleared: the latest place wins.
             self._qsy = (hz, monotonic(), False)
@@ -652,7 +714,7 @@ class SDR_Link:
             # base (uBITX_Link._leave_rit): RIT off first, and only once the
             # rig has said so, the new frequency -- see _qsy_waiting.
             self._qsy = (hz, monotonic(), False)
-            self._rig.Toggle_RIT()
+            self._rig.toggle_rit_for_operator()   # FIX (2026-11-08): the app's own in split
             return
         self._rig.set_role_frequency("rx", hz)
 
@@ -806,6 +868,11 @@ class SDR_Link:
         quick on-then-off in the SDR does not leave the rig inverted.
         """
         offset = int(offset)
+        # FIX (2026-11-08): not just after a VFO switch -- the SDR's RIT is
+        # still its old VFO's (VFO_RIT_QUIET_SECONDS). The rig's is sent back.
+        if monotonic() - getattr(self, "_vfo_switch_at", -1e9) < VFO_RIT_QUIET_SECONDS:
+            self._sent_rit = None
+            return
         want_on = offset != 0
         m = self._model
         asked = self._rit_asked
@@ -814,7 +881,7 @@ class SDR_Link:
         self._rit_asked = (offset, monotonic(), want_on)
         self._rit_rx_asked = None
         if want_on != expected_on:
-            self._rig.Toggle_RIT()
+            self._rig.toggle_rit_for_operator()   # FIX (2026-11-08): the app's own in split
         elif want_on and m.rit and m.rit_base_hz:
             self._ask_rig_rx(m.rit_base_hz + offset)
 
@@ -827,6 +894,108 @@ class SDR_Link:
         """
         self._rit_rx_asked = hz
         self._rig.set_role_frequency("rx", hz)
+
+    # ------------------------------------------------------------------
+    # FIX (2026-11-06): VFO A and B, kept with the rig's
+    # ------------------------------------------------------------------
+    def _follow_vfos(self):
+        """
+        Where the SDR has two VFOs (VFO_AB -- SDRoxide, Brown), keeps them as
+        the rig's: the SDR's ACTIVE VFO is the rig's receive VFO, and the
+        OTHER one holds the rig's other VFO's frequency -- so switching VFOs in
+        either shows the right frequency at once, and in split the SDR's other
+        VFO is where the rig transmits. The active VFO's frequency is sent by
+        follow() as before.
+
+        The RIG LEADS: a VFO chosen in the SDR is asked of the rig
+        (_from_sdr_vfo) and pending until the rig reports it. False while
+        pending -- follow() then sends nothing, since the rig's receive is
+        still the old VFO's.
+        """
+        if VFO_AB not in self.capabilities:
+            return True
+        m = self._model
+        rig_vfo = m.rx_vfo
+        if self._vfo_pending is not None:
+            target, at = self._vfo_pending
+            if rig_vfo == target:
+                self._vfo_pending = None
+            elif monotonic() - at > VFO_CONFIRM_SECONDS:
+                print(f"[sdr] the rig did not switch to VFO {target.upper()} "
+                      f"-- the SDR goes back to the rig's")
+                self._vfo_pending = None
+                self._sent_vfo = None
+            else:
+                return False
+        # FIX (2026-11-08): the swap for a transmit in split is not followed --
+        # see SPLIT_TX_GRACE_SECONDS. A real A/B press in split goes through
+        # once the grace is over with no transmit.
+        if m.split and self._sent_vfo is not None and rig_vfo != self._sent_vfo:
+            if m.transmitting:
+                return False
+            seen = getattr(self, "_split_change_seen", None)
+            if seen is None:
+                self._split_change_seen = monotonic()
+                self.root.after(int(SPLIT_TX_GRACE_SECONDS * 1000) + 50, self.follow)
+                return False
+            if monotonic() - seen < SPLIT_TX_GRACE_SECONDS:
+                return False
+        self._split_change_seen = None
+        if rig_vfo != self._sent_vfo:
+            if self.controller.set_vfo(rig_vfo):
+                self._sent_vfo = rig_vfo
+                # The newly active VFO's frequency is sent below in follow(),
+                # and the other one's here -- both start afresh.
+                self._sent_hz = None
+                self._sent_other_hz = None
+            if VFO_AB not in self.capabilities:
+                return True                    # it refused: one VFO after all
+        other = "b" if rig_vfo == "a" else "a"
+        other_hz = m.frequency(other)
+        if other_hz and other_hz != self._sent_other_hz:
+            if self.controller.set_vfo_frequency(other, other_hz):
+                self._sent_other_hz = other_hz
+        return True
+
+    def _from_sdr_vfo(self, which):
+        """
+        A VFO chosen in the SDR. Asked of the rig, which leads: the rig
+        switches and reports it, and _follow_vfos then has nothing to do.
+        Not while transmitting -- the SDR is put back at once.
+        """
+        m = self._model
+        if which == m.rx_vfo:
+            self._sent_vfo = which
+            return
+        if m.transmitting:
+            self._sent_vfo = None             # back to the rig's VFO
+            self.follow()
+            return
+        self._sent_vfo = which
+        self._vfo_pending = (which, monotonic())
+        self._vfo_switch_at = monotonic()          # FIX (2026-11-08): RIT quiet
+        self._rig.toggle_vfo()
+        # Looked at again when the wait is over, in case nothing else changes
+        # meanwhile -- a rig that never answers must not leave the two apart.
+        self.root.after(int(VFO_CONFIRM_SECONDS * 1000) + 100, self.follow)
+
+    def _from_sdr_swap(self):
+        """
+        FIX (2026-11-08): A and B EXCHANGED in the SDR (Brown's A<->B). Done on
+        the rig too -- uBITX_Link.exchange_vfos -- which leads: the SDR's
+        readings meanwhile are not taken for a tune (the same quiet window as
+        a VFO switch). Not while transmitting or locked, nor with RIT on --
+        the rig's RIT belongs to one VFO's contents -- and then the SDR is put
+        back to the rig's VFOs instead.
+        """
+        m = self._model
+        self._vfo_switch_at = monotonic()
+        if m.transmitting or m.locked:     # FIX (2026-11-09): RIT now goes with it
+            print("[sdr] A/B exchanged in the SDR -- not now; the SDR is put back")
+            self._sent_hz = self._sent_other_hz = self._sent_mode = None
+            self.follow()
+            return
+        self._rig.exchange_vfos()
 
     def _from_sdr_split(self, *args):
         # Not acted on yet: the rig leads split as it leads RIT.

@@ -4,8 +4,8 @@ The short list. Detail for each is in TODO.md.
 
 ## The app
 
-- **Meters:** the rig's S-meter (A7) is wired and the scanner can hold on a signal -- done 2026-11-06, to check at the station. Power/SWR waits for the future Pico board's sensor.
-- **Settings dialogs:** the S-meter calibration and the other machine and general settings from the original Main branch need dialogs.
+- **Power/SWR meter:** waits for the future Pico board's sensor (the switch and factors are in Machine settings, greyed).
+- **S-meter calibration:** set the SDR's S9 point from a known signal, and the radio S-meter sensor's eight levels from the SDR's reading (today the levels are typed in EEPROM settings).
 - **RX tab:** ATT and IFS aren't wired.
 - **Setup, Log QSO:** check what's still not read or saved. The MCU headroom is hard-coded in the link.
 - **Startup recovery:** a slow-booting rig is no longer called silent, and missing values are fetched by restarting it (confirmed 2026-11-06). Still to watch: the "skipped bytes" at startup -- the hex lines will show if reports run together.

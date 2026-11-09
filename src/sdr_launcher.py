@@ -153,7 +153,7 @@ class Started:
         """
         system = _system()
         try:
-            if system == "darwin" and self.profile.app_name and self._is_application():
+            if system == "darwin" and self.profile.app_name:
                 # NOT SILENCED. Asking one application to quit another needs
                 # Automation permission on macOS, and the first attempt puts
                 # up a prompt: refused or unanswered, osascript fails with
@@ -193,23 +193,6 @@ class Started:
             return False
         return False
 
-    def _is_application(self):
-        """
-        FIX: whether macOS sees what was started as the APPLICATION app_name
-        names -- so asking that application to quit reaches it. Yes if it was
-        opened as one, or started from inside an .app bundle. No for a bare
-        binary started from the SDR Path setting, such as a build in
-        ~/sdroxide/target/release: the quit went to the INSTALLED copy
-        instead, reached nothing, and the app waited out the whole timeout
-        before closing it. Such a program is closed the way it is on Linux
-        (insist, in stop) -- unless never_force_quit, when it is left running.
-        """
-        if self.popen is None:
-            return True
-        args = self.popen.args
-        command = args[0] if isinstance(args, (list, tuple)) and args else args
-        return ".app/" in str(command)
-
     def wait(self, timeout):
         """Whether it has gone within the time."""
         deadline = time.monotonic() + timeout
@@ -240,6 +223,14 @@ class Started:
         return self.wait(2.0)
 
 
+def _mac_bundle(path):
+    """The path, if it names a macOS application bundle (a folder ending .app); else None."""
+    if _system() != "darwin" or not path:
+        return None
+    path = os.path.expanduser(str(path).strip()).rstrip("/")
+    return path if path.lower().endswith(".app") and os.path.isdir(path) else None
+
+
 def start(profile, override=""):
     """
     Starts the SDR program.
@@ -255,16 +246,24 @@ def start(profile, override=""):
         return None, (f"{profile.name} needs a command line of its own -- "
                       f"set it under the SDR's settings")
 
+    # FIX (2026-11-08): A MAC APPLICATION GIVEN AS THE PATH. SDR settings'
+    # location may name an .app bundle -- /Applications/sdroxide-Brown.app --
+    # which is a FOLDER: run directly it fails with "Permission denied"
+    # (Mark, with Brown's pre-release). It is opened as the application it
+    # is, that copy and no other, as an application without a path is.
+    bundle = _mac_bundle(override)
+
     # AS AN APPLICATION where the platform has such a thing and the program
     # needs to be quit politely -- see Profile.launch_as_application.
-    if (_system() == "darwin" and profile.launch_as_application
-            and profile.app_name and not override):
+    if bundle or (_system() == "darwin" and profile.launch_as_application
+                  and profile.app_name and not override):
+        what = bundle or profile.app_name
         try:
-            subprocess.run(["open", "-a", profile.app_name], check=True,
+            subprocess.run(["open", "-a", what], check=True,
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                            timeout=15)
         except Exception as err:
-            return None, f"could not start {profile.app_name}: {err}"
+            return None, f"could not start {what}: {err}"
         # `open` has exited; find what it started, so there is something to
         # ask to quit later.
         pid = None
@@ -274,7 +273,7 @@ def start(profile, override=""):
                 pid = getattr(process, "pid", None)
                 break
             time.sleep(0.25)
-        return Started(profile, pid=pid), f"started {profile.app_name}"
+        return Started(profile, pid=pid), f"started {os.path.basename(what) if bundle else what}"
 
     command = program_command(profile, override)
     if not command:

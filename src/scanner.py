@@ -37,7 +37,7 @@ choice:
     and moves on SIGNAL_HANG_MS after it drops. Stop still works throughout.
 
 The level comes from whatever the owner hands in -- the SDR's reading when
-listening through it, the rig's S-meter (A7) when listening through the rig
+listening through it, the radio S-meter sensor when listening through the rig
 -- in S-units on the meter's scale. None means no reading (SDR++ has none):
 then the scan goes by time alone. A reading is trusted only SIGNAL_SETTLE_MS
 after the rig has reported the new channel -- before that it may still be

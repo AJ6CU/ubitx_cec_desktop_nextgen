@@ -69,7 +69,9 @@ import sdr_programs
 import sdr_controls
 from app_paths import config_path, shown as shown_path
 from sdr_programs import profile_for, choices as sdr_choices, MUTE
-from ubitx_link import uBITX_Link
+from ubitx_link import uBITX_Link, MCU_COMMAND_HEADROOM, MCU_COMMAND_HEADROOM_MAX
+import ubitx_link            # FIX (2026-11-06): its adjustable timings
+TIMING_KEY = "Link Timing"   # where they are saved in the settings file
 
 from scustomtkinter import (
     sCTk, sCTkFrame, sCTkNotebook,
@@ -691,11 +693,17 @@ class RolePanel(sCTkFrame):
         header = sCTkFrame(self, fg_color="transparent", border_width=0)
         header.pack(fill="x", padx=8, pady=(5, 0))
 
-        self.role_label = sCTkLabelSecondary(
-            header, text=role)
+        # FIX (2026-11-09): RX AND TX STAND OUT (Mark). In split the receive
+        # VFO can be B and transmit A -- the reverse of the firmware's usual
+        # A receives, B transmits -- and a small "rx"/"tx" did not say which
+        # panel was which strongly enough. A primary button in the buttons'
+        # blue, capitals, with no command and no hover: a badge, not a control.
+        self.role_label = sCTkButtonPrimary(
+            header, text=role.upper(), width=36, height=22,
+            hover=False, command=None)
         self.role_label.pack(side="left")
 
-        self.vfo_label = sCTkLabelTertiary(header, text="vfo a")
+        self.vfo_label = sCTkLabelTertiary(header, text="VFO A")
         self.vfo_label.pack(side="left", padx=(8, 0))
 
         if role == "tx":
@@ -911,7 +919,7 @@ class RolePanel(sCTkFrame):
 
         self.display.set(
             confirmed if self._target is None else self._target)
-        self.vfo_label.configure(text=f"vfo {radio.role_vfo(self._role)}")
+        self.vfo_label.configure(text=f"VFO {radio.role_vfo(self._role).upper()}")
 
         self.configure(border_color=("#993C1D", "#993C1D") if is_tx
                        else ("#CBD5E1", "#374151"))
@@ -1167,6 +1175,10 @@ class UbitxCecDesktop(sCTk):
 
         self.rig_stream = stream
         self.connection = uBITX_Link(self, stream, self.model, 250)
+        # FIX (2026-11-06): the operator's command headroom and timings --
+        # Machine settings.
+        self.connection.command_headroom = self._headroom_setting()
+        ubitx_link.apply_timing(self._timing_setting())
         self.rig_state, self.rig_note = "connected", f"connected on {value}"
         print(f"[rig] {self.rig_note}")
         # Give the rig time to answer the startup dump before believing it.
@@ -2315,11 +2327,17 @@ class UbitxCecDesktop(sCTk):
 
         self._toggles["split"] = tx_button("Split", lambda: self._toggle("split"), 0)
         # FIX: kept, so the lock can grey them -- see _show_lock.
-        self._vfo_buttons = [tx_button("A \u21c4 B", self._swap, 1),
-                             tx_button("A\u2192B", self._copy_AtoB, 2)]
+        # FIX (2026-11-08): THREE, WITH THE USUAL NAMES (Mark: "our definition
+        # is the wrong one"). A/B SELECTS the other VFO -- what "A⇄B" did
+        # here. A⇄B EXCHANGES their contents, as Brown's A<->B and most rigs'
+        # do. A→B copies. The firmware has none of the last two; the link
+        # builds them from the borrow -- see exchange_vfos.
+        self._vfo_buttons = [tx_button("A/B", self._swap, 1),
+                             tx_button("A \u21c4 B", self._exchange, 2),
+                             tx_button("A\u2192B", self._copy_AtoB, 3)]
         # Log QSO at the end of the row: what you do when a contact ends.
         log = sCTkButtonPrimary(self.offset_row, text="Log QSO", height=26, command=self._log_qso)
-        log.grid(row=0, column=3, columnspan=3, padx=(10, 2), pady=2, sticky="ew")
+        log.grid(row=0, column=4, columnspan=2, padx=(10, 2), pady=2, sticky="ew")
 
         for column, (label, khz) in enumerate(SPLIT_OFFSETS):
             btn = sCTkButtonSecondary(
@@ -3390,7 +3408,7 @@ class UbitxCecDesktop(sCTk):
         self.scan_threshold_entry.configure(state="normal" if live else "disabled")
         note = "" if available else "(no signal reading -- by time)"
         if self.scan_signal_note.cget("text") != note:
-            self.scan_signal_note.configure(text=note)
+            self.scan_signal_note.configure(text=note or " ")  # FIX (2026-11-08): "" is ignored by sCTk labels -- a space clears
 
         # Set on the table itself, so a cell that may not be changed never
         # opens an editor at all -- rather than opening one and refusing.
@@ -3451,7 +3469,7 @@ class UbitxCecDesktop(sCTk):
         """
         FIX (2026-11-06): the signal in S-units from the receiver being heard
         -- the SDR's reading through the SDR (None where it has none, as
-        SDR++), the rig's S-meter (A7) through the rig. The rig sends its
+        SDR++), the radio S-meter sensor through the rig. The rig sends its
         meter only when the step changes, and never a first S0, so a rig not
         yet heard from reads S0.
         """
@@ -3656,7 +3674,7 @@ class UbitxCecDesktop(sCTk):
                          f" -- it may not be saved.")
         if m.locked:
             notes.append(self.LOCKED_NOTE)
-        self._cw_note.configure(text="  ".join(notes))
+        self._cw_note.configure(text="  ".join(notes) or " ")  # FIX (2026-11-08): "" is ignored by sCTk labels -- a space clears
         if m.cw_pending and live:
             self._cw_restart.pack(side="left", padx=(10, 0))
         else:
@@ -3782,6 +3800,18 @@ class UbitxCecDesktop(sCTk):
                     field = sCTkEntryPrimary(line, width=150, height=SETTINGS_CONTROL_HEIGHT)
                     field.pack(side="left")
                     field.insert(0, value)
+                    if label == "Callsign":
+                        # FIX (2026-11-06): THE RIG'S CALLSIGN, from its EEPROM
+                        # (the sc report at connect) -- it was a placeholder
+                        # filled with the model's seed. Return, or leaving
+                        # the field, writes a changed one -- see _callsign_entered.
+                        self.callsign_entry = field
+                        field.delete(0, "end")
+                        field.bind("<Return>", lambda e: self._callsign_entered())
+                        field.bind("<FocusOut>", lambda e: self._callsign_entered())
+                        self.callsign_note = sCTkLabelTertiary(line, text="")
+                        self.callsign_note.pack(side="left", padx=4)
+                        self._callsign_shown = None
                 elif kind == "choice":
                     sCTkComboBox(line, values=value, width=150, height=SETTINGS_CONTROL_HEIGHT).pack(side="left")
                 elif kind == "switch":
@@ -3810,8 +3840,9 @@ class UbitxCecDesktop(sCTk):
         # FIX: "Other Settings", the right half of the bottom row, three
         # buttons to a line -- two lines.
         box = self._settings_box(bottom, 0, 1, "Other Settings", 2)
-        pairs = (("EEPROM settings…", None),
-                 ("Machine settings…", None),
+        # FIX (2026-11-06): the two that were greyed placeholders, built.
+        pairs = (("EEPROM settings…", self._rig_eeprom_settings),
+                 ("Machine settings…", self._machine_settings),
                  ("Backup and restore…", self._eeprom_backup),
                  ("SDR settings…", self._sdr_advanced),
                  ("About…", self._about))
@@ -4227,7 +4258,7 @@ class UbitxCecDesktop(sCTk):
                 note = "no SDR chosen"
             else:
                 note = f"{profile.name} has no CW decoder"
-        self.decoder_port_note.configure(text=note)
+        self.decoder_port_note.configure(text=note or " ")  # FIX (2026-11-08): "" is ignored by sCTk labels -- a space clears
 
     def _save_decoder_port(self):
         """
@@ -4499,7 +4530,9 @@ class UbitxCecDesktop(sCTk):
         # to the same model, which is how a mode set by one and confirmed by
         # the other ends up arguing with itself.
         {"split": self.connection.Toggle_Split,
-         "rit": self.connection.Toggle_RIT,
+         # FIX (2026-11-08): the app keeps RIT itself in split -- see
+         # uBITX_Link.toggle_rit_for_operator.
+         "rit": self.connection.toggle_rit_for_operator,
          "locked": self.connection.Toggle_Lock,
          "muted": self._mute_pressed,
          "tx_inhibit": self.connection.Toggle_Stop}[key]()
@@ -4599,6 +4632,9 @@ class UbitxCecDesktop(sCTk):
 
     def _swap(self):
         """
+        Selects the other VFO -- the "A/B" button. (FIX 2026-11-08: it was
+        labelled "A⇄B", which elsewhere means an exchange; see _exchange.)
+
         Swaps which VFO receives and which transmits.
 
         A TOGGLE, not an exchange of contents. The rig has no command to
@@ -4613,6 +4649,18 @@ class UbitxCecDesktop(sCTk):
         if self.model.locked:               # FIX: see _show_lock
             return
         self.connection.toggle_vfo()
+
+    def _exchange(self):
+        """
+        FIX (2026-11-08): EXCHANGES A AND B -- frequency and mode -- leaving the
+        same VFO active. A RIT goes with its contents. Not while transmitting.
+        """
+        m = self.model
+        if m.locked or m.transmitting:
+            return
+        # FIX (2026-11-09): with RIT on too -- it goes with its VFO's
+        # contents (Mark). See uBITX_Link.exchange_vfos.
+        self.connection.exchange_vfos()
 
     def _copy_AtoB(self):
         """
@@ -5013,7 +5061,7 @@ class UbitxCecDesktop(sCTk):
                 notes.append("Saved in the radio, used after a restart: " + ", ".join(labels) + ".")
             if m.cw_write_failed:
                 notes.append("The radio did not confirm a write -- it may not be saved.")
-            status.configure(text="  ".join(notes))
+            status.configure(text="  ".join(notes) or " ")  # FIX (2026-11-08): "" is ignored
             if pending and radio_live():
                 restart.pack(side="left", padx=(10, 0))
             else:
@@ -5113,6 +5161,438 @@ class UbitxCecDesktop(sCTk):
             self.connection.read_settings()
         watch()
 
+    # ------------------------------------------------------------------
+    # FIX (2026-11-06): THE CALLSIGN, EEPROM SETTINGS AND MACHINE SETTINGS
+    # ------------------------------------------------------------------
+    def _show_callsign(self):
+        """
+        The Station group's callsign: the rig's, as it reported it -- or the
+        one just written, waiting on a restart, with a note saying so.
+        Not repainted while the operator is typing in it.
+        """
+        entry = getattr(self, "callsign_entry", None)
+        if entry is None:
+            return
+        m = self.model
+        pending = m.settings_pending.get("callsign")
+        text = pending[0] if pending else self._rig_callsign()
+        shown = (text, bool(pending), self.rig_state)
+        if shown == self._callsign_shown:
+            return
+        try:
+            if self.focus_get() is entry._entry:
+                return
+        except Exception:
+            pass
+        self._callsign_shown = shown
+        entry.delete(0, "end")
+        entry.insert(0, text)
+        self.callsign_note.configure(text="(after a restart)" if pending else "" or " ")  # FIX (2026-11-08): "" is ignored by sCTk labels -- a space clears
+
+    def _rig_callsign(self):
+        """
+        The callsign the rig reported (sc), or "" -- never the model's seed,
+        which is only a placeholder until the rig has spoken.
+        """
+        if "sc" not in getattr(self.connection, "seen_reports", ()):
+            return ""
+        return self.model.callsign
+
+    def _callsign_entered(self):
+        """
+        A callsign typed in the Station group goes to the rig's EEPROM, keeping
+        its show-at-start-up choice (EEPROM settings). Refused, the field is
+        put back and the note says why.
+        """
+        m = self.model
+        text = self.callsign_entry.get().strip().upper()
+        pending = m.settings_pending.get("callsign")
+        current = pending[0] if pending else self._rig_callsign()
+        self._callsign_shown = None
+        if text == current.strip().upper():
+            self._show_callsign()
+            return
+        if self.rig_state != "connected" or m.locked:
+            self.callsign_note.configure(text="(no rig to write to)" if not m.locked
+                                         else "(locked)")
+            self.after(3000, self._show_callsign)
+            return
+        head = m.eeprom_settings.get("callsign_head")
+        if head is None:
+            # FIX (2026-11-06): THE SHOW-AT-START-UP FLAG IS KEPT. It lives in
+            # the same byte as the length, so writing without knowing it
+            # would quietly turn it off. Not read yet this session: read it
+            # first, then write.
+            self.callsign_note.configure(text="(reading the rig…)")
+            if m.settings_state != "reading":
+                self.connection.read_settings()
+            self._callsign_waits = getattr(self, "_callsign_waits", 0) + 1
+            if self._callsign_waits <= 40:            # 10 s
+                self.after(250, lambda t=text: self._callsign_retry(t))
+            else:
+                self._callsign_waits = 0
+                self.callsign_note.configure(text="(the rig did not answer -- not written)")
+            return
+        self._callsign_waits = 0
+        show = bool(head[0] == uBITX_Link.CALLSIGN_KEY and head[1] & 0x80)
+        try:
+            self.connection.set_callsign(text, show)
+        except ValueError:
+            self.callsign_note.configure(text="(letters, digits and / only, 18 at most)")
+            self.after(4000, self._show_callsign)
+            return
+        self.callsign_note.configure(text="(writing…)")
+
+    def _callsign_retry(self, text):
+        """The callsign write again, once the rig's flag has been read."""
+        if self.callsign_entry.get().strip().upper() != text:
+            self._callsign_waits = 0
+            return                                   # typed over: start again
+        self._callsign_entered()
+
+    def _rig_eeprom_settings(self):
+        """
+        The rig's own settings that live in its EEPROM and have nowhere else
+        in the app: whether it shows the callsign at start-up, and the
+        S-METER -- whether it sends its reports at all (off, the meter stays
+        empty listening through the rig) and the eight levels the radio
+        S-meter sensor's reading
+        is compared with, from KD8CEC's map (uBITX_Link.RIG_EEPROM).
+
+        Read from the rig as the dialog opens; Apply lists old -> new and
+        asks, then writes; the rig takes them as it boots, so a restart is
+        offered. Nothing is written without Apply.
+        """
+        win = sCTkToplevel(self)
+        win.title("EEPROM settings")
+        self._over_app(win, 560, 520)
+        win.transient(self)
+        body = sCTkFrame(win, fg_color="transparent", border_width=0)
+        body.pack(fill="both", expand=True, padx=16, pady=14)
+
+        show_call = tk.BooleanVar(value=False)
+        meter_on = tk.BooleanVar(value=False)
+        sCTkLabelSecondary(body, text="Callsign").pack(anchor="w")
+        call_line = sCTkFrame(body, fg_color="transparent", border_width=0)
+        call_line.pack(anchor="w", pady=(2, 10))
+        call_box = sCTkCheckBox(call_line, text="Show the callsign as the rig starts",
+                                variable=show_call)
+        call_box.pack(side="left")
+        sCTkLabelTertiary(call_line, text="  (the callsign itself: Setup, Station)").pack(side="left")
+
+        # FIX (2026-11-06): "radio S-meter sensor", not "A7" -- the operator's
+        # name for it, not the Nano's pin (Mark).
+        sCTkLabelSecondary(body, text="Radio S-meter sensor").pack(anchor="w")
+        # FIX (2026-11-06): WHEN IT IS USED (Mark). Only listening through the
+        # radio: through an SDR the meter shows the SDR's own reading, and the
+        # rig sends no sensor reading in its SDR mode anyway. An SDR with no
+        # reading (SDR++) leaves the meter empty -- it does not fall back to
+        # this sensor.
+        sCTkLabelTertiary(body, text="Used only when you listen through the radio "
+                          f"(now: {'the SDR' if self._listen_source == 'SDR' else 'the radio'}). "
+                          "Through an SDR the meter shows the SDR's own reading instead; "
+                          "with an SDR that has none (SDR++), the meter stays empty.",
+                          wraplength=520, justify="left").pack(anchor="w", pady=(0, 4))
+        meter_box = sCTkCheckBox(body, text="Send S-meter reports -- needed for the meter "
+                                 "and for scanning on a signal through the rig",
+                                 variable=meter_on)
+        meter_box.pack(anchor="w", pady=(2, 6))
+        levels_line = sCTkFrame(body, fg_color="transparent", border_width=0)
+        levels_line.pack(anchor="w")
+        level_entries = []
+        for i in range(8):
+            cell = sCTkFrame(levels_line, fg_color="transparent", border_width=0)
+            cell.pack(side="left", padx=(0, 6))
+            sCTkLabelTertiary(cell, text=f"step {i + 1}").pack()
+            e = sCTkEntryPrimary(cell, width=48)
+            e.pack()
+            level_entries.append(e)
+        sCTkLabelTertiary(body, text="Each step is reached when the sensor's reading, 0-255, "
+                          "passes its level -- so they rise from step 1 to step 8.",
+                          wraplength=520, justify="left").pack(anchor="w", pady=(4, 0))
+        # FIX (2026-11-06): THE WARNING, always in view (Mark): levels never
+        # calibrated make the meter useless, all zeros worst of all.
+        sCTkLabelSecondary(body, text="Levels of all 0 make every signal read about S9, and "
+                           "scanning on a signal then stops everywhere. If you listen through "
+                           "the radio's own S-meter sensor, calibrate these levels.",
+                           wraplength=520, justify="left").pack(anchor="w", pady=(4, 0))
+
+        status_line = sCTkFrame(body, fg_color="transparent", border_width=0)
+        status_line.pack(anchor="w", pady=(12, 0))
+        status = sCTkLabelTertiary(status_line, text="", wraplength=420, justify="left")
+        status.pack(side="left")
+        restart = sCTkButtonSecondary(status_line, text="Restart rig",
+                                      command=lambda: self.connection.restart_rig())
+        state = {"shown": None, "filled": False}
+
+        def rig_values():
+            e = self.model.eeprom_settings
+            head, opt, levels = (e.get("callsign_head"), e.get("display_option1"),
+                                 e.get("smeter_levels"))
+            show = None if head is None else bool(head[0] == uBITX_Link.CALLSIGN_KEY
+                                                  and head[1] & 0x80)
+            on = None if opt is None else bool(opt[0] & uBITX_Link.SMETER_DISPLAY_BIT)
+            return show, on, (list(levels) if levels else None), (opt[0] if opt else None)
+
+        def paint():
+            m = self.model
+            show, on, levels, _ = rig_values()
+            live = self.rig_state == "connected" and not m.locked
+            shown = (show, on, tuple(levels or ()), m.settings_state, live,
+                     tuple(sorted(m.settings_pending)), m.cw_write_failed)
+            if shown == state["shown"]:
+                return
+            state["shown"] = shown
+            # The fields are filled from the rig ONCE, when its values arrive --
+            # not again, so what the operator is typing is not overwritten.
+            if not state["filled"] and m.settings_state == "read":
+                state["filled"] = True
+                show_call.set(bool(show)); meter_on.set(bool(on))
+                for e, v in zip(level_entries, levels or [""] * 8):
+                    e.delete(0, "end"); e.insert(0, str(v))
+            for w in [call_box, meter_box] + level_entries:
+                w.configure(state="normal" if live and state["filled"] else "disabled")
+            notes = []
+            if self.rig_state != "connected":
+                notes.append(f"Radio not available ({self.rig_note}).")
+            elif m.settings_state == "reading":
+                notes.append("Reading the rig…")
+            elif m.locked:
+                notes.append(self.LOCKED_NOTE)
+            # FIX (2026-11-06): say so when the rig's own levels cannot work,
+            # and how they fail.
+            note = self._smeter_levels_problem(levels)
+            if note:
+                notes.append(note)
+            mine = [k for k in ("callsign", "display_option1", "smeter_levels")
+                    if k in m.settings_pending]
+            if mine:
+                notes.append("Saved in the rig -- it uses them after a restart.")
+            if m.cw_write_failed:
+                notes.append("The rig did not confirm a write -- it may not be saved.")
+            status.configure(text="  ".join(notes) or " ")  # FIX (2026-11-08): "" is ignored
+            if mine and live:
+                restart.pack(side="left", padx=(10, 0))
+            else:
+                restart.pack_forget()
+
+        def watch():
+            if not win.winfo_exists():
+                return
+            paint()
+            win.after(250, watch)
+
+        def apply():
+            m = self.model
+            if self.rig_state != "connected" or m.locked or not state["filled"]:
+                return
+            show, on, levels, option = rig_values()
+            # FIX (2026-11-06): THE LEVELS ARE CHECKED ONLY IF CHANGED. They
+            # were checked every time, so a rig whose stored levels do not
+            # rise (never set, or erased) refused EVERY Apply -- turning the
+            # S-meter reports on, or the callsign flag, forced setting levels
+            # first (Mark). Left as the rig has them, they are not written.
+            new_levels, problem = self._smeter_levels_entered(
+                [e.get().strip() for e in level_entries], levels)
+            if problem:
+                status.configure(text=problem)
+                return
+            changes = []
+            if new_levels is not None:
+                changes.append(("S-meter levels", " ".join(map(str, levels)),
+                                " ".join(map(str, new_levels)),
+                                lambda: self.connection.set_rig_bytes("smeter_levels", new_levels)))
+            if on is not None and meter_on.get() != on:
+                byte = (option | uBITX_Link.SMETER_DISPLAY_BIT) if meter_on.get() \
+                    else (option & ~uBITX_Link.SMETER_DISPLAY_BIT)
+                changes.append(("S-meter reports", "on" if on else "off",
+                                "on" if meter_on.get() else "off",
+                                lambda b=byte: self.connection.set_rig_bytes("display_option1", [b])))
+            if show is not None and show_call.get() != show:
+                call = self._rig_callsign()
+                if not call:
+                    status.configure(text="Set a callsign first (Setup, Station).")
+                    return
+                changes.append(("Show callsign at start", "yes" if show else "no",
+                                "yes" if show_call.get() else "no",
+                                lambda: self.connection.set_callsign(call, show_call.get())))
+            if not changes:
+                status.configure(text="Nothing changed.")
+                return
+            lines = "\n".join(f"{label}:  {old}  →  {new}" for label, old, new, _ in changes)
+            if not sCTkMessagebox.askyesno(
+                    "Write to the rig", f"Write these to the rig's EEPROM?\n\n{lines}\n\n"
+                    "The rig uses them after a restart.",
+                    yes_text="Write", no_text="Cancel", master=win):
+                return
+            for *_, write in changes:
+                try:
+                    write()
+                except ValueError as err:
+                    status.configure(text=f"Not written: {err}")
+            state["shown"] = None
+
+        footer = sCTkFrame(body, fg_color="transparent", border_width=0)
+        footer.pack(anchor="w", pady=(14, 0))
+        sCTkButtonPrimary(footer, text="Apply", width=90, command=apply).pack(side="left", padx=(0, 6))
+        sCTkButtonSecondary(footer, text="Close", width=80, command=win.destroy).pack(side="left")
+        if self.rig_state == "connected":
+            self.connection.read_settings()
+        watch()
+
+    @staticmethod
+    def _smeter_levels_problem(levels):
+        """
+        What is wrong with the rig's stored S-meter levels, in words -- or
+        "" when they rise as they must. (The firmware takes the highest step
+        whose level the sensor's reading is ABOVE.)
+        """
+        if not levels or all(b > a for a, b in zip(levels, levels[1:])):
+            return ""
+        if all(v == 0 for v in levels):
+            return ("The rig's S-meter levels are all 0: every signal reads about S9. "
+                    "Calibrate them before relying on the radio S-meter sensor.")
+        if all(v == 255 for v in levels):
+            return ("The rig's S-meter levels are all 255 (never set): the radio "
+                    "S-meter will always read S0. Calibrate them.")
+        return ("The rig's S-meter levels do not rise from step 1 to step 8, so the "
+                "radio S-meter cannot show steps properly. Calibrate them.")
+
+    @staticmethod
+    def _smeter_levels_entered(texts, levels):
+        """
+        (levels to write, or None for no change; a reason they are refused,
+        or None). See the FIX in _rig_eeprom_settings: only changed levels
+        are checked, so the rest of the dialog works whatever the rig holds.
+        """
+        if levels is not None and texts == [str(v) for v in levels]:
+            return None, None
+        try:
+            new = [int(t) for t in texts]
+        except ValueError:
+            return None, "Each level must be a whole number, 0-255."
+        if any(not 0 <= v <= 255 for v in new):
+            return None, "Each level must be 0-255."
+        if any(b <= a for a, b in zip(new, new[1:])):
+            return None, "The levels must rise from step 1 to step 8."
+        return (None if new == levels else new), None
+
+    # The headroom choices, in ms -- the original application's list.
+    HEADROOM_CHOICES_MS = ("40", "50", "60", "70", "80", "90", "100", "110",
+                           "150", "160", "170", "180", "190", "200")
+
+    def _headroom_setting(self):
+        """The command headroom from the settings, in seconds, kept in range."""
+        try:
+            value = float(gv.config.get_MCU_Command_Headroom())
+        except (TypeError, ValueError, KeyError, AttributeError):
+            value = MCU_COMMAND_HEADROOM
+        return max(MCU_COMMAND_HEADROOM, min(MCU_COMMAND_HEADROOM_MAX, value))
+
+    @staticmethod
+    def _timing_setting():
+        """The saved timings, {name: ms}; {} -- the defaults -- if none."""
+        try:
+            saved = gv.config.config_data.get(TIMING_KEY, {})
+        except AttributeError:
+            return {}
+        return saved if isinstance(saved, dict) else {}
+
+    def _machine_settings(self):
+        """
+        The settings about the link to the rig itself -- advanced use. The
+        COMMAND HEADROOM: the least gap between two commands to the Nano, set
+        here, used at once and saved. POWER/SWR: kept, greyed -- there is no
+        sensor yet (a future Pico board).
+
+        Of the original application's other machine settings, the update
+        period and read wait belonged to its polling loop -- the reader now
+        takes bytes as they come -- and DSP lives in SDR settings.
+        """
+        win = sCTkToplevel(self)
+        win.title("Machine settings -- advanced use")
+        self._over_app(win, 560, 640)
+        win.transient(self)
+        body = sCTkFrame(win, fg_color="transparent", border_width=0)
+        body.pack(fill="both", expand=True, padx=16, pady=14)
+
+        line = sCTkFrame(body, fg_color="transparent", border_width=0)
+        line.pack(anchor="w")
+        sCTkLabelSecondary(line, text="Command headroom (ms)", width=180, anchor="w").pack(side="left")
+        headroom = sCTkComboBox(line, values=list(self.HEADROOM_CHOICES_MS), width=90, state="readonly")
+        headroom.set(str(int(round(self._headroom_setting() * 1000))))
+        headroom.pack(side="left")
+        sCTkLabelTertiary(body, text="The least time between two commands to the rig. "
+                          "Too short and a fast spin of the dial can overrun the Nano; "
+                          "longer is safer and slower. 40 is the least.",
+                          wraplength=480, justify="left").pack(anchor="w", pady=(4, 12))
+
+        sCTkLabelSecondary(body, text="Power and SWR").pack(anchor="w")
+        pwr = tk.BooleanVar(value=str(gv.config.get_PWR_SWR_Switch()) == "True")
+        pwr_line = sCTkFrame(body, fg_color="transparent", border_width=0)
+        pwr_line.pack(anchor="w", pady=(2, 0))
+        sCTkCheckBox(pwr_line, text="Power/SWR meter", variable=pwr,
+                     state="disabled").pack(side="left", padx=(0, 12))
+        for label, getter in (("PWR factor", gv.config.get_PWR_Factor),
+                              ("SWR factor", gv.config.get_SWR_Factor)):
+            sCTkLabelTertiary(pwr_line, text=label).pack(side="left", padx=(0, 4))
+            e = sCTkEntryPrimary(pwr_line, width=50)
+            e.insert(0, str(getter()))
+            e.configure(state="disabled")
+            e.pack(side="left", padx=(0, 10))
+        sCTkLabelTertiary(body, text="Needs a power/SWR sensor -- a future Pico board.",
+                          ).pack(anchor="w", pady=(2, 12))
+
+        # FIX (2026-11-06): ADVANCED TIMING -- the link's other timings that
+        # depend on the Nano's speed (ubitx_link.TIMING_SETTINGS). The
+        # defaults are the values tuned at the station; leave them unless a
+        # slow or unusual Nano drops commands.
+        sCTkLabelSecondary(body, text="Advanced timing").pack(anchor="w")
+        sCTkLabelTertiary(body, text="For a slow or unusual Nano only -- the defaults were "
+                          "tuned at the station. Out-of-range values are kept in range.",
+                          wraplength=500, justify="left").pack(anchor="w", pady=(2, 4))
+        in_use = ubitx_link.apply_timing(self._timing_setting())
+        timing_entries = {}
+        grid = sCTkFrame(body, fg_color="transparent", border_width=0)
+        grid.pack(anchor="w")
+        for row, (name, label, default, low, high) in enumerate(ubitx_link.TIMING_SETTINGS):
+            sCTkLabelTertiary(grid, text=label, width=220, anchor="w").grid(row=row, column=0, sticky="w")
+            e = sCTkEntryPrimary(grid, width=64)
+            e.insert(0, str(in_use[name]))
+            e.grid(row=row, column=1, sticky="w", pady=1)
+            sCTkLabelTertiary(grid, text=f"{low}-{high}, default {default}").grid(
+                row=row, column=2, sticky="w", padx=8)
+            timing_entries[name] = e
+
+        def reset_timing():
+            for name, _, default, _, _ in ubitx_link.TIMING_SETTINGS:
+                timing_entries[name].delete(0, "end")
+                timing_entries[name].insert(0, str(default))
+
+        status = sCTkLabelTertiary(body, text="")
+        status.pack(anchor="w", pady=(8, 0))
+
+        def apply():
+            seconds = int(headroom.get()) / 1000
+            gv.config.set_MCU_Command_Headroom(seconds)
+            self.connection.command_headroom = self._headroom_setting()
+            used = ubitx_link.apply_timing({n: e.get() for n, e in timing_entries.items()})
+            for name, e in timing_entries.items():      # show what was kept
+                e.delete(0, "end"); e.insert(0, str(used[name]))
+            try:
+                gv.config.config_data[TIMING_KEY] = used
+                gv.config.saveConfig()
+            except AttributeError:
+                pass
+            status.configure(text=f"Saved and in use -- headroom {int(seconds * 1000)} ms.")
+
+        footer = sCTkFrame(body, fg_color="transparent", border_width=0)
+        footer.pack(anchor="w", pady=(10, 0))
+        sCTkButtonPrimary(footer, text="Apply", width=90, command=apply).pack(side="left", padx=(0, 6))
+        sCTkButtonSecondary(footer, text="Reset timing", width=110,
+                            command=reset_timing).pack(side="left", padx=(0, 6))
+        sCTkButtonSecondary(footer, text="Close", width=80, command=win.destroy).pack(side="left")
+
     def _over_app(self, win, width, height):
         """
         FIX (2026-11-06): the app's dialogs -- Log QSO, About, SDR settings,
@@ -5200,6 +5680,7 @@ class UbitxCecDesktop(sCTk):
         self.panel_tx.update_view(s)
         self._show_lock()
         self._show_cw()          # FIX (2026-11-06): the keyer, as reported
+        self._show_callsign()    # FIX (2026-11-06): the rig's callsign
 
         # Latched controls read as lit or unlit.
         # FIX: PRESSED, not recoloured. Setting fg_color was overwritten
@@ -5233,7 +5714,11 @@ class UbitxCecDesktop(sCTk):
             for btn in self._offset_buttons:
                 btn.state("normal" if live else "disabled")
 
-        if s.split:
+        # FIX (2026-11-08): a passing message under the buttons -- see _exchange.
+        message = getattr(self, "_offset_message", None)
+        if message and time.monotonic() < message[1]:
+            self.offset_note.configure(text=message[0])
+        elif s.split:
             delta = s.split_delta_hz()
             if delta == 0:
                 self.offset_note.configure(text="transmitting on the rx frequency")

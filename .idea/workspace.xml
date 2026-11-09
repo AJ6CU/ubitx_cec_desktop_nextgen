@@ -5,9 +5,27 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="ffee8cb6-f9f7-4a7a-aac5-5c8718d71e6d" name="Changes" comment="">
+      <change afterPath="$PROJECT_DIR$/src/test_cw_values.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/test_exchange.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/test_lock_and_quiet.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/test_rit_vfo.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/test_vfo_sync.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/test_mac_bundle.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/test_rig_settings.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/test_vfo_sync.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/docs/OPEN_ITEMS.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/OPEN_ITEMS.md" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/docs/TODO.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/TODO.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/radio_model.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/radio_model.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/rigctl_sdr.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/rigctl_sdr.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/scanner.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/scanner.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sdr_launcher.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/sdr_launcher.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/sdr_link.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/sdr_link.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/test_scan_signal.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_scan_signal.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/test_starter_sets.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_starter_sets.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/ubitx_cec_desktop.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/ubitx_cec_desktop.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/ubitx_link.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/ubitx_link.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_eeprom_backup.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_eeprom_backup.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -33,27 +51,30 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent"><![CDATA[{
-  "keyToString": {
-    "ModuleVcsDetector.initialDetectionPerformed": "true",
-    "Python.make_cw_iq.executor": "Run",
-    "Python.radio_model.executor": "Run",
-    "Python.scratch.executor": "Run",
-    "Python.test.executor": "Run",
-    "Python.test_rigctl.executor": "Run",
-    "Python.test_rit.executor": "Run",
-    "Python.test_rit_loop.executor": "Run",
-    "Python.test_serial_ports.executor": "Run",
-    "Python.test_span.executor": "Run",
-    "Python.ubitx_cec_desktop.executor": "Run",
-    "RunOnceActivity.ShowReadmeOnStart": "true",
-    "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
-    "RunOnceActivity.git.unshallow": "true",
-    "git-widget-placeholder": "main",
-    "last_opened_file_path": "/Users/markjhatch/Documents/GitHub/ubitx_cec_desktop_nextgen/src",
-    "settings.editor.selected.configurable": "configurable.group.python.group.settings"
+  <component name="PropertiesComponent">{
+  &quot;keyToString&quot;: {
+    &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
+    &quot;Python.make_cw_iq.executor&quot;: &quot;Run&quot;,
+    &quot;Python.radio_model.executor&quot;: &quot;Run&quot;,
+    &quot;Python.scratch.executor&quot;: &quot;Run&quot;,
+    &quot;Python.test.executor&quot;: &quot;Run&quot;,
+    &quot;Python.test_apf.executor&quot;: &quot;Run&quot;,
+    &quot;Python.test_decoder_port.executor&quot;: &quot;Run&quot;,
+    &quot;Python.test_rigctl.executor&quot;: &quot;Run&quot;,
+    &quot;Python.test_rit.executor&quot;: &quot;Run&quot;,
+    &quot;Python.test_rit_loop.executor&quot;: &quot;Run&quot;,
+    &quot;Python.test_sdr_path.executor&quot;: &quot;Run&quot;,
+    &quot;Python.test_serial_ports.executor&quot;: &quot;Run&quot;,
+    &quot;Python.test_span.executor&quot;: &quot;Run&quot;,
+    &quot;Python.ubitx_cec_desktop.executor&quot;: &quot;Run&quot;,
+    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
+    &quot;git-widget-placeholder&quot;: &quot;main&quot;,
+    &quot;last_opened_file_path&quot;: &quot;/Users/markjhatch/Documents/GitHub/ubitx_cec_desktop_nextgen/src&quot;,
+    &quot;settings.editor.selected.configurable&quot;: &quot;configurable.group.python.group.settings&quot;
   }
-}]]></component>
+}</component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
       <recent name="$PROJECT_DIR$/src" />

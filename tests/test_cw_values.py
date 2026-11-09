@@ -281,7 +281,7 @@ def _():
     assert "restart" in w._cw_note.text and w._cw_restart.packed, w._cw_note.text
     w._cw_restart_rig(); assert asked == ["reboot"], asked
     w.model.cw_pending = {}; w._show_cw()
-    assert not w._cw_restart.packed and w._cw_note.text == "", "still offered"
+    assert not w._cw_restart.packed and w._cw_note.text.strip() == "", "still offered"
 
 print("\n".join(out))
 print(f"{sum(o.startswith('PASS') for o in out)} of {len(out)} passed")

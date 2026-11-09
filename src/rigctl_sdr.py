@@ -30,6 +30,23 @@ from sdr_programs import (FREQUENCY, MODE, FILTER, SIGNAL, VOLUME, SQUELCH, MUTE
 
 POLL_MS = 200
 
+# FIX (2026-11-06): VFO A AND B KEPT WITH THE RIG'S. Where the SDR has two
+# VFOs over rigctl -- SDRoxide and Brown: "v"/"V" for which is active, and a
+# VFO token before F/f ("F VFOB 14070000") for the other one's frequency,
+# accepted even outside Hamlib's VFO mode -- the link keeps both, and which
+# is active, as the rig has them. Found at connect: "v" names a VFO and
+# "f VFOB" answers. Gqrx and SDR++ answer neither, and keep following the
+# rig's receive frequency on their one VFO, as before.
+VFO_AB = "vfo_ab"
+
+# FIX (2026-11-08): HOW LONG A VFO SWITCH MAY TAKE TO SHOW. SDRoxide applies
+# "V" late -- seen at the station: A to B and quickly back, and its poll still
+# read B, with B's frequency, after the app had sent A. Its profile has no
+# settle window (settle_seconds 0), so that late reading was taken for the
+# operator's choice and pushed back onto the rig. After a switch, "v" and "f"
+# are expected to read what was sent for this long, whatever the profile says.
+VFO_SETTLE_SECONDS = 3.0
+
 # UBITX_SDR_TRACE=1 in the environment: every command sent, and every change
 # the poll reports as made in the SDR, printed -- for finding who moved what.
 TRACE = os.environ.get("UBITX_SDR_TRACE") == "1"
@@ -159,6 +176,16 @@ def _mode_and_width(reply):
     width = _number(values[1]) if len(values) > 1 else None
     return mode, (int(width) if width else None)
 
+def _vfo_letter(text):
+    """FIX (2026-11-06): "a" or "b" from a VFO name -- VFOA, Main, B... -- or None."""
+    name = str(text or "").strip().upper()
+    if name in ("VFOA", "MAIN", "A"):
+        return "a"
+    if name in ("VFOB", "SUB", "B"):
+        return "b"
+    return None
+
+
 def _split_and_vfo(reply):
     """
     The "s" reply is 0 (off) ar 1 on) and VFO for TX
@@ -227,6 +254,8 @@ class RigctlSDR:
         self.rit_offset = 0          # 0 no Rit offset seen, otherwise +/- total RIT offset
         self.split = None            # True if available
         self.split_vfo = None        # Either VFOA or VFOB for TX Frequency
+        self.active_vfo = None       # FIX (2026-11-06): "a" or "b", with VFO_AB
+        self.other_vfo_hz = None     # the inactive VFO's frequency, as sent
         self.signal = None           # dBFS, where the SDR reports it
         self.volume = None           # its own audio level, in its own units
         self.muted = None            # its own mute, where it has one
@@ -258,6 +287,8 @@ class RigctlSDR:
         self._span_min = self._span_max = None
         self._span_asked = None
         self.on_split = None
+        self.on_vfo = None           # FIX (2026-11-06): "a"/"b" chosen in the SDR
+        self.on_swap = None          # FIX (2026-11-08): A and B exchanged in the SDR
         self.on_signal = None
         self.on_volume = None        # the level changed in the SDR itself
         self.on_mute = None          # its mute changed in the SDR itself
@@ -446,6 +477,16 @@ class RigctlSDR:
                 self.bandwidth = int(span)
                 caps.add(BANDWIDTH)
 
+        # FIX (2026-11-06): discover VFO A/B -- see VFO_AB.
+        self.active_vfo = None
+        reply = client.query("v")
+        named = _vfo_letter(reply.values[0]) if reply.ok and reply.values else None
+        if named is not None:
+            other = client.query("f VFOB")
+            if other.ok and other.values and _number(other.values[0]) is not None:
+                self.active_vfo = named
+                caps.add(VFO_AB)
+
         # Discover SPLIT
         if "split" not in known_missing:
             split_status, split_vfo = _split_and_vfo(self._client.query("s", lines=2))
@@ -546,14 +587,68 @@ class RigctlSDR:
         # wherever the transport has a sampled span; over rigctl only the
         # frequency can be set, not where the span sits -- the SDR places
         # that itself. Without the parameter, framing raised TypeError.
-        if self._command(f"F {int(hz)}"):
+        # FIX (2026-11-08): THE VFO NAMED, where the SDR has two. SDRoxide
+        # takes a bare "F" for the VFO its last published state calls active
+        # -- and straight after "V" that is still the OLD one, because the
+        # switch is applied later. So "V VFOB" then "F <B's frequency>" put
+        # B's frequency on A; switching back showed it on A, and once the hold
+        # was over it was pushed onto the rig's VFO A (Mark). Named, it lands
+        # on the VFO meant whatever SDRoxide has caught up with.
+        target = (f"F VFO{self.active_vfo.upper()} {int(hz)}"
+                  if VFO_AB in self.capabilities and self.active_vfo else f"F {int(hz)}")
+        if self._command(target):
             self.frequency = int(hz)
+            # FIX (2026-11-08): just after a VFO switch the poll holds anyway
+            # -- see set_vfo.
+            if time.monotonic() < getattr(self, "_vfo_switch_until", 0):
+                return True
             # FIX: what was SENT is what the SDR reads back. "f" is SDRoxide's
             # VFO -- the RIT base -- not base minus offset, so recording the
             # difference meant every read-back looked stale and a tune made
             # in the SDR was ignored for the whole settle window.
             self._set("frequency", self.frequency)
             return True
+        return False
+
+    def set_vfo(self, which):
+        """
+        FIX (2026-11-06): makes VFO `which` ("a" or "b") the SDR's active one.
+        Its frequency then becomes what "f" reads -- recorded as expected, so
+        the poll does not take the switch for a QSY.
+        """
+        if VFO_AB not in self.capabilities:
+            return False
+        if self._command(f"V VFO{which.upper()}"):
+            self.active_vfo = which
+            # A HOLD, by time alone: until it ends, "v" and "f" are not
+            # reported at all. Not ended early by a matching read -- straight
+            # after A->B->A, the SDR still reading A is only the SDR not
+            # having moved yet, and B was still to come (seen in the test).
+            self._vfo_switch_until = time.monotonic() + VFO_SETTLE_SECONDS
+            self._vfo_check_after = True
+            return True
+        self._no_vfo_ab(f"V VFO{which.upper()}")
+        return False
+
+    def _no_vfo_ab(self, refused):
+        """
+        A program that answered "v" and "f VFOB" at connect but refuses to
+        switch or set the other VFO has only one VFO in practice (Gqrx can
+        name VFOA without having a B). VFO_AB is dropped, so it follows the
+        rig's receive frequency on its one VFO, as before.
+        """
+        if VFO_AB in self.capabilities:
+            self.capabilities = self.capabilities - {VFO_AB}   # a frozenset
+            print(f"[sdr] {refused!r} refused -- following the rig on one VFO")
+
+    def set_vfo_frequency(self, which, hz):
+        """FIX (2026-11-06): sets the frequency of VFO `which` without selecting it."""
+        if VFO_AB not in self.capabilities:
+            return False
+        if self._command(f"F VFO{which.upper()} {int(hz)}"):
+            self.other_vfo_hz = int(hz)
+            return True
+        self._no_vfo_ab(f"F VFO{which.upper()}")
         return False
 
     def bandwidth_choices(self):
@@ -1027,6 +1122,47 @@ class RigctlSDR:
         if not self.is_connected:
             return
         try:
+            # FIX (2026-11-06): WHICH VFO FIRST. A VFO chosen in the SDR changes
+            # what "f" reads; reported first, the link knows the new frequency
+            # is the other VFO's, not a QSY on this one.
+            holding = False
+            if VFO_AB in self.capabilities:
+                reply = self._client.query("v")
+                named = _vfo_letter(reply.values[0]) if reply.ok and reply.values else None
+                holding = time.monotonic() < getattr(self, "_vfo_switch_until", 0)
+                if holding or named is None:
+                    pass                   # a switch still showing -- see set_vfo
+                elif getattr(self, "_vfo_check_after", False):
+                    # FIX (2026-11-08): the hold over, the SDR should be where
+                    # it was sent. If not, the command was lost or applied out
+                    # of order: sent again -- the rig leads -- not reported as
+                    # the operator's choice, which would toggle the rig.
+                    self._vfo_check_after = False
+                    if named != self.active_vfo:
+                        print(f"[sdr] the SDR is on VFO {named.upper()}, not "
+                              f"{self.active_vfo.upper()} as sent -- sending it again")
+                        self.set_vfo(self.active_vfo)
+                        holding = True
+                elif named != self.active_vfo:
+                    self.active_vfo = named
+                    self._call(self.on_vfo, named)
+            # FIX (2026-11-08): AN EXCHANGE IN THE SDR. Brown's A<->B swaps
+            # the two VFOs' contents, leaving the same one active -- seen
+            # alone, the active frequency moving looks like a retune. So the
+            # other VFO is read too: both now holding each other's old
+            # frequency is an exchange, reported as one.
+            if (VFO_AB in self.capabilities and not holding and self.active_vfo
+                    and self.other_vfo_hz):
+                other = "b" if self.active_vfo == "a" else "a"
+                o_reply = self._client.query(f"f VFO{other.upper()}")
+                a_reply = self._client.query(f"f VFO{self.active_vfo.upper()}")
+                o_hz = _number(o_reply.values[0]) if o_reply.ok and o_reply.values else None
+                a_hz = _number(a_reply.values[0]) if a_reply.ok and a_reply.values else None
+                if (o_hz is not None and a_hz is not None and self.frequency
+                        and int(a_hz) == int(self.other_vfo_hz) and int(o_hz) == int(self.frequency)
+                        and int(a_hz) != int(o_hz)):
+                    self.frequency, self.other_vfo_hz = int(a_hz), int(o_hz)
+                    self._call(self.on_swap)
             reply = self._client.query("f")
             hz = _number(reply.values[0]) if reply.ok and reply.values else None
             # FIX: _stale FIRST, as for volume and the RF gain. Compared
@@ -1035,7 +1171,8 @@ class RigctlSDR:
             # settle_seconds of anything sent was taken for the old value and
             # ignored until the window ran out. Mode, width, RIT and the DSP
             # switches below had the same order.
-            if (hz is not None and not self._stale("frequency", int(hz))
+            if (hz is not None and not holding
+                    and not self._stale("frequency", int(hz))
                     and int(hz) != self.frequency):
                 self.frequency = int(hz)
                 # FIX: the SDR's own frequency, "f", with no offset. A change

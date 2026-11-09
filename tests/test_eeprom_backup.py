@@ -12,10 +12,13 @@ lsrc = open(os.path.join(folder, "ubitx_link.py")).read()
 ltree = ast.parse(lsrc)
 link_cls = next(n for n in ltree.body if isinstance(n, ast.ClassDef) and n.name == "uBITX_Link")
 LINK = ("read_settings", "_send_next_setting_request", "_setting_read_timed_out",
-        "_finish_setting_request", "_on_setting_reply", "_decode_setting", "_on_memory_reply")
+        "_finish_setting_request", "_on_setting_reply", "_decode_setting", "_on_memory_reply",
+        "_mem_spec")
 lf = {n.name: n for n in link_cls.body if isinstance(n, ast.FunctionDef) and n.name in LINK}
 reads = next((ast.literal_eval(n.value) for n in link_cls.body if isinstance(n, ast.Assign)
               and getattr(n.targets[0], "id", "") == "SETTING_READS"), None)
+rig_eeprom = next((ast.literal_eval(n.value) for n in link_cls.body if isinstance(n, ast.Assign)
+                   and getattr(n.targets[0], "id", "") == "RIG_EEPROM"), {})
 out = []
 def case(name):
     def wrap(f):
@@ -28,30 +31,33 @@ def link():
     sent, timers = [], []
     m = types.SimpleNamespace(settings_state="unread", settings_failed=[], eeprom_settings={},
                               channels_state="read", changed=lambda: None)
-    l = types.SimpleNamespace(_model=m, memoryQueue=[], SETTING_READS=reads,
+    l = types.SimpleNamespace(_model=m, memoryQueue=[], SETTING_READS=reads, RIG_EEPROM=rig_eeprom,
                               toRadioCommandDict={"TS_CMD_READMEM": 31})
     l.sendCommandToMCU = lambda b: sent.append(list(b))
     l.root = types.SimpleNamespace(after=lambda ms, f: (timers.append(f), len(timers))[1],
                                    after_cancel=lambda t: None)
     ns = {"EEPROM": EEPROM, "CHANNEL_READ_TIMEOUT_MS": 800, "CHANNEL_READ_RETRIES": 2,
-          "CHANNEL_READ_PACE_MS": 50, "print": lambda *a, **k: None}
+          "CHANNEL_READ_PACE_MS": 50, "print": lambda *a, **k: None,
+          "uBITX_Link": types.SimpleNamespace(RIG_EEPROM=rig_eeprom)}
     for name, node in lf.items():
         exec(textwrap.dedent(ast.get_source_segment(lsrc, node)), ns)
         static = any(getattr(d, "id", "") == "staticmethod" for d in node.decorator_list)
         setattr(l, name, ns[name] if static else types.MethodType(ns[name], l))
     return l, sent, timers
 
-@case("the seven reads go out one at a time, to EEPROM.py's addresses")
+@case("the settings reads go out one at a time, to their addresses")
 def _():
     assert "read_settings" in lf, "no read_settings"
     l, sent, timers = link(); l.read_settings()
     assert sent == [[31, 0x00, 0x0, 4, 0x48]], sent          # master cal first
     replies = {"master_cal": "000243B7", "ssb_bfo": "00A8B726", "cw_bfo": "00A8B2BA",
                "factory_master_cal": "00014D67", "factory_ssb_bfo": "00A8B9A0",
-               "factory_cw_wpm": "50", "factory_cw_sidetone": "00000258"}
+               "factory_cw_wpm": "50", "factory_cw_sidetone": "00000258",
+               "callsign_head": "5985", "display_option1": "0c",
+               "smeter_levels": "0a141e28323c4650"}
     for name in reads:
         l._on_memory_reply(replies[name]); timers[-1]()
-    assert len(sent) == 7 and l._model.settings_state == "read", (len(sent), l._model.settings_state)
+    assert len(sent) == len(reads) and l._model.settings_state == "read", (len(sent), l._model.settings_state)
     e = l._model.eeprom_settings
     assert e["master_cal"] == 148407 and e["factory_master_cal"] == 85351, e
     assert e["factory_cw_wpm"] == 15 and e["factory_cw_sidetone"] == 600, e
@@ -132,7 +138,7 @@ def _():
         assert not row[4].lower().startswith("set_factory"), row
 
 # --- restore: the link's set_stored ------------------------------------------
-SF = ("set_stored", "_send_cw_write", "_cw_write_timed_out", "_on_cw_written", "_on_memory_written",
+SF = ("set_stored", "_fit_firmware_checksum", "_send_cw_write", "_cw_write_timed_out", "_on_cw_written", "_on_memory_written",
       "_eeprom_write", "Freq_Encode", "restart_rig")
 sf = {n.name: n for n in link_cls.body if isinstance(n, ast.FunctionDef) and n.name in SF}
 limits = next((ast.literal_eval(n.value) for n in link_cls.body if isinstance(n, ast.Assign)
@@ -188,5 +194,32 @@ def _():
 def _():
     assert limits is not None, "no STORED_LIMITS"
     assert not any(k.startswith("factory") for k in limits), limits
+
+@case("CW BFO: written as 3 bytes at 252 -- the firmware refuses a checksum of 256")
+def _():
+    l, sent, _ = writer(); l._model.eeprom_settings["cw_bfo"] = 11055802
+    l.set_stored("cw_bfo", 11055812)
+    v = 11055812
+    assert sent[0] == [32, 0xFC, 0x00, 3, 255, v & 255, (v >> 8) & 255, (v >> 16) & 255], sent[0]
+    assert 0xFC + 0 + 3 < 256
+
+@case("CW BFO: not written blind -- the byte left alone must be known to be zero")
+def _():
+    l, sent, _ = writer()                       # cw_bfo never read
+    try: l.set_stored("cw_bfo", 11055812)
+    except ValueError: pass
+    else: raise AssertionError("written without knowing the top byte")
+    l._model.eeprom_settings["cw_bfo"] = 0xFFFFFFFF   # erased
+    try: l.set_stored("cw_bfo", 11055812)
+    except ValueError: pass
+    else: raise AssertionError("written over a non-zero top byte")
+    assert sent == [], sent
+
+@case("the rig's refusal (-2) fails the write at once, not after retries")
+def _():
+    l, sent, timers = writer(); l.set_stored("master_cal", 100)
+    l._on_memory_written("65534")
+    assert l._model.cw_write_failed == "master_cal", l._model.cw_write_failed
+    assert l._model.settings_pending == {}, "a refused write counted"
 
 print("\n".join(out)); print(f"{sum(o.startswith('PASS') for o in out)} of {len(out)} passed")
