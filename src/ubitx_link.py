@@ -3296,6 +3296,12 @@ class uBITX_Link:
         self._model.rit = False
         self._leave_rit()
         self._maybe_restore_rit()
+        # FIX (2026-11-10): SAID, not left to a frequency report. This runs
+        # from a timer, after the report's own notification has gone; with
+        # receive already on the base (RIT +0) no frequency report follows
+        # either, so the view kept showing RIT on at +0 (Mark, A2) and each
+        # press of RIT looked like it did nothing.
+        self._model.changed()
 
     def _rit_split_changed(self, split_on):
         """
@@ -3306,6 +3312,16 @@ class uBITX_Link:
         the VFO to the base, RIT on, receive back -- as after a VFO switch.
         """
         m = self._model
+        if split_on:
+            # FIX (2026-11-10): THE OTHER VFO'S REMEMBERED RIT becomes the
+            # app's kind too, so A/B in split brings it back at once (Mark,
+            # D5: B showed 7.095.800 with no RIT until split went off). Split
+            # off turns it back into the rig's kind, below. The transmit swap
+            # does not show it: that cv is held (SPLIT_TX_GRACE_MS).
+            vsaved = self.__dict__.setdefault("_vrit_saved", {})
+            for vfo, (base, _rx) in list(self._rit_saved.items()):
+                vsaved[vfo] = base
+            self._rit_saved.clear()
         pending = getattr(self, "_rit_off_pending", None)
         if split_on and pending is not None:
             self._rit_off_pending = None

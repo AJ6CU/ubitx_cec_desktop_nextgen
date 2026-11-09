@@ -1,0 +1,3981 @@
+import os
+from time import sleep, monotonic
+from timeit import default_timer as timer
+import serial
+
+import EEPROM
+from scustomtkinter import sCTkMessagebox
+
+MODES = ("DFT", "ERR", "LSB", "USB", "CWL", "CWU")
+
+# FIX (2026-11-06): UBITX_RIG_TIMING=1 in the environment prints how long after
+# the reboot command each step of the start-up arrives -- the first byte, and
+# every report -- to find where the ~5 s between connecting and the values
+# goes, when the rig itself is up in about 2 s from power on.
+RIG_TIMING = os.environ.get("UBITX_RIG_TIMING") == "1"
+
+# How long a borrow-write-return step waits for its confirmation before the
+# sequence is abandoned. Generous: the rig is effectively synchronous and
+# answers in tens of milliseconds, so this only fires when something has
+# genuinely gone wrong.
+# Generous on purpose. Each step sits behind the throttle's blocking sleep,
+# and a toggle makes the rig report several things -- the new primary's
+# frequency and its mode -- before the confirmation being waited on. Waiting
+# too long only delays clearing a failed sequence; waiting too little
+# abandons one that was about to succeed.
+TX_WRITE_TIMEOUT_MS = 2000
+
+# How long to wait before starting a queued transmit write after the last one
+# finished. Long enough for the rig's trailing reports -- the frequency and
+# mode of the VFO it just switched back to -- to arrive and be attributed to
+# the sequence they belong to.
+FOLLOW_UP_DELAY_MS = 250
+
+# Spacing between the memory reads when the Channels tab fills in. The code
+# this replaces sent all 38 at once, each behind the throttle's blocking
+# sleep, and the interface froze for a second and a half behind a "Loading"
+# window. Paced through the event loop instead, nothing freezes, and the tab
+# can show its progress as the replies come in.
+CHANNEL_READ_PACE_MS = 50
+
+# ONE READ AT A TIME. The rig answers memory reads without saying which slot
+# an answer is for, so replies are matched to requests by order. The first
+# version sent all 38 on a timer, and when the Nano dropped two of them --
+# busy, as it is when commands arrive mid-work -- every reply after the gap
+# was filed against the wrong slot. Labels turned up as frequencies:
+#
+#     could not decode Freq slot 18: 'mark1'
+#
+# and every channel after the lost read showed another channel's frequency,
+# plausibly. Now the next read waits for the last reply; one that never comes
+# is withdrawn from the queue and retried, so a lost reply cannot move any
+# other slot.
+CHANNEL_READ_TIMEOUT_MS = 800
+CHANNEL_READ_RETRIES = 2
+
+# What a channel frequency may sensibly be -- globalvars' FREQ_BOUNDS. A slot
+# that was never written holds erased EEPROM, all ones, which decodes to
+# 536,870,911 Hz; anything outside this range is treated as empty.
+CHANNEL_FREQ_MAX_HZ = 60_000_000
+
+# What a VFO may sensibly report -- the same bound. Anything outside it is a
+# corrupted write the rig carried out, not a place anyone tuned to: see
+# _frequency_report.
+VFO_FREQ_MAX_HZ = CHANNEL_FREQ_MAX_HZ
+
+# RECEIVE WRITES, ONE AT A TIME -- see _request_frequency.
+#
+# Every detent of the dial used to send a write at once, 40 ms apart behind
+# MCU_COMMAND_HEADROOM. A fast spin overran the Nano: a byte of one write was
+# lost, the Nano took the first 0xff of the postscript as the frequency's top
+# byte, and the rig tuned to 4.29 GHz and said so. Raising the headroom hides
+# that on this Nano and wastes time on a faster one; waiting for the rig's
+# own report paces the writes at whatever speed the rig actually has.
+#
+# How long a write waits for its report before it is sent again.
+FREQ_CONFIRM_TIMEOUT_MS = 500
+# The pause between a report and the next write, so the write does not land
+# while the rig is still sending what follows the report.
+FREQ_FOLLOW_MS = 40
+# How many times one frequency is sent again -- after a timeout, or to put
+# the rig back after an impossible report -- before giving up and saying so.
+FREQ_RETRIES = 2
+
+# The mode numbers the rig actually uses. 1 is reserved and 6 and 7 do not
+# exist, so they are garbage, not modes.
+CHANNEL_MODES = {0: "DFT", 2: "LSB", 3: "USB", 4: "CWL", 5: "CWU"}
+
+# Writing takes longer than reading -- the chip is programming EEPROM cells --
+# so a write is given longer to be acknowledged before it is retried.
+CHANNEL_WRITE_TIMEOUT_MS = 1500
+
+# How long to wait after a confirmation before sending the next command of a
+# sequence.
+#
+# MCU_COMMAND_HEADROOM paces commands generally, but a VFO toggle is not a
+# general command: the rig does real work and emits several reports, and a
+# frequency write arriving in the middle of that is sometimes simply lost --
+# no acknowledgement, no error, the sequence waits for a confirmation that
+# never comes. Intermittently, which is what made it look like something
+# other than timing.
+STEP_SETTLE_MS = 150
+# Seconds between commands sent to the rig. The laptop can outrun a Nano
+# easily, and this is what stops it. 0.04 means a transmit write in split --
+# toggle, frequency, toggle -- spends 120 ms behind the throttle, which is
+# why TX_WRITE_TIMEOUT_MS below is generous.
+# How long to let the reboot command reach the rig before the reader starts
+# collecting what it sends on the way back up. Not the time the rig takes to
+# boot -- the reader waits for that itself, up to five seconds -- only enough
+# for the bytes to leave.
+REBOOT_SETTLE = 0.25
+
+# The reader takes at most this many bytes per pass, then gives the window
+# its turn. A rig that never stops sending (see READER_REPEAT_WARNING) used to
+# hold the reader in its loop and freeze the interface.
+READER_MAX_BYTES_PER_PASS = 512
+
+# No report is longer than this. A frame that grows past it lost its three
+# 0xff somewhere; it is dropped and the reader waits for the next 'p'.
+READER_MAX_FRAME = 64
+
+# The same report arriving this many times within READER_REPEAT_WINDOW
+# seconds means the rig is re-sending on its own -- seen when a USB-to-TTL
+# adapter was wired to its serial lines. Said once; nothing else is done.
+READER_REPEAT_WARNING = 20
+READER_REPEAT_WINDOW = 5.0
+
+# A run of zero bytes this long is not data: it is the line from the rig held
+# at 0 V, which a serial port reads as zero after zero. Rig switched off with
+# its USB still in, the Nano held in reset, or something on its TX line
+# pulling it down -- an unpowered USB-to-TTL adapter will. The CEC's single
+# zero at boot stays well under this.
+READER_ZERO_RUN = 64
+
+MCU_COMMAND_HEADROOM = .04
+# FIX (2026-11-06): the headroom is a SETTING again -- Machine settings sets
+# uBITX_Link.command_headroom; this is the value until then, and the least
+# it may be (below it a fast spin overruns the Nano -- see above). The most:
+MCU_COMMAND_HEADROOM_MAX = .2
+# FIX (2026-11-08): how long a firmware "RIT off" waits to see whether split
+# going on caused it -- the firmware reports cr_ 0 just before cs_ 1.
+SPLIT_RIT_WAIT_MS = 300
+
+# FIX (2026-11-09): THE FIRMWARE'S SWAP TO TRANSMIT IN SPLIT is not the
+# operator choosing a VFO. startTx makes the other VFO primary and reports cv
+# BEFORE ct 1, so the app took it as A/B: receive and transmit panels traded
+# places for the whole transmission -- "TX at 7.075.800", the receive VFO's
+# frequency (Mark, D3b) -- and the app's RIT jumped to the transmit VFO. So
+# in split a VFO change waits this long for a transmit (as sdr_link's
+# SPLIT_TX_GRACE_SECONDS) with the roles held; no transmit, it was A/B.
+SPLIT_TX_GRACE_MS = 450
+# FIX (2026-11-08): the longest an exchange of VFOs waits for its borrow.
+EXCHANGE_TIMEOUT_S = 5.0
+
+# FIX (2026-11-06): THE TIMINGS AN OPERATOR MAY ADJUST -- Machine settings,
+# Advanced timing. Each: the constant above, its label, its default and the
+# range allowed. They depend on how fast the rig's Nano is; the defaults are
+# the values tuned at the station, and each constant's comment says why it is
+# where it is. Applied by setting the module's constants (apply_timing): the
+# code reads them where they are used, so a change takes effect on the next
+# use, with nothing else to change.
+TIMING_SETTINGS = (
+    ("STEP_SETTLE_MS", "Step settle (ms)", 150, 50, 1000),
+    ("FOLLOW_UP_DELAY_MS", "Follow-up delay (ms)", 250, 100, 1500),
+    ("FREQ_FOLLOW_MS", "Frequency follow (ms)", 40, 0, 500),
+    ("FREQ_CONFIRM_TIMEOUT_MS", "Frequency confirm timeout (ms)", 500, 200, 3000),
+    ("TX_WRITE_TIMEOUT_MS", "Transmit write timeout (ms)", 2000, 500, 10000),
+    ("CHANNEL_READ_TIMEOUT_MS", "EEPROM read timeout (ms)", 800, 200, 5000),
+    ("CHANNEL_READ_PACE_MS", "EEPROM read pace (ms)", 50, 0, 1000),
+    ("CHANNEL_WRITE_TIMEOUT_MS", "EEPROM write timeout (ms)", 1500, 500, 5000),
+    ("FREQ_RETRIES", "Frequency retries", 2, 0, 5),
+    ("CHANNEL_READ_RETRIES", "EEPROM retries", 2, 0, 5),
+)
+
+
+def apply_timing(values):
+    """
+    Sets the adjustable timings from {name: value} -- each kept in its range,
+    anything missing or unreadable at its default. Returns what is in use.
+    """
+    used = {}
+    for name, _, default, low, high in TIMING_SETTINGS:
+        try:
+            value = int(round(float(values.get(name, default))))
+        except (TypeError, ValueError, AttributeError):
+            value = default
+        value = max(low, min(high, value))
+        globals()[name] = value
+        used[name] = value
+    return used
+
+
+class uBITX_Link:
+    def __init__ (self, root, port, model, schedule):
+        self.root = root
+        self.port = port
+        self._model = model
+        self.schedule = schedule
+
+        # THE COMMAND TABLE FIRST. It is static data, and everything that
+        # sends anything needs it -- including a handler that fires while
+        # the reader is still being constructed.
+        self.toRadioCommandDict = {
+            "TS_CMD_MODE": 1,
+            "TS_CMD_FREQ": 2,
+            "TS_CMD_BAND": 3,
+            "TS_CMD_VFO": 4,
+            "TS_CMD_SPLIT": 5,
+            "TS_CMD_RIT": 6,
+            "TS_CMD_TXSTOP": 7,
+            "TS_CMD_SDR": 8,
+            "TS_CMD_LOCK": 9,  # Dial Lock
+            "TS_CMD_ATT": 10,  # ATT
+            "TS_CMD_IFS": 11,  # IFS Enabled
+            "TS_CMD_IFSVALUE": 12,  # IFS VALUE
+            "TS_CMD_STARTADC": 13,
+            "TS_CMD_STOPADC": 14,
+            "TS_CMD_SPECTRUMOPT": 15,  # Option for Spectrum
+            "TS_CMD_SPECTRUM": 16,  # Get Spectrum Value
+            "TS_CMD_TUNESTEP": 17,  # Get Spectrum Value
+            "TS_CMD_WPM": 18,  # Set WPM
+            "TS_CMD_KEYTYPE": 19,  # Set KeyType
+            "TS_CMD_SWTRIG": 21,  # SW Action Trigger for WSPR and more
+            "TS_CMD_READMEM": 31,  # Read EEProm
+            "TS_CMD_WRITEMEM": 32,  # Write EEProm
+            "TS_CMD_LOOPBACK0": 74,  # Loopback1 (Response to Loopback Channgel)
+            "TS_CMD_LOOPBACK1": 75,  # Loopback2 (Response to Loopback Channgel)
+            "TS_CMD_LOOPBACK2": 76,  # Loopback3 (Response to Loopback Channgel)
+            "TS_CMD_LOOPBACK3": 77,  # Loopback4 (Response to Loopback Channgel)
+            "TS_CMD_LOOPBACK4": 78,  # Loopback5 (Response to Loopback Channgel)
+            "TS_CMD_LOOPBACK5": 79,  # Loopback6 (Response to Loopback Channgel)
+            "TS_CMD_FACTORYRESET": 85,  # Factory Reset
+            "TS_CMD_UBITX_REBOOT": 95  # Reboot
+        }
+
+        # The borrow-write-return sequence for a transmit frequency in split.
+        # See set_role_frequency: the rig can only write to the primary VFO,
+        # so transmit has to borrow that slot and hand it back.
+        #
+        # SET BEFORE THE READER EXISTS. Constructing _input reads the rig's
+        # startup dump and dispatches it immediately, so a handler runs
+        # during this constructor -- before any line that follows the
+        # assignment. Anything a handler touches has to be in place first.
+        self._tx_write_state = None
+        self._tx_write_hz = None
+        self._tx_write_timer = None
+        # FIX (2026-11-08): RIT kept per VFO across a switch -- see
+        # _rit_cleared_by_switch. {vfo: (base, receive)}; the restore under
+        # way, or None.
+        self._rit_saved = {}
+        self._rit_restore = None
+        # FIX (2026-11-09): an exchange with RIT on -- see exchange_vfos.
+        self._exchange_carry = None
+        self._exchange_rit_off = False
+        # The most recent thing the dial asked for while a write was running.
+        self._tx_write_next = None
+        self._tx_write_mode = None
+        self._tx_write_next_mode = None
+
+        # Receive writes -- see _request_frequency. Before the reader for the
+        # same reason as the above: the boot burst runs the handlers that
+        # read these.
+        self._freq_intent = None        # what the operator last asked for
+        self._freq_sent = None          # the write awaiting its report
+        self._freq_timer = None         # its deadline
+        self._freq_follow_timer = None  # the next write, waiting its pause
+        self._freq_recovery_timers = {}  # per VFO: "p", "a", "b"
+        self._freq_retries = 0
+
+        # ALL OF THIS BEFORE THE READER.
+        #
+        # Constructing _input reads the rig's startup dump and dispatches it
+        # immediately, so handlers run DURING this constructor -- before any
+        # line that follows. Anything they touch, or that anything they
+        # trigger touches, has to exist first: the memory queue a handler
+        # appends to, and the framing and timing sendCommandToMCU needs.
+        self.memoryQueue = []  # when a memory slot is requested, it later comes in without any indication of which
+        # memory slot it belong to. Fortunately, all in order. So everytime a memory slot is
+        # requested, the type of memory requested is added to the queue so when we take it
+        # off the queue, we know where it goes.
+
+        self.tx_to_mcu_preamble = b'\x59\x58\x68'  # all commands to MCU must start with these three bytes
+        self.tx_to_mcu_postscript = b'\xff\xff\x73'  # all commands to MCU must end with these three numbers
+
+        # Report codes seen since connecting -- see check_expected_reports().
+        self.seen_reports = set()
+        # FIX (2026-11-06): bytes of any kind since connecting, zeros included.
+        # A rig still booting holds its line low -- thousands of zero bytes --
+        # before the first report, so "nothing yet" and "nothing at all" are
+        # different, and the window's answer check needs to tell them apart.
+        self.bytes_seen = 0
+
+        self.mcu_command_buffer = []  # buffer used to send bytes to MCU
+        self.time_of_last_sent = timer()  # used to avoid overloading MCU
+
+        # REBOOT THE RIG, THEN READ WHAT IT SAYS ON THE WAY UP.
+        #
+        # The order here is the whole trick. toRadioCommandDict exists by now
+        # (it is built at the top of this method), so a command can be sent --
+        # but the reader does not exist yet, and its constructor is what sits
+        # and collects the 26 values the rig sends as it boots. So: ask the
+        # rig to restart, let the command reach it, and only then start the
+        # reader, which is waiting for exactly what the restart produces.
+        #
+        # Sending it any later would be too late; any earlier would fail on a
+        # command dictionary that does not exist.
+        try:
+            self.port.reset_input_buffer()      # anything from before is stale
+        except Exception:
+            pass
+        self.reboot_ubitx()
+        sleep(REBOOT_SETTLE)
+
+        self._ubitx_reader = self._input(self)
+
+        # THE FINEST PRESET, ONCE, AND LEFT THERE.
+        #
+        # AFTER the reader, not inside it. The reader's constructor once ran
+        # a blocking read of its own, before toRadioCommandDict existed, so a
+        # command sent from there failed on an attribute not yet assigned.
+        # That read is gone, but the rule stands: commands belong out here,
+        # the reader reads.
+        #
+        # The rig rounds every frequency it is given to the active tuning
+        # preset -- a dial-step setting with a side effect on frequency
+        # entry. At 100 Hz a 10 Hz tuning step simply vanishes: the digit
+        # turns, the rig rounds it away, and nothing moves.
+        #
+        # channels.py worked around this per operation, forcing the preset
+        # to its finest value and restoring it afterwards, with a comment
+        # explaining that a channel recalled at 7.032.100 came back as
+        # 7.032.000 otherwise. Doing it once at connect costs two fewer
+        # commands on every write and removes the workaround from everywhere
+        # that would otherwise need it.
+        #
+        # What it changes: the rig's OWN knob now steps at the finest rate
+        # too. For a desktop controller that is the right trade -- and the
+        # operator can still change it on the rig, which reports it and this
+        # model follows, so the rounding tolerance stays correct either way.
+        self.Set_Tuning_Preset(1)
+
+
+    @property
+    def reader_process_id(self):
+        """The VFO that transmits: B in split, otherwise the active one."""
+        return self._ubitx_reader.id
+
+    #
+    #   Decoding command buffers sent from MCU to Nextion screens
+    #
+    #   Command format is "pm.xx.val=nn..n" terminated by 3 0xff
+    #   Command starts in position 3(0,1,2,3)
+    #   Value starts in position 10, and ends before the 3 0xff
+    #   All"values" are ascii characters  (i.e., frequency might be
+    #   pm.xx.val=7500000ffffff  for 7.5mhz and a 14m frequency might be
+    #   pm.xx.val=14032000ffffff
+    #
+    class _input:
+        def __init__(self, radio_link):
+            self._radio_link = radio_link
+            self._port = radio_link.port
+            self._model = radio_link._model
+            self._schedule = radio_link.schedule
+            print("inner class init", self._port, self._model, self._schedule)
+
+            # A FRAME CAN SPAN TWO PASSES. These used to be locals of
+            # _reader(), so a report half-received when a pass ended was
+            # thrown away, and the next pass began partway through it --
+            # "skipping prior byte" for the rest of it, and that value lost.
+            # Kept here, the next pass finishes the frame.
+            self._buffer = []
+            self._ff_count = 0
+            self._repeats = {}          # code -> (window start, count)
+            self._repeat_said = False
+            self._zero_run = 0              # see READER_ZERO_RUN
+
+            # NO BLOCKING READ ANY MORE.
+            #
+            # This used to call _read_all_values(), which sat counting until
+            # 26 values had arrived -- the burst the rig sends as it boots --
+            # with a five-second timeout and modal dialogs inside the loop
+            # ("Did you forget to turn it on?"). A hundred lines to receive
+            # what the reader below receives anyway, and the most likely
+            # thing in the link to fail.
+            #
+            # The reader starts instead, and the burst arrives through the
+            # ordinary handlers like every later report: the window comes up
+            # at once and the readouts fill in over the next second, the way
+            # the channel list does. A value that never comes costs nothing
+            # now -- see check_expected_reports(), which says which are
+            # missing rather than waiting for them.
+            self.id = self._radio_link.root.after(self._schedule, self._reader)
+
+        def _reader(self):
+            """
+            Takes what the rig has sent, a bounded amount per pass, and hands
+            each complete report on. A report is "p" ... three 0xff; anything
+            before its "p" is noise and is dropped (the CEC sends a zero to
+            start, for one). A partial report waits for the next pass.
+            """
+            skipped = []
+            skipped_raw = []        # FIX (2026-11-06): with the 0xff bytes, for the hex
+            taken = 0
+            while taken < READER_MAX_BYTES_PER_PASS and self._port.in_waiting > 0:
+                in_byte = self._port.read(1)
+                if not in_byte:
+                    break
+                taken += 1
+                self._radio_link.bytes_seen += 1
+
+                if RIG_TIMING and not getattr(self._radio_link, "_t_first_byte", None):
+                    self._radio_link._t_first_byte = monotonic()
+                    print(f"[rig timing] first byte {in_byte!r} at "
+                          f"+{self._radio_link._since_reboot():.2f} s")
+
+                if in_byte == b'\x00' and not self._buffer:
+                    self._zero_run += 1
+                    if self._zero_run == READER_ZERO_RUN:
+                        print("[rig] the line from the rig is being held low -- "
+                              "a steady stream of zero bytes. Is the rig switched "
+                              "on? Is a USB-to-TTL adapter on its TX line?")
+                    continue
+                if self._zero_run:
+                    if self._zero_run >= READER_ZERO_RUN:
+                        print(f"[rig] the line came back after {self._zero_run} zero bytes")
+                    self._zero_run = 0
+
+                if not self._buffer and in_byte != b'p':
+                    if in_byte != b'\xff':
+                        skipped.append(in_byte)
+                    skipped_raw.append(in_byte)
+                    continue
+
+                self._buffer.append(in_byte)
+                if in_byte == b'\xff':
+                    self._ff_count += 1
+                    if self._ff_count == 3:
+                        frame = [item.decode(errors='ignore') for item in self._buffer]
+                        self._buffer.clear()
+                        self._ff_count = 0
+                        if len(frame) > 5:
+                            self._note_repeat(frame[3] + frame[4])
+                            self._process_radio_command(frame)
+                        continue
+
+                if len(self._buffer) > READER_MAX_FRAME:
+                    text = b''.join(self._buffer).decode(errors='replace')
+                    print(f"[rig] dropped a report that never ended: {text[:40]!r}...")
+                    # FIX (2026-11-06): and in hex, as for skipped bytes.
+                    print(f"[rig]   as sent: {b''.join(self._buffer).hex(' ')}")
+                    self._buffer.clear()
+                    self._ff_count = 0
+
+            if skipped:
+                text = b''.join(skipped).decode(errors='replace')
+                print(f"[rig] skipped {len(skipped)} bytes before a report: {text!r}")
+                # FIX (2026-11-06): THE SAME BYTES IN HEX, 0xff included -- the
+                # text above leaves the terminators out, so it cannot say
+                # whether reports ran together or each ended properly.
+                raw = b''.join(skipped_raw)
+                print(f"[rig]   as sent ({len(raw)} bytes): {raw[:96].hex(' ')}"
+                      f"{' ...' if len(raw) > 96 else ''}")
+
+            try:
+                self.id=self._radio_link.root.after(self._schedule, self._reader)
+            except tk.TclError:
+                # Catch-all safety net for mid-execution destruction
+                return
+
+        def _note_repeat(self, code):
+            """Says once if the rig keeps sending the same report on its own."""
+            if self._repeat_said:
+                return
+            now = timer()
+            start, count = self._repeats.get(code, (now, 0))
+            if now - start > READER_REPEAT_WINDOW:
+                start, count = now, 0
+            count += 1
+            self._repeats[code] = (start, count)
+            if count >= READER_REPEAT_WARNING:
+                self._repeat_said = True
+                print(f"[rig] the rig has sent \"{code}\" {count} times in "
+                      f"{now - start:.1f} s without being asked. Something is "
+                      f"feeding its serial input -- a USB-to-TTL adapter on its "
+                      f"TX/RX lines will do this. Unplug it, or connect only its "
+                      f"GND and RX.")
+
+        def _process_radio_command(self, buffer):
+            command = buffer[3] + buffer[4]
+            if RIG_TIMING:
+                print(f"[rig timing] +{self._radio_link._since_reboot():.2f} s  {command}")
+            # Every report passes here, so this is where "we have seen one"
+            # belongs -- see uBITX_Link.check_expected_reports().
+            self._radio_link.seen_reports.add(command)
+            self._delegate_command_processing(command, buffer)
+
+            # THE VIEW IS TOLD HERE, and nowhere else.
+            #
+            # Handlers write the model; none of them notifies. Without this
+            # the rig reported, the model updated, and the interface went on
+            # showing whatever it had -- which looked like individual features
+            # not working rather than the display never redrawing at all.
+            #
+            # Once per command is fine: changed() coalesces a burst into a
+            # single redraw on the next idle pass.
+            self._model.changed()
+
+        ################################################################################
+        #   Format of command sent by radio:
+        #   1. Prelog
+        #   2. command type: characters 0-2, format "xx." Where "xx" is mostly "pm"
+        #   3. subcommand type: characters 3,4  The translation between these characters
+        #   and the code that implements them is in the dictionary above "MCU_Command_To_CB_Dict"
+        #   4. value: This is the 4 bytes between 10-13. Mostly these are characters. But
+        #   in some cases the might represent hex bytes that need to be recoded into an int
+        ################################################################################
+
+        def _extract_value(self, buffer, start, end):
+            returnBuffer = ""
+            i = start
+            while i < end:
+                returnBuffer = returnBuffer + buffer[i]
+                i += 1
+            return returnBuffer.replace('"', '')
+
+        ######################################################################################
+        #   This looks up the command processing routing to be called via a dictionary
+        #   based on the command type (characters 3,4 in the buffer after prelogue stripped
+        ######################################################################################
+
+        def _validate_key(self, command, buffer):
+            validate_flag = False
+            if len(command) != 2:
+                print("invalid command", command)
+            elif len(buffer) == 0:
+                print("empty buffer", buffer)
+            elif command.isalnum() == False:
+                print("invalid command", command)
+            elif buffer[0] != 'p' or buffer[1] != 'm':
+                print("invalid command - doesnt start pm", command)
+            elif buffer[2] != '.' or buffer[5] != '.':
+                print("invalid command - periods in wrong place ")
+            elif ((buffer[6] != 'v') or (buffer[7] != 'a') or (buffer[8] != 'l')) and (
+                    (buffer[6] != 't') or (buffer[7] != 'x') or (buffer[8] != 't')):
+                print("invalid command - not txt or val")
+            elif buffer[9] != '=':
+                print("invalid command format, no =")
+            elif len(self._extract_value(buffer, 10, len(buffer) - 3)) < 1:
+                print("invalid value format, empty")
+            elif 'val' in self._extract_value(buffer, 10, len(buffer) - 3):
+                print("invalid value format, looks like val")
+            else:
+                validate_flag = True
+            #
+            #   Need to figure out how to recover from this type of bad data
+            #
+            # if validate_flag == False:
+            #     self.connection.rebootRadio()
+
+            return validate_flag
+
+        def _delegate_command_processing(self, command, buffer):
+            # print(command, buffer)
+
+            if self._validate_key(command, buffer) == False:
+                print(buffer)
+                return
+            match command:
+                case "v1":
+                    self.v1_UX_Set_Tuning_Preset_1(buffer)
+                case "v2":
+                    self.v2_UX_Set_Tuning_Preset_2(buffer)
+                case "v3":
+                    self.v3_UX_Set_Tuning_Preset_3(buffer)
+                case "v4":
+                    self.v4_UX_Set_Tuning_Preset_4(buffer)
+                case "v5":
+                    self.v5_UX_Set_Tuning_Preset_5(buffer)
+                case "cn":
+                    self.cn_UX_Set_Active_Tuning_Preset(buffer)
+                case "ch":
+                    self.ch_UX_Set_CW_TX_OFFSET(buffer)
+                case "vh":
+                    self.vh_UX_Set_CW_Tweak(buffer)
+                case "vo":
+                    self.voGet(buffer)
+                case "vp":
+                    self.vpGet(buffer)
+                case "vq":
+                    self.vqGet(buffer)
+                case "sv":
+                    self.sv_UX_Set_SW_Version(buffer)
+                case "sc":
+                    self.sc_UX_Set_User_Callsign(buffer)
+                case "cm":
+                    self.cm_UX_Display_Callsign_Version_Flag(buffer)
+                case "c0":
+                    self.c0_UX_Toggle_Classic_uBITX_Control(buffer)
+                case "vc":
+                    self.vc_UX_Set_Primary_VFO_Frequency(buffer)
+                case "cc":
+                    self.cc_UX_Set_Primary_Mode(buffer)
+                case "va":
+                    self.va_UX_Set_VFO_A_Frequency(buffer)
+                case "ca":
+                    self.ca_UX_Set_VFO_A_Mode(buffer)
+                case "vb":
+                    self.vb_UX_Set_VFO_B_Frequency(buffer)
+                case "cb":
+                    self.cb_UX_Set_VFO_B_Mode(buffer)
+                case "vt":
+                    self.vt_UX_SET_CW_Tone(buffer)
+                case "ck":
+                    self.ck_UX_Set_CW_Key_Type(buffer)
+                case "vs":
+                    self.vs_UX_Set_CW_Speed(buffer)
+                case "vy":
+                    self.vy_UX_Set_CW_Delay_Returning_to_RX(buffer)
+                case "ve":
+                    self.ve_UX_Set_CW_Delay_Starting_TX(buffer)
+                case "cv":
+                    self.cv_UX_VFO_Toggle(buffer)  # sets active VFO, A=0, B=1
+                case "s0":
+                    self.s0_UX_Greenbox_Line1(buffer)
+                case "s1":
+                    self.s1_UX_Greenbox_Line2(buffer)
+                case "sh":
+                    self.sh_UX_Get_Memory(buffer)
+                case "vn":
+                    self.vn_UX_ACK_Memory_Write(buffer)
+                case "cl":
+                    self.cl_UX_Lock_Screen(buffer)
+                case "cj":
+                    self.cj_UX_Speaker_Toggle(buffer)
+                case "cs":
+                    self.cs_UX_SPLIT_Toggle(buffer)
+                case "vr":
+                    self.vr_UX_Update_RIT_Freq(buffer)
+                case "cr":
+                    self.cr_UX_RIT_Toggle(buffer)
+                case "vf":
+                    self.vf_UX_ATT_Level(buffer)
+                case "vi":
+                    self.vi_UX_IFS_Level(buffer)
+                case "vm":
+                    self.vm_UX_PW_SWR_Level(buffer)
+                case "ci":
+                    self.ci_UX_IFS_State_Set(buffer)
+                case "cx":
+                    self.cx_UX_TX_Stop_Toggle(buffer)
+                case "cp":
+                    self.cp_UX_S_Meter_Value(buffer)  # Related to S meter. search CMD_SMETER
+                case "ct":
+                    self.ct_UX_RX_TX_Mode(buffer)
+                case "al":
+                    self.al_UX_S_Meter_Value(buffer)
+                case "vv":
+                    self.vv_UX_Command_Data(buffer)
+                case "vg":
+                    self.vg_UX_DSP_Flag(buffer)
+                case "sb":
+                    self.sb_UX_CW_Decoded_Characters(buffer)
+                case "sp":
+                    self.sp_UX_DSP_Spectrum_Values(buffer)
+                case "xt":
+                    self.sp_UX_DSP_Spectrum_Values(buffer)
+                case _:
+                    print("Command not recognized=", buffer, "*")
+                    print("command:", command, "*", sep="*")
+
+        #   MCU Commands
+        #########################################################################################
+        ####    Start of command processing sent by Radio(MCU) to Screen
+        #########################################################################################
+
+        #
+        #   The "v1" command is used for smallest tuning rate
+        #
+
+        def v1_UX_Set_Tuning_Preset_1(self, buffer):
+            value = self._extract_value(buffer, 10, len(buffer) - 3)
+            print("Tuning Preset 1: ", value)
+            self._model.tuning_presets[0] = int(value)
+            # self.theVFO_Object.setTuningPreset(1, value)
+
+        #
+        #   The "v2" command is used for smallest tuning rate
+        #
+        def v2_UX_Set_Tuning_Preset_2(self, buffer):
+            value = self._extract_value(buffer, 10, len(buffer) - 3)
+            print("Tuning Preset 2: ", value)
+            self._model.tuning_presets[1] = int(value)
+            # self.theVFO_Object.setTuningPreset(2, value)
+
+        #
+        #   The "v3" command 1s used for the third (middle) tuning rate
+        #
+        def v3_UX_Set_Tuning_Preset_3(self, buffer):
+            value = self._extract_value(buffer, 10, len(buffer) - 3)
+            print("Tuning Preset 3: ", value)
+            self._model.tuning_presets[2] = int(value)
+            # self.theVFO_Object.setTuningPreset(3, value)
+
+        #
+        #   The "v4" command 1s used for the next largest tuning rate
+        #
+        def v4_UX_Set_Tuning_Preset_4(self, buffer):
+            value = self._extract_value(buffer, 10, len(buffer) - 3)
+            print("Tuning Preset 4: ", value)
+            self._model.tuning_presets[3] = int(value)
+            # self.theVFO_Object.setTuningPreset(4, value)
+
+        #
+        #   The "v5" command 1s used for the largest tuning rate
+        #
+        def v5_UX_Set_Tuning_Preset_5(self, buffer):
+            value = self._extract_value(buffer, 10, len(buffer) - 3)
+            print("Tuning Preset 5: ", value)
+            self._model.tuning_presets[4] = int(value)
+            # self.theVFO_Object.setTuningPreset(5, value)
+
+        #
+        #   The "cn" command indicates which tuning step is active (1(smallest) - 5(largest)
+        #
+        def cn_UX_Set_Active_Tuning_Preset(self, buffer):
+
+            value = self._extract_value(buffer, 10, len(buffer) - 3)
+            print("Active Tuning Preset: ", value)
+            # Decides the rounding granularity, so anything comparing a
+            # confirmation against a request needs it.
+            self._model.active_tuning_preset = int(value)
+            # self.theVFO_Object.set_Active_Tuning_Preset(value)
+
+        #
+        #   The "ch" command originates from the EEPROM and is added to the frequency to shift it
+        #
+        def ch_UX_Set_CW_TX_OFFSET(self, buffer):
+            value = self._extract_value(buffer, 10, len(buffer) - 3)
+            print("CW TX OFFSET: ", value)
+            #
+            #   The following provides the ability to override the EEPROM value as a setting config
+            #
+            # if self.cwTX_OffsetFlagOverride != None:
+            #     self.cwTX_OffsetFlag = self.cwTX_OffsetFlagOverride
+            #     return
+            #
+            # if value == 0:  # turn off CW TX offset mode
+            #     self.cwTX_OffsetFlag = False
+            # else:  # turn on CW TX offset - only effects CWL and CWU modes
+            #     self.cwTX_OffsetFlag = True
+
+        #
+        #   The "vh" command originates from the EEPROM and is added to the frequency to shift it
+        #
+        def vh_UX_Set_CW_Tweak(self, buffer):
+            value = self._extract_value(buffer, 10, len(buffer) - 3)
+            print("CW Tweak: ", value)
+            # Part of the CW transmit offset -- see RadioModel.cw_tx_offset.
+            # Discarded until now; harmless while the rig reports 0, wrong the
+            # moment an operator trims it.
+            try:
+                self._model.cw_tweak = int(value)
+            except (TypeError, ValueError):
+                pass
+
+        #
+        #   The "vo" if 1, then turn on IFS and use initial value
+        #
+        def voGet(self, buffer):
+            value = self._extract_value(buffer, 10, len(buffer) - 3)
+            print("v0Get: ", value)
+
+        def cp_UX_S_Meter_Value(self, buffer):
+            value = self._extract_value(buffer, 10, len(buffer) - 3)
+            # FIX (2026-11-06): THE RIG'S S-METER, wired -- it only printed.
+            # KD8CEC sends it from the A7 sensor as a STEP, 0 to 8: which of
+            # the eight levels calibrated in the rig (sMeterLevels) the
+            # reading has passed. Sent only when it changes, only with the
+            # S-meter display option on, and only OUTSIDE SDR mode -- in SDR
+            # mode the SDR's own reading is the one used. Shown on the
+            # meter's S-unit scale through RIG_S_STEPS; anything else ignored.
+            try:
+                step = int(str(value).strip())
+            except ValueError:
+                return
+            if 0 <= step < len(self.RIG_S_STEPS):
+                self._model.s_value = self.RIG_S_STEPS[step]
+                self._model.s_reported = True
+
+        # Each rig S-meter step on the S-unit scale -- S0, then the eight
+        # levels spread to S9. A first guess: what each step means is set by
+        # the calibration in the rig, and belongs with that calibration's
+        # dialog when it is built.
+        RIG_S_STEPS = (0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.5, 8.0, 9.0)
+
+        #
+        #   This is a hack fix for a bug in CEC (at least v2.0, perhaps in 1.x too)
+        #   Command for S-meter is ill formed and we  get "p.val=x" instead of "pm.cp.val=x'
+        #   Just got tired of seeing this error flagged...
+        #
+        def al_UX_S_Meter_Value(self, buffer):
+            value = self._extract_value(buffer, 6, len(buffer) - 3)
+            print("al_UX_S_Meter_Value: ", value)
+            # if value.isnumeric():
+            #     print("correcting for mal formed s-meter commend", buffer, "setting s-meter to", value)
+            #     self.s_meter_Progressbar_VAR.set(int(value))
+            # else:
+            #     print("another weird malformed command, buffer =", buffer)
+
+        #
+        #   This command provides Nextion with the Power and SWR levels
+        #   PWR is sent first, followed by the SWR second
+        #
+        def vm_UX_PW_SWR_Level(self, buffer):
+            value = self._extract_value(buffer, 10, len(buffer) - 3)
+            print("vm_UX_PW_SWR_Level: ", value)
+            # if gv.config.get_PWR_SWR_Switch() == "True":
+            #     value = self._extract_value(buffer, 10, len(buffer) - 3)
+            #     adjustedValue = int(value) / 100
+            #
+            #     if self.lastPWRSWR_Reading == None or self.lastPWRSWR_Reading == "SWR":
+            #         self.lastPWRSWR_Reading = "PWR"
+            #         factorPWR = round(adjustedValue / float(gv.config.get_PWR_Factor()), 1)  # 3.91
+            #         self.PWR_Value_VAR.set(str(factorPWR).replace(".", gv.config.get_NUMBER_DELIMITER()))
+            #     else:
+            #         self.lastPWRSWR_Reading = "SWR"
+            #         factorSWR = round(adjustedValue / float(gv.config.get_SWR_Factor()), 1)  # 2,95
+            #         if factorSWR < 1.0 or factorSWR > 2.9:
+            #             self.SWR_Label.configure(style="Heading3bRed.TLabel")
+            #             self.SWR_Value.configure(style="Heading3bRed.TLabel")
+            #         else:
+            #             self.SWR_Label.configure(style="Heading3b.TLabel")
+            #             self.SWR_Value.configure(style="Heading3b.TLabel")
+            #
+            #         self.SWR_Value_VAR.set(str(factorSWR).replace(".", gv.config.get_NUMBER_DELIMITER()))
+
+        def vv_UX_Command_Data(self, buffer):
+
+            #
+            # saving this data because dont know what to do with it until next command
+            # could be retrieving EEPROM DSP settings to screen dimming or ?
+            #
+
+            self.vv_Command_Buffer = self._extract_value(buffer, 10, len(buffer) - 3)
+            print("Received VV data", self.vv_Command_Buffer, "len=", len(self.vv_Command_Buffer))
+
+        def vg_UX_DSP_Flag(self, buffer):
+            commandType = self._extract_value(buffer, 10, len(buffer) - 3)
+            print("vg_UX_DSP_Flag Received:", commandType)
+            #
+            #   Dsp data is weird. You get a "vv" command with the data followed by a "vg" with
+            #   the command to send the "vv" buffer that you received previously.
+            #
+            # self.process_DSP_EEPROM_Data(self.vv_Command_Buffer)
+
+        def sb_UX_CW_Decoded_Characters(self, buffer):
+            value = self._extract_value(buffer, 10, len(buffer) - 3)
+            print("Decoded CW Characters", buffer)
+            # self.consumerDSPdata.process_CWDecoded_Data(value)
+
+        def sp_UX_DSP_Spectrum_Values(self, buffer):
+            value = self._extract_value(buffer, 6, len(buffer) - 3)
+            print("sp_UX_DSP_Spectrum_Values: ", value)
+            # if buffer[3] == "x" and buffer[4] == "t":  # error catch for malformed spectrum responses
+            #     value = self._extract_value(buffer, 6, len(buffer) - 3)
+            #     # print("fixing malformed p., value =", value)
+            # else:
+            #     value = self._extract_value(buffer, 10, len(buffer) - 3)
+            # print("buffer=", buffer)
+            # print("value=", value)
+            # if self.consumerDSPdata
+            self.consumerDSPdata.process_Spectrum_Data(value)
+
+        # def highlightCWorSpectrumBoxes(self, flag):
+        #     self.mainScreenCW_logger.clearLog()
+        #     self.mainScreenPlotter.clearCanvas()
+        #
+        #     if flag:
+        #         if self.frequencySpectrumMode == "FreqScan":
+        #             self.spectrumCanvas.configure(
+        #                 highlightbackground="white",
+        #                 highlightcolor="white")
+        #             self.decodedCWText.configure(
+        #                 highlightbackground="gray",
+        #                 highlightcolor="gray")
+        #             # self.mainScreenCW_logger.clearLog()
+        #             return
+        #         elif self.frequencySpectrumMode == "CWDecode":
+        #             self.spectrumCanvas.configure(
+        #                 highlightbackground="gray",
+        #                 highlightcolor="gray")
+        #             self.decodedCWText.configure(
+        #                 highlightbackground="white",
+        #                 highlightcolor="white")
+        #             # self.mainScreenPlotter.clearCanvas()
+        #             return
+        #
+        #     self.decodedCWText.configure(
+        #         highlightbackground="gray",
+        #         highlightcolor="gray")
+        #     self.spectrumCanvas.configure(
+        #         highlightbackground="gray",
+        #         highlightcolor="gray")
+            # self.mainScreenCW_logger.clearLog()
+            # self.mainScreenPlotter.clearCanvas()
+
+        # def process_Spectrum_Data(self, buffer):
+        #     #
+        #     #   If the DSP had been previously enabled, it can be generating data before
+        #     #   the "consumer" in the mainscreen has been started. This just throws this data
+        #     #   away until it is ready
+        #     #
+        #     # print("mainscreen Processing Spectrum Data", buffer)
+        #     if self.mainScreenPlotter != None:
+        #         self.mainScreenPlotter.process_Data(buffer)
+        #
+        # def process_CWDecoded_Data(self, buffer):
+        #     print("Processing CW Data for main window", buffer)
+        #     #
+        #     #   If the DSP had been previously enabled, it can be generating data before
+        #     #   the "consumer" in the mainscreen has been started. This just throws this data
+        #     #   away until it is ready
+        #     #
+        #
+        #     if self.mainScreenCW_logger != None:
+        #         self.mainScreenCW_logger.process_CWDecoded_Data(buffer)
+        #
+        # def process_DSP_EEPROM_Data(self, buffer):
+        #     # print("Processing DSP Data for main window", buffer)
+        #     byteList = int(buffer).to_bytes(4, 'little')
+        #     # print("process_DSP_Data", byteList)
+        #
+        #     if int(buffer) < 0xffffff:  # only a 3 hex byte number
+        #         self.DSPFound = True
+        #
+        #         # print("main window eeprom values returned")
+        #         # print(hex(int(buffer)))
+        #         # print("main window decodescale*10=", byteList[0])
+        #         # print("main window useDSPFlag=", byteList[1])
+        #
+        #         self.frequencyDecodeScale = int(byteList[0] / 10)
+        #
+        #         if byteList[
+        #             1] == 1 and gv.config.get_DSP_Switch() == "False":  # configuration file/option says no, DSP says yes...
+        #             messagebox.showwarning(message="Configuration Mismatch!",
+        #                                    detail="Configuration file disables DSP while DSP believes it is active.\n\n" +
+        #                                           "Updating configuration file to Enable DSP. You can change this in Machine Settings.",
+        #                                    parent=self)
+        #             gv.config.set_DSP_Switch("True")
+        #         elif byteList[
+        #             1] == 0 and gv.config.get_DSP_Switch() == "True":  # configuration file says yes, DSP says no
+        #             messagebox.showwarning(message="Configuration Mismatch!",
+        #                                    detail="Configuration file enables DSP while DSP is inactive.\n\n" +
+        #                                           "Updating configuration file to Disable DSP. You can change this in Machine Settings.",
+        #                                    parent=self)
+        #             gv.config.set_DSP_Switch("False")
+        #         else:
+        #             pass  # configuration file and DSP agree, do nothing
+        #
+        #         if byteList[2] == 95:
+        #             self.frequencySpectrumMode = "FreqScan"
+        #         elif byteList[2] >= 100 and byteList[2] < 146:  # in CW mode
+        #             self.frequencyPlotcwToneScale = int(byteList[2] - 100)
+        #             self.frequencyPlotcwToneValue = ((byteList[2] - 100) * 50) + 300
+        #             self.frequencySpectrumMode = "CWDecode"
+        #
+        #         #
+        #         #   Now that we know which mode we are in, set white boundaries around the cw or spectrum areas
+        #         #   appropriately and clear the areas to start fresh
+        #         #
+        #         self.highlightCWorSpectrumBoxes(True)
+        #
+        #         # print("eeprom fetch:", hex(int(buffer)))
+        #
+        # def request_DSP_EEPROM_Data(self):
+        #     #
+        #     # Request DSP data stored in EEPROM
+        #     self.connection.Req_DSP_EEPROM_Settings()
+
+        #
+        #   Indicates a switching of RX/TX mode. 1=TX, 0=RX
+        #
+        def ct_UX_RX_TX_Mode(self, buffer):
+            value = self._extract_value(buffer, 10, len(buffer) - 3)
+            print("ct_UX_RX_TX_Mode: ", value)
+            # Carries its state, unlike the toggles above: the code this
+            # replaces tested `value == "1"` rather than flipping a flag.
+            self._model.transmitting = (str(value).strip() == "1")
+            # FIX (2026-11-09): a transmit during a held split VFO change makes
+            # it the firmware's swap to transmit -- see SPLIT_TX_GRACE_MS.
+            hold = getattr(self._radio_link, "_split_hold", None)
+            if hold is not None and self._model.transmitting:
+                hold["tx"] = True
+            # if value == "1":  # going into transmit mode
+            #     self.theVFO_Object.setTXButtonState()
+            #     #
+            #     #   Stop SDR if it exists
+            #     #
+            #     if self.theSDR is not None:
+            #         self.theSDR.stop_scan()
+            #         self.theSDR.stopSDR()
+            #
+            #     if gv.config.get_PWR_SWR_Switch() == "True":  # If PWR/SWR Switch is off display nothing
+            #         self.SWR_PWR_Frame.grid()
+            #
+            # else:
+            #     self.theVFO_Object.setRXButtonState()
+            #     #
+            #     #   Start SDR if it exists
+            #     #
+            #     if self.theSDR is not None:
+            #         self.theSDR.startSDR()
+            #     #
+            #     #   the self.master.state('normal') is a little magic that is needed on macos to make sure the
+            #     #   frame really disappears. Only need to schedule this if PWR/SWR switch is on.
+            #     #
+            #     if gv.config.get_PWR_SWR_Switch() == "True":
+            #         self.master.after(2000, lambda: [self.SWR_PWR_Frame.grid_remove(), self.master.state('normal')])
+
+        #
+        #   The "vp" command originates from the EEPROM and is added to the frequency to shift it
+        #
+        def vpGet(self, buffer):
+            value = self._extract_value(buffer, 10, len(buffer) - 3)
+            print("vp get called:", "buffer =", buffer)
+
+        #
+        #   The "vq" command is referred to as display option 2 in EEPROM
+        #
+        def vqGet(self, buffer):
+            value = self._extract_value(buffer, 10, len(buffer) - 3)
+            print("vq get called: buffer=", buffer)
+
+        #
+        #   The "sv" command is stores the text of the firmware version
+        #
+        def sv_UX_Set_SW_Version(self, buffer):
+            value = self._extract_value(buffer, 10, len(buffer) - 3)
+            print("sv_UX_Set_SW_Version: ", value)
+            self._model.set_firmware(str(value).strip())
+            # self.theVFO_Object.setFirmwareVersion(value)
+
+        #
+        #   The "sc" command is stores the text of the operators callsign
+        #
+        def sc_UX_Set_User_Callsign(self, buffer):
+            value = self._extract_value(buffer, 10, len(buffer) - 3)
+            print("sc_UX_Set_User_Callsign: ", value)
+            self._model.set_callsign(str(value).strip())
+            # self.theVFO_Object.setCallsign(value)
+
+        #
+        #   The "cm" command determines whether call sign and firmware versions are displayed
+        #
+        def cm_UX_Display_Callsign_Version_Flag(self, buffer):
+            value = self._extract_value(buffer, 10, len(buffer) - 3)
+            print("cm_UX_Display_Callsign_Version_Flag: ", value)
+            # if value == "0":
+            #     self.theVFO_Object.setFirmwareVersion("")
+            #     self.theVFO_Object.setCallsign("")
+
+        #
+        #   The "c0" command determines whether we are in text (yellow box) or graphics mode
+        #
+        def c0_UX_Toggle_Classic_uBITX_Control(self, buffer):
+            value = self._extract_value(buffer, 10, len(buffer) - 3)
+            print("c0_UX_Toggle_Classic_uBITX_Control: ", value)
+            # if value == "0":
+            #     if self.classic_uBITX_ControlWindowObj != None:
+            #         self.classic_uBITX_ControlWindowObj.pack_forget()
+            #         self.classic_uBITX_ControlWindowObj = None
+            #     if self.classic_uBITX_ControlWindow != None:
+            #         self.classic_uBITX_ControlWindow.destroy()
+            #         self.classic_uBITX_ControlWindow = None
+            #
+            # else:
+            #     self.displayClassic_uBITXControlWindow()
+
+        #
+        # The purpose of this command is a little puzzling
+        # code talks about this being used to eliminate duplicate data
+        # Only sent on the first attempt to lock the screen
+        # Also contains the text for the speaker button
+        #
+        def s0_UX_Greenbox_Line1(self, buffer):
+            value = self._extract_value(buffer, 10, len(buffer) - 3)
+            print("s0_UX_Greenbox_Line1: ", value)
+            # self.displayLine1Classic_uBITX_Control(value)
+
+        def s1_UX_Greenbox_Line2(self, buffer):
+            value = self._extract_value(buffer, 10, len(buffer) - 3)
+            print("s1_UX_Greenbox_Line2: ", value)
+            # self.displayLine2Classic_uBITX_Control(value)
+
+        def sh_UX_Get_Memory(self, buffer):
+            value = self._extract_value(buffer, 10, len(buffer) - 3)
+            # _radio_link, NOT connection. This handler lives in the reader
+            # class, which has no `connection` -- the line here called
+            # self.connection.lenMemoryQueue() and would have raised on the
+            # first memory reply, had anything asked for one.
+            self._radio_link._on_memory_reply(value)
+            # try:
+            #     value = self._extract_value(buffer, 10, len(buffer) - 3)
+            #     # print("sh_UX_Get_Memory", self.connection.lenMemoryQueue())
+            #     if self.connection.lenMemoryQueue() == 0:  # make sure something in queue, otherwise fatal error
+            #         messagebox.showerror("Application Error",
+            #                              "Memory Queue is empty, yet memory value delivered by MCU")
+            #         sys.exit("A fatal internal error occurred")
+            #
+            #     memoryCategory = self.connection.popMemoryQueue()
+            #
+            #     match memoryCategory:
+            #
+            #         case "Freq":  # Got a channel frequency request
+            #             freq = int(value, 16) & 0x1FFFFFFF
+            #             mode = (int(value, 16) >> 29) & 0x7
+            #             self.channelsWindow.EEPROM_SetChanneFreqMode(
+            #                 self.EEPROM_Current_Slot_Freq,
+            #                 freq,
+            #                 mode)
+            #             self.EEPROM_Current_Slot_Freq += 1
+            #             if (self.EEPROM_Current_Slot_Freq ==
+            #                     EEPROM.Mem_Address["channel_freq_Mode"][EEPROM.totalSlots]):
+            #                 self.EEPROM_Current_Slot_Freq = 0
+            #
+            #         case "Label":  # have a label for a memory channel
+            #             self.channelsWindow.EEPROM_SetChannelLabel(
+            #                 self.EEPROM_Current_Slot_Label,
+            #                 value)
+            #             # if self.EEPROM_Current_Slot_Label == 9:
+            #             #         print("label slot=", self.EEPROM_Current_Slot_Label, "value=", value, sep='*', end='*')
+            #             self.EEPROM_Current_Slot_Label += 1
+            #             if (self.EEPROM_Current_Slot_Label ==
+            #                     EEPROM.Mem_Address["channel_Label"][EEPROM.totalSlots]):
+            #                 self.EEPROM_Current_Slot_Label = 0
+            #
+            #         case "ShowLabel":  # Reading switch on whether to show or not show the label
+            #             if (ord(value) == 0):
+            #                 self.channelsWindow.EEPROM_SetChannelShowLabel(
+            #                     self.EEPROM_Current_Slot_ShowLabel,
+            #                     "No")
+            #
+            #             else:
+            #                 self.channelsWindow.EEPROM_SetChannelShowLabel(
+            #                     self.EEPROM_Current_Slot_ShowLabel,
+            #                     "Yes")
+            #
+            #             self.EEPROM_Current_Slot_ShowLabel += 1
+            #             if (self.EEPROM_Current_Slot_ShowLabel ==
+            #                     EEPROM.Mem_Address["channel_ShowLabel"][EEPROM.totalSlots]):
+            #                 self.EEPROM_Current_Slot_ShowLabel = 0
+            #
+            #         case "MasterCal":  # Got a master cal value
+            #             self.connection.Master_Cal_Setter(str(int(value, 16)))
+            #
+            #         case "SSB_BFO":  # Got a SSB BFO value
+            #             self.connection.SSB_BFO_Setter(str(int(value, 16)))
+            #
+            #         case "CW_BFO":  # Got a CW BFO Value
+            #             self.connection.CW_BFO_Setter(str(int(value, 16)))
+            #
+            #         case "Factory_MasterCal":  # Got a Factory_MasterCal memory value
+            #             self.connection.Factory_Master_Cal_Setter(str(int(value, 16)))
+            #
+            #         case "Factory_SSB_BFO":  # Got a Factory SSB BFO memory value
+            #             self.connection.Factory_SSB_BFO_Setter(str(int(value, 16)))
+            #
+            #         case "Factory_CW_Speed":  # Got a CW Speed memory value
+            #             if int(value, 16) != 0:
+            #                 cw_speed = str(round(1200 / int(value, 16)))
+            #             else:
+            #                 cw_speed = "0"
+            #
+            #             self.connection.Factory_CW_Speed_Setter(cw_speed)
+            #
+            #         case "Factory_CW_Sidetone":
+            #             self.connection.Factory_CW_Sidetone_Setter(str(int(value, 16)))
+            #
+            #         case "Spectrum_Scan":
+            #             # print("Spectrum_Scan", self.connection.lenMemoryQueue(), buffer)
+            #             self.consumerSpectrumdata.process_Spectrum_Data(value)
+            #
+            #         case _:
+            #             # print("case=",memoryCategory)
+            #             messagebox.showerror("Application Error", "Unknown Memory Request")
+            #             sys.exit("A fatal internal error occurred")
+            # except TypeError:
+            #     print("type error")
+            #     print("memory category =", memoryCategory)
+            #     print(" freq slot =", self.EEPROM_Current_Slot_Freq)
+            #     print(" label slot =", self.EEPROM_Current_Slot_Label)
+            #     print(" show slot =", self.EEPROM_Current_Slot_ShowLabel)
+            #
+            #     print("buffer =", buffer)
+            #     message = messagebox.showerror("Application Error", "Unknown Memory Request\nRestart application")
+            #     sys.exit("A fatal internal error occurred")
+
+        def vn_UX_ACK_Memory_Write(self, buffer):
+
+            value = self._extract_value(buffer, 10, len(buffer) - 3)
+            print("vn_UX_ACK_Memory_Write: ", value)
+            # The value is the ADDRESS that was written -- 358 is 0x166, the
+            # CW key type -- so each acknowledgement names its own write, and
+            # can be matched to it without counting.
+            self._radio_link._on_memory_written(value)
+            # if self.CurrentDebug:
+            #     print("vn get called:", "buffer =", buffer)
+            #     print("buffer=", buffer)
+            #     if (int(value) == 358):
+            #         print("write complete for keychange, mem=", int(value))
+            #     elif (int(value) == 28):
+            #         print("write complete for new WPM, mem=", int(value))
+            #     elif (int(value) == 259):
+            #         print("write complete for new RX->TX, mem=", int(value))
+            #     elif (int(value) == 258):
+            #         print("write complete for new TX->RX, mem=", int(value))
+            #     else:
+            #         print("memory location write complete, mem=", int(value))
+
+        def cl_UX_Lock_Screen(self, buffer):
+            value = self._extract_value(buffer, 10, len(buffer) - 3)
+            print("cl_UX_Lock_Screen: ", value)
+            # FIX (2026-11-06): READ, not toggled -- the rig reports the
+            # state, 1 locked and 0 unlocked (checked on the rig), as it does
+            # for split and RIT. Flipping a flag on every report would invert
+            # for good after one missed or repeated report.
+            self._model.locked = str(value).strip() == "1"
+
+            # if (self.lock_Button_On):
+            #     self.lock_Button_On = False
+            #     self.lock_Button.configure(style='Button1bRaised.TButton')
+            #     self.lock_Button['text'] = "LOCK"
+            #     self.unlockUX()
+            # else:
+            #     self.lock_Button_On = True
+            #     self.lock_Button.configure(style='RedButton1bPressed.TButton')
+            #     self.lock_Button['text'] = "LOCKED"
+            #     self.lockUX()
+
+        #
+        #   Disable all of the control widgets when a LOCK action is requested
+        #
+        # def lockUX(self):
+        #     self.settings_Button.configure(state="disabled")
+        #     self.vfo_Button.configure(state="disabled")
+        #     self.mode_Button.configure(state="disabled")
+        #     self.band_up_Button.configure(state="disabled")
+        #     self.band_down_Button.configure(state="disabled")
+        #     self.speaker_Button.configure(state="disabled")
+        #     self.split_Button.configure(state="disabled")
+        #     self.rit_Button.configure(state="disabled")
+        #     self.channels_Button.configure(state="disabled")
+        #     # self.ATT_Jogwheel.setStateDisabled()
+        #     # self.IFS_Jogwheel.setStateDisabled()
+        #     self.downButton_Canvas.configure(state="disabled")
+        #     self.downButton_Canvas.itemconfig(self.downButton, image=self.arrow_down_disabled)
+        #
+        #     self.upButton_Canvas.configure(state="disabled")
+        #     self.upButton_Canvas.itemconfig(self.upButton, image=self.arrow_up_disabled)
+        #
+        #     self.theVFO_Object.setVFOUXState("disabled")
+        #     self.cwDecode_Button.configure(state="disabled")
+        #     self.spectrumScan_Button.configure(state="disabled")
+        #     self.bandScan_Button.configure(state="disabled")
+        #
+        #     self.logQSO_Button.configure(state="disabled")
+        #
+        # #
+        # #   Reset all widgets to their "normal" state after the  unlock happens
+        # #
+        # def unlockUX(self):
+        #     self.settings_Button.configure(state="normal")
+        #     self.vfo_Button.configure(state="normal")
+        #     self.mode_Button.configure(state="normal")
+        #     self.band_up_Button.configure(state="normal")
+        #     self.band_down_Button.configure(state="normal")
+        #     self.speaker_Button.configure(state="normal")
+        #     self.split_Button.configure(state="normal")
+        #     self.rit_Button.configure(state="normal")
+        #     self.channels_Button.configure(state="normal")
+        #     # if (self.ATT_Button_On == True):
+        #     #     self.ATT_Jogwheel.setStateNormal()
+        #     # if (self.IFS_Button_On == True):
+        #     #     self.IFS_Jogwheel.setStateNormal()
+        #
+        #     self.downButton_Canvas.configure(state="normal")
+        #     self.downButton_Canvas.itemconfig(self.downButton, image=self.arrow_down_normal)
+        #     self.upButton_Canvas.configure(state="normal")
+        #     self.upButton_Canvas.itemconfig(self.upButton, image=self.arrow_up_normal)
+        #     self.theVFO_Object.setVFOUXState("normal")
+        #     self.cwDecode_Button.configure(state="normal")
+        #     self.spectrumScan_Button.configure(state="normal")
+        #     self.bandScan_Button.configure(state="normal")
+        #
+        #     if gv.config.get_Logbook_Switch() == "True":
+        #         self.logQSO_Button.configure(state="normal")
+
+        def cj_UX_Speaker_Toggle(self, buffer):
+            value = self._extract_value(buffer, 10, len(buffer) - 3)
+            print("cj_UX_Speaker_Toggle: ", value)
+            # FIX (2026-11-06): READ, not toggled -- the rig reports the
+            # state: 1 in SDR mode (its speaker muted), 0 in speaker mode
+            # (checked on the rig). Matters most of the three: choosing the
+            # SDR as the receiver goes by model.muted.
+            self._model.muted = str(value).strip() == "1"
+
+            # if (self.speaker_Button_On):
+            #     self.speaker_Button_On = False
+            #     self.speaker_Button.configure(style='Button1bRaised.TButton')
+            #     self.speaker_Button['text'] = "SPEAKER"
+            #     if self.theSDR != None:
+            #         self.theSDRWindow.on_close()  # close the sdrdashboard when going out of sdr mode
+            #         self.theSDR.stopSDR()
+            #         self.theSDR.disconnect()
+            #         self.theSDR = None
+            # else:
+            #     self.speaker_Button_On = True
+            #     self.speaker_Button.configure(style='RedButton1bPressed.TButton')  # , state="pressed")
+            #     if gv.config.get_SDR_Switch() == "True":
+            #         self.speaker_Button['text'] = "SDR"
+            #         self.theSDRWindow = launch_sdr_popup(self)
+            #         self.theSDR = self.theSDRWindow.get_app()
+            #         if self.theSDR.connect(gv.config.get_sdr_server_ip(), gv.config.get_sdr_tcp_port()):
+            #             # print("sdr connected")
+            #             self.theSDR.startSDR()
+            #             self.theSDR.set_frequency_hz(int(self.theVFO_Object.getIntPrimaryVFO()))
+            #             self.theSDR.set_mode(self.mode_Button['text'].replace("CWL", "CW").replace("CWU", "CW"))
+            #
+            #             self.theSDR.on_frequency_change_primary = self.sdr_frequency_change_callback
+            #             self.theSDR.on_mode_change_primary = self.sdr_mode_change_callback
+            #
+            #         else:
+            #             messagebox.showerror("Error", "SDR++ Connection refused. Verify target host profiles.")
+            #     else:
+            #         self.speaker_Button['text'] = "MUTE"
+
+        # def relaunch_SDRPanel_CB(self, event=None):
+        #     if self.speaker_Button_On and self.speaker_Button['text'] == "SDR" and self.theSDRWindow is None:
+        #         self.theSDRWindow = launch_sdr_popup(self)
+        #         if self.theSDR.connect(gv.config.get_sdr_server_ip(), gv.config.get_sdr_tcp_port()):
+        #             # print("sdr connected")
+        #             self.theSDR.startSDR()
+        #             self.theSDR.set_frequency_hz(int(self.theVFO_Object.getIntPrimaryVFO()))
+        #             self.theSDR.set_mode(self.mode_Button['text'].replace("CWL", "CW").replace("CWU", "CW"))
+        #             self.theSDR.on_frequency_change_primary = self.sdr_frequency_change_callback
+        #             self.theSDR.on_mode_change_primary = self.sdr_mode_change_callback
+        #
+        #         else:
+        #             messagebox.showerror("Error", "SDR++ Connection refused. Verify target host profiles.")
+
+        def cs_UX_SPLIT_Toggle(self, buffer):
+            value = self._extract_value(buffer, 10, len(buffer) - 3)
+            print("cs_UX_SPLIT_Toggle: ", value)
+            # A TOGGLE, not a state. The code this replaced flipped its own
+            # flag and never read `value`, which is the behaviour that worked
+            # against the real firmware.
+            # Read, not toggled, for the same reason as cr_: the rig reports
+            # 1 when split goes on, which is a state rather than a
+            # notification. The code this replaced flipped its own flag, and
+            # would have inverted permanently after a single missed report.
+            was_split = self._model.split
+            self._model.split = str(value).strip() == "1"
+            # FIX (2026-11-08): RIT and split -- see _rit_split_changed.
+            if self._model.split != was_split:
+                self._radio_link._rit_split_changed(self._model.split)
+            # if (self.split_Button_On):
+            #     self.split_Button_On = False
+            #     self.split_Button.configure(style='Button1bRaised.TButton')
+            #     self.theVFO_Object.setSplitmode("OFF")
+            # else:
+            #     self.split_Button_On = True
+            #     self.split_Button.configure(style='GreenButton1bPressed.TButton')
+            #     self.theVFO_Object.setSplitmode("ON")
+
+        #
+        #   This appears to be a no-op command. If the last rit TX frequency does not equal
+        #   the current frequency, this is called to set the VFO to the RIT TX frequency which happens to be
+        #   the current vfo setting anyway.
+        #
+        def vr_UX_Update_RIT_Freq(self, buffer):
+            value = self._extract_value(buffer, 10, len(buffer) - 3)
+            print("vr_UX_Update_RIT_Freq(base freq): ", value)
+            # IGNORED, deliberately.
+            #
+            # It looks like the rig's record of the RIT base, and for a while
+            # it was stored as one. It is not: it arrives immediately after
+            # cr_ and reports a round 14.000.000 wherever the radio actually
+            # is -- the same figure the original display showed as "RIT Base
+            # RX Freq", so it is the firmware's value, not ours.
+            #
+            # Storing it overwrote the correct base, captured a moment
+            # earlier in cr_ from the real receive frequency, and left the
+            # transmit readout stuck on a number nobody had tuned to.
+            #
+            # The capture in cr_ is the reliable source. If this report ever
+            # turns out to mean something useful, the place to find out is
+            # the firmware source rather than here.
+
+        def cr_UX_RIT_Toggle(self, buffer):
+            value = self._extract_value(buffer, 10, len(buffer) - 3)
+            print("cr_UX_RIT_Toggle: ", value)
+            # THE VALUE IS THE STATE -- 1 on, 0 off -- so it is read, not
+            # toggled. Confirmed on the rig: turning split on while RIT is
+            # on produces
+            #
+            #     cr_UX_RIT_Toggle:  0
+            #     cs_UX_SPLIT_Toggle:  1
+            #
+            # Toggling gave the right answer while every report arrived; one
+            # missed report would have left RIT inverted for good. Reading
+            # the value cannot drift, and only a genuine CHANGE acts -- so a
+            # repeated report does not capture a new base or send receive
+            # anywhere.
+            was_on = self._model.rit
+            now_on = str(value).strip() == "1"
+            # FIX (2026-11-08): THE APP'S OWN RIT (split) is not the firmware's,
+            # which stays off: its "off" reports say nothing about it. Its "on"
+            # -- RIT pressed on the rig's panel -- ends the app's, which is
+            # replaced by the firmware's without writing anything.
+            if self._model.rit_virtual:
+                if not now_on:
+                    return
+                self._radio_link._end_virtual_rit(write_base=False)
+                was_on = False
+            self._model.rit = now_on
+            if now_on and not was_on:
+                self._model.rit_base_hz = self._model.frequency(self._model.rx_vfo)
+                self._model.rit_vfo = self._model.rx_vfo     # FIX (2026-11-08)
+                # FIX: no seed. A RIT switched on from the SDR is followed by
+                # the SDR link asking for base + its offset, once this report
+                # has captured the base -- see SDR_Link._follow_rit.
+            elif was_on and not now_on and self._radio_link._exchange_rit_off:
+                # FIX (2026-11-09): turned off for an exchange -- the RIT goes
+                # with its VFO's contents (exchange_vfos), nothing to undo.
+                self._model.rit_base_hz = 0
+                self._model.rit_vfo = None
+            elif was_on and not now_on:
+                # FIX (2026-11-08): turned off BY A VFO SWITCH, or by the
+                # operator? The firmware clears RIT whenever it switches VFO
+                # (menuVfoToggle calls ritDisable) and reports the switch
+                # first -- so a VFO already changed means the switch did it.
+                rit_vfo = self._model.rit_vfo
+                if rit_vfo and self._model.rx_vfo != rit_vfo:
+                    self._radio_link._rit_cleared_by_switch(rit_vfo)
+                    self._radio_link._maybe_restore_rit()
+                else:
+                    # FIX (2026-11-08): OR BY SPLIT GOING ON. The firmware's
+                    # split clears RIT without retuning, and reports cr_ 0
+                    # BEFORE cs_ 1 -- so this waits a moment to see which it
+                    # was: split -> the app keeps RIT itself (cs_ handler);
+                    # otherwise the operator turned it off.
+                    self._radio_link._rit_off_pending = (rit_vfo, self._model.rit_base_hz)
+                    self._model.rit = True          # until it is decided
+                    self._radio_link.root.after(SPLIT_RIT_WAIT_MS,
+                                                self._radio_link._decide_rit_off)
+
+
+        def vf_UX_ATT_Level(self, buffer):
+            value = int(self._extract_value(buffer, 10, len(buffer) - 3))
+            print("vf_UX_ATT_Level: ", value)
+
+            #
+            #   Zero Value indicated Radio turning off the ATT
+            #
+            # if (value == 0):
+            #     self.setATTScaleState('disabled')
+            #     self.ATT_Toggle_Button.configure(text="ATT OFF", style='Button2bRaised.TButton')
+            #     self.ATT_Button_On = False
+            # else:
+            #     self.setATTScaleState('normal')
+            #     self.ATT_Toggle_Button.configure(text="ATT ON", style='RedButton2bPressed.TButton')
+            #     self.ATT_Scale.set(value)
+            #     self.ATT_Button_On = True
+                # if self.ATT_Jogwheel.state == 'disabled':
+                #     self.ATT_Jogwheel.setStateNormal()
+                #     self.ATT_Status_VAR.set("ATT (ON)")
+                #     self.ATT_Button_On = True
+                #
+                # mjh normally ux should be set to the value ack-ed by mcu. Problem with this
+                # with jog wheels is that they jerk around too much because of all the callbacks
+                # This can also cause oscillation where are reported and stored in jogwheel
+                # much after and so when correcting generate more old traffic.
+                # On balance the chance of a lost packet is pretty low, so best option is to not
+                # repond to the ack-ed value from the MCU
+                #
+                # BUT...
+                # In Classic mode, still need to update the jogwheel...
+                #
+                # if self.classic_uBITX_ControlWindow != None:
+                #     self.ATT_Jogwheel.set(value)            # Set UX to value acked by MCU
+
+        def ci_UX_IFS_State_Set(self, buffer):
+            value = int(self._extract_value(buffer, 10, len(buffer) - 3))
+            print("ci_UX_IFS_State_Set: ", value)
+            # if (value == 0):  # Zero value indicates IFS being turned off
+            #     self.IFS_Jogwheel.setStateDisabled()
+            #     self.IFS_Status_VAR.set("IFS (OFF)")
+            #     self.IFS_Button_On = False
+            # else:
+            #     self.IFS_Jogwheel.setStateNormal()
+            #     self.IFS_Status_VAR.set("IFS (ON)")
+            #     self.IFS_Button_On = True
+
+        def vi_UX_IFS_Level(self, buffer):  # verification by MCU of new value
+            value = int(self._extract_value(buffer, 10, len(buffer) - 3))
+            print("vi_UX_IFS_Level: ", value)
+            # Note that if a "personalized" IF level is set in the EEPROM, then the radio comes
+            # Up with IFS enabled. If value here is 0, just disable the jogwheel
+            # if (value == 0):
+            #     self.IFS_Jogwheel.setStateDisabled()
+
+            # mjh normally ux should be set to the value ack-ed by mcu. Problem with this
+            # with jog wheels is that they jerk around too much because of all the callbacks
+            # This can also cause oscillation where are reported and stored in jogwheel
+            # much after and so when correcting generate more old traffic.
+            # On balance the chance of a lost packet is pretty low, so best option is to not
+            # repond to the ack-ed value from the MCU
+            #
+            # BUT.....
+            # Need to respond when in Classic UX Mode. Can use a check for null to figure out whether we update or not
+            #
+
+            # if self.classic_uBITX_ControlWindow != None:
+            #     self.IFS_Jogwheel.set(value)
+            #
+            # if self.IFS_On_Boot_Flag:  # A little hack. Generally will not respond to MCU IFS requests for efficiency
+            #     # On boot, the default setting is passed to the UX.
+            #     self.IFS_Jogwheel.set(value)
+            #     self.IFS_On_Boot_Flag = False
+
+        def cx_UX_TX_Stop_Toggle(self, buffer):
+            value = int(self._extract_value(buffer, 10, len(buffer) - 3))
+            print("cx_UX_TX_Stop_Toggle: ", value)
+            # FIX (2026-11-06): READ, not toggled -- 1 with transmit off, 0
+            # with it back on (checked on the rig).
+            self._model.tx_inhibit = value == 1
+            # self.theVFO_Object.toggleStopButtonState()
+
+        #
+        #   The "vc" command indicates a new frequency for the Primary
+        #
+        def vc_UX_Set_Primary_VFO_Frequency(self, buffer):
+            value = self._extract_value(buffer, 10, len(buffer) - 3)
+            # FIX: an impossible frequency is refused, not recorded -- see
+            # _frequency_report. int() on a mangled value used to raise here.
+            hz = self._radio_link._frequency_report("p", value)
+            print("set primary return, frequency, ", value, "hz returned", hz)
+            if hz is not None:
+                print("setting model frequency from vc_UX_Set_Primary_VFO_Frequency",hz)
+                self._model.set_frequency("p", hz)
+
+            # NOT fed to the transmit sequence any more. Nothing waits for
+            # a write to be acknowledged -- see _advance_tx_write -- so this
+            # is just another report, and the model has already taken it.
+            # self.theVFO_Object.setPrimaryVFO(value)
+            #
+            # if self.theSDR != None:
+            #     self.theSDR.set_frequency_hz(int(value))
+            #
+            # if self.channelsWindow != None:  # Only update frequency if the channel window has been created once
+            #     self.channelsWindow.update_Current_Frequency(self.theVFO_Object.getFormattedPrimaryVFO())
+                # self.channelsWindow.update_Current_Frequency(gv.formatFrequency(self.primary_VFO_VAR.get()))
+
+        #
+        #   The "cc" command indicates a change to a new mode for primary (e.g. USB, LSB, etc.)
+        #
+        def cc_UX_Set_Primary_Mode(self, buffer):
+            value = self._extract_value(buffer, 10, len(buffer) - 3)
+            self._model.set_mode("p", MODES[int(value)])
+            print("cc_UX_Set_Primary_Mode: ", value, MODES[int(value)])
+
+            # if value == '':
+            #     print("cc_UX_Set_Primary_Mode key error, buffer=", buffer)
+            # self.mode_Button['text'] = EEPROM.modeNum_To_TextDict[value]
+            # if self.cwTX_OffsetFlag and (
+            #         EEPROM.modeNum_To_TextDict[value] == "CWL" or EEPROM.modeNum_To_TextDict[value] == "CWU"):
+            #     #
+            #     #   We are showing the TX frequency on the VFO so need to offset it
+            #     #
+            #     self.theVFO_Object.set_CW_OffsetforTX("ON")
+            # else:
+            #     self.theVFO_Object.set_CW_OffsetforTX("OFF")
+            #
+            # if self.theSDR != None:
+            #     self.theSDR.set_mode(self.mode_Button['text'].replace("CWL", "CW").replace("CWU", "CW"))
+            #
+            # if self.channelsWindow != None:
+            #     # Only update frequency if the channel window has been created once
+            #     self.channelsWindow.update_Current_Mode(self.mode_Button['text'])
+
+        #
+        #   The "va" command indicates assignment of vfoA to new frequency
+        #
+        def va_UX_Set_VFO_A_Frequency(self, buffer):
+            value = self._extract_value(buffer, 10, len(buffer) - 3)
+            # FIX: an impossible frequency is refused, not recorded -- see
+            # _frequency_report. int() on a mangled value used to raise here.
+            print('set vfo a', value)
+            hz = self._radio_link._frequency_report("a", value)
+            print("hz returned", hz)
+            if hz is not None:
+                self._model.set_frequency("a", hz)
+            # print("va_UX_Set_VFO_A_Frequency: ", value)
+            # if (self.channelsWindow != None) and (self.channelsWindow.scanRunning):
+            #     # print("***Ignoring va command as we're scanning***")
+            #     return  # ignore the VFO A command during scanning as it can be out of order
+            #
+            # value = self._extract_value(buffer, 10, len(buffer) - 3)
+
+            # if (self.vfo_VAR.get()== self.VFO_A):       #update displayed frequency
+            # if (self.vfo_Button['text'] == self.VFO_A):  # update displayed frequency
+            #     self.theVFO_Object.setPrimaryVFO(value)  # MJH dont we need to update vfoa and vfob directly
+            #
+            # else:
+            #     self.theVFO_Object.setSecondaryVFO(value)
+
+        #
+        #   The "ca" command indicates assignment of a new mode to vfoA
+        #
+        def ca_UX_Set_VFO_A_Mode(self, buffer):
+            value = self._extract_value(buffer, 10, len(buffer) - 3)
+            self._model.set_mode("a", MODES[int(value)])
+            print("ca_UX_Set_VFO_A_Mode: ", value, MODES[int(value)])
+            # if (self.channelsWindow != None) and (self.channelsWindow.scanRunning):
+            #     # print("***Ignoring ca command as we're scanning***")
+            #     return  # ignore the VFO A command during scanning  as it can be out of order
+            #
+            # value = self._extract_value(buffer, 10, len(buffer) - 3)
+            #
+            # if value == '4pm.vb.val=100980':
+            #     print("ca_UX_Set_VFO_A_Mode error 4pm.vb.val=100980, buffer:", buffer)
+            #
+            # if (self.vfo_Button['text'] == self.VFO_A):
+            #
+            #     self.mode_Button['text'] = EEPROM.modeNum_To_TextDict[value]
+            # else:
+            #     self.theVFO_Object.setSecondaryMode(EEPROM.modeNum_To_TextDict[value])
+
+        #
+        #   The "vb" command indicates assignment of vfoB to new frequency
+        #
+        def vb_UX_Set_VFO_B_Frequency(self, buffer):
+            value = self._extract_value(buffer, 10, len(buffer) - 3)
+            # FIX: an impossible frequency is refused, not recorded -- see
+            # _frequency_report. int() on a mangled value used to raise here.
+            print('set vfo b', value)
+            hz = self._radio_link._frequency_report("b", value)
+            print("hz returned", hz)
+            if hz is not None:
+                self._model.set_frequency("b", hz)
+            print("vb_UX_Set_VFO_B_Frequency: ", value)
+            #
+            # if (self.channelsWindow != None) and (self.channelsWindow.scanRunning):
+            #     return  # ignore the VFO B command during scanning as it can be out of order
+            #
+            # value = self._extract_value(buffer, 10, len(buffer) - 3)
+            #
+            # if (self.vfo_Button['text'] == self.VFO_B):  # update displayed frequency
+            #     self.theVFO_Object.setPrimaryVFO(value)
+            # else:
+            #     self.theVFO_Object.setSecondaryVFO(value)  # need formatted here too
+
+        #
+        #   This sets VFO B to a new mode
+        #
+        def cb_UX_Set_VFO_B_Mode(self, buffer):
+            value = self._extract_value(buffer, 10, len(buffer) - 3)
+            self._model.set_mode("b", MODES[int(value)])
+            print("cb_UX_Set_VFO_B_Mode: ", value, MODES[int(value)])
+            #
+            # if (self.channelsWindow != None) and (self.channelsWindow.scanRunning):
+            #     return  # ignore the VFO B command during scanning as it can be out of order
+            #
+            # value = self._extract_value(buffer, 10, len(buffer) - 3)
+            #
+            # if (self.vfo_Button['text'] == self.VFO_B):  # update displayed frequency
+            #     self.mode_Button['text'] = EEPROM.modeNum_To_TextDict[value]
+            # else:
+            #     self.theVFO_Object.secondary_Mode_Label['text'] = EEPROM.modeNum_To_TextDict[value]
+
+        #
+        #   The "vt" command stores the CW tone
+        #
+        def vt_UX_SET_CW_Tone(self, buffer):
+            value = self._extract_value(buffer, 10, len(buffer) - 3)
+            print("vt_UX_SET_CW_Tone: ", value)
+            # The transmit frequency in a CW mode is displayed offset by this,
+            # so the model needs it -- without this the offset used whatever
+            # RadioModel defaulted to rather than what the rig reported.
+            self._model.cw_tone = int(value)
+            self._model.cw_tone_reported = True   # FIX (2026-11-06): for the CW tab
+            self._model.cw_pending.pop("cw_tone", None)   # in effect now: reported
+
+        #
+        #   The "ck" command stores which cw key is being used
+        #
+        def ck_UX_Set_CW_Key_Type(self, buffer):
+            value = self._extract_value(buffer, 10, len(buffer) - 3)
+            print("ck_UX_Set_CW_Key_Type: ", value)
+            # FIX (2026-11-06): stored, for the CW tab -- it printed only.
+            # 0 straight, 1 iambic A, 2 iambic B (globalvars.CW_KeyType); taken as a
+            # word too, in case the rig sends one. Anything else is left
+            # unknown rather than guessed.
+            self._model.cw_key_type = self._cw_key_word(value)
+
+        #
+        #   The "vs" command stores words/minute
+        #
+        def vs_UX_Set_CW_Speed(self, buffer):
+            value = self._extract_value(buffer, 10, len(buffer) - 3)
+            print("vs_UX_Set_CW_Speed: ", value)
+            # FIX (2026-11-06): stored. The rig reports the DOT LENGTH in ms,
+            # 1200 / wpm, so 20 wpm arrives as 60.
+            self._model.cw_wpm = self._cw_number(value, lambda v: round(1200 / v))
+
+        #
+        #   The "vy" command stores delay returning after last cw character
+        #
+        def vy_UX_Set_CW_Delay_Returning_to_RX(self, buffer):
+            value = self._extract_value(buffer, 10, len(buffer) - 3)
+            print("vy_UX_Set_CW_Delay_Returning_to_RX: ", value)
+            # FIX (2026-11-06): stored, in ms -- the rig counts in 10 ms.
+            self._model.cw_delay_rx_ms = self._cw_number(value, lambda v: v * 10, zero_ok=True)
+            self._model.cw_pending.pop("cw_delay_rx_ms", None)   # in effect now: reported
+
+        #
+        #   The "ve" command stores delay prior to TX 1st cw character
+        #
+        def ve_UX_Set_CW_Delay_Starting_TX(self, buffer):
+            value = self._extract_value(buffer, 10, len(buffer) - 3)
+            print("ve_UX_Set_CW_Delay_Starting_TX: ", value)
+            # FIX (2026-11-06): stored, in ms -- the rig counts in 2 ms.
+            self._model.cw_delay_tx_ms = self._cw_number(value, lambda v: v * 2, zero_ok=True)
+            self._model.cw_pending.pop("cw_delay_tx_ms", None)   # in effect now: reported
+
+        @staticmethod
+        def _cw_key_word(value):
+            """The rig's key type as a word (globalvars.CW_KeyType's), or None."""
+            words = {"0": "STRAIGHT", "1": "IAMBICA", "2": "IAMBICB"}
+            text = str(value).strip().upper()
+            if text in words:
+                return words[text]
+            return text if text in words.values() else None
+
+        @staticmethod
+        def _cw_number(value, convert, zero_ok=False):
+            """A reported number in the operator's units, or None if not one."""
+            try:
+                number = int(str(value).strip())
+            except ValueError:
+                return None
+            if number < 0 or (number == 0 and not zero_ok):
+                return None                       # 1200 / 0 is no speed
+            return convert(number)
+
+        #
+        #   Returns active VFO, VFO-A=0, VFO-B=1
+        #
+        def cv_UX_VFO_Toggle(self, buffer):
+            value = self._extract_value(buffer, 10, len(buffer) - 3)
+            print("cv_UX_VFO_Toggle: ", value)
+            # WHICH IS PRIMARY, not an instruction to exchange the two.
+            # 0 is A, 1 is B.
+            # FIX (2026-11-08): THE NEW VFO'S FREQUENCY, BEFORE THE FIRMWARE
+            # OVERWRITES IT. Switching with RIT on, menuVfoToggle selects the
+            # new VFO and then ritDisable() tunes to the OLD VFO's RIT base
+            # (setFrequency(ritTxFrequency)) -- so B took A's frequency (Mark).
+            # cv comes before the frequency reports, so B is still B's here;
+            # _rit_cleared_by_switch puts it back.
+            new = "a" if int(value) == 0 else "b"
+            # FIX (2026-11-09): A BORROW'S cv IS THE BORROW'S, checked first.
+            # The app's-RIT branch below took it in split -- set_active, return
+            # -- so the borrow never saw its confirmation, was abandoned after
+            # 2 s with the rig left on the other VFO, and the RIT carried by
+            # A<->B started there (+1800 from A's base, Mark, D2). Tuning the
+            # transmit VFO in split with the app's RIT on failed the same way.
+            # A borrow is not a VFO change the RIT has to follow: it comes back.
+            if self._radio_link._tx_write_state:
+                self._model.set_active(new)
+                self._radio_link._advance_tx_write("cv")
+                return
+            # FIX (2026-11-09): in split, held until it is known whether this
+            # is the transmit swap -- see SPLIT_TX_GRACE_MS.
+            if self._model.split and self._radio_link._split_vfo_hold(new):
+                return
+            if self._model.rit_virtual or (self._model.split and
+                                           getattr(self._radio_link, "_vrit_saved", None)):
+                # FIX (2026-11-08): the app's RIT stays with its VFO -- see
+                # _virtual_rit_vfo_changed. The firmware touches nothing.
+                self._model.set_active(new)
+                self._radio_link._virtual_rit_vfo_changed()
+                return
+            if self._model.rit and not self._radio_link._tx_write_state \
+                    and new != self._model.rx_vfo:
+                self._radio_link._rit_switch_to = (new, self._model.frequency(new))
+            self._model.set_active(new)
+            # FIX (2026-11-08): back on a VFO that had RIT -- see
+            # _maybe_restore_rit. Not during a split borrow, below.
+            if not self._radio_link._tx_write_state:
+                self._radio_link._maybe_restore_rit()
+
+            # A transmit write borrows the primary slot; this is the step
+            # that tells us the borrow happened. See set_role_frequency.
+            #
+            # Through _radio_link: these handlers live in the inner reader
+            # class, so `self` here is the reader, not the link that owns the
+            # sequence.
+            if self._radio_link._tx_write_state:
+                self._radio_link._advance_tx_write("cv")
+                return
+            # self.theVFO_Object.toggleVFO()
+            # self.vfo_Button['text'] = self.Text_To_VFO[value]  # Update Label on button
+
+        ########################################################################################
+        #   End processing of commands sent by MCU to Screen
+        ########################################################################################
+
+
+    #   Radio Commands
+    ########################################################################################
+    #   These routines are called to tell the MCU that an action has happened in the UX.
+    #   Typically these should be used by the UX Callbacks
+    ########################################################################################
+    #
+    #   This command sends a request via loopback to retrieve any stored settings for
+    #   DSP
+    #
+    def req_DSP_EEPROM_settings(self):
+        print("req_DSP_EEPROM_settings")
+
+        # nMyAddr = random.randint(5,255)
+        nMyAddr = 69
+        command = [self.toRadioCommandDict["TS_"
+                                           "CMD_LOOPBACK0"],
+                   nMyAddr,  # Random number, probably no reason at moment
+                   2,  # Command 2 is to retrieve all the EEPROM
+                   0x6a,  # Indicates that this is for DSP
+                   (nMyAddr + 2 + 0x6a) % 256  # Checksum
+                   ]
+
+        self.sendCommandToMCU(bytes(command))
+
+    def Req_Channel_Freqs(self):
+        print("Req_Channel_Freqs")
+        #
+        # base = EEPROM.Mem_Address["channel_freq_Mode"][EEPROM.lsb]
+        #
+        # for i in range(EEPROM.Mem_Address["channel_freq_Mode"][EEPROM.totalSlots]):
+        #     command = [self.toRadioCommandDict["TS_CMD_READMEM"],
+        #                base,
+        #                EEPROM.Mem_Address["channel_freq_Mode"][EEPROM.msb],
+        #                EEPROM.Mem_Address["channel_freq_Mode"][EEPROM.memLength],
+        #                EEPROM.Mem_Address["channel_freq_Mode"][EEPROM.charFlag]
+        #                ]
+        #     self.memoryQueue.append("Freq")  # Add  it to queue to be processed when MCU responds
+        #     self.sendCommandToMCU(bytes(command))
+        #     base += EEPROM.Mem_Address["channel_freq_Mode"][EEPROM.memOffset]
+        #
+        # base = EEPROM.Mem_Address["channel_freq_Mode"][EEPROM.lsb]
+
+    def Req_Channel_Labels(self):
+        print("Req_Channel_Labels")
+        # base = EEPROM.Mem_Address["channel_Label"][EEPROM.lsb]
+        # for i in range(EEPROM.Mem_Address["channel_Label"][EEPROM.totalSlots]):
+        #     command = [self.toRadioCommandDict["TS_CMD_READMEM"],
+        #                base,
+        #                EEPROM.Mem_Address["channel_Label"][EEPROM.msb],
+        #                EEPROM.Mem_Address["channel_Label"][EEPROM.memLength],
+        #                EEPROM.Mem_Address["channel_Label"][EEPROM.charFlag]
+        #                ]
+        #     self.memoryQueue.append("Label")
+        #     self.sendCommandToMCU(bytes(command))
+        #     base += EEPROM.Mem_Address["channel_Label"][EEPROM.memOffset]
+        #
+        # base = EEPROM.Mem_Address["channel_Label"][EEPROM.lsb]
+
+    def Req_Channel_Show_Labels(self):
+        print("Req_Channel_Show_Labels")
+        # base = EEPROM.Mem_Address["channel_ShowLabel"][EEPROM.lsb]
+        # for i in range(EEPROM.Mem_Address["channel_ShowLabel"][EEPROM.totalSlots]):
+        #     command = [self.toRadioCommandDict["TS_CMD_READMEM"],
+        #                base,
+        #                EEPROM.Mem_Address["channel_ShowLabel"][EEPROM.msb],
+        #                EEPROM.Mem_Address["channel_ShowLabel"][EEPROM.memLength],
+        #                EEPROM.Mem_Address["channel_ShowLabel"][EEPROM.charFlag]
+        #                ]
+        #     self.memoryQueue.append("ShowLabel")
+        #     self.sendCommandToMCU(bytes(command))
+        #     base += EEPROM.Mem_Address["channel_ShowLabel"][EEPROM.memOffset]
+        #
+        # base = EEPROM.Mem_Address["channel_ShowLabel"][EEPROM.lsb]
+
+    def Req_Master_Cal(self, setter_CB):
+        print("Req_Master_CAL")
+
+        # self.Master_Cal_Setter = setter_CB
+        #
+        # command = [self.toRadioCommandDict["TS_CMD_READMEM"],
+        #            EEPROM.Mem_Address["master_cal"][EEPROM.lsb],
+        #            EEPROM.Mem_Address["master_cal"][EEPROM.msb],
+        #            EEPROM.Mem_Address["master_cal"][EEPROM.memLength],
+        #            EEPROM.Mem_Address["master_cal"][EEPROM.charFlag]
+        #            ]
+        #
+        # self.memoryQueue.append("MasterCal")  # tell the command that receives the data what is it for
+        #
+        # self.sendCommandToMCU(bytes(command))
+
+    def Req_SSB_BFO(self, setter_CB):
+        print("Req_SSB_BFO")
+
+        # self.SSB_BFO_Setter = setter_CB
+        #
+        # command = [self.toRadioCommandDict["TS_CMD_READMEM"],
+        #            EEPROM.Mem_Address["ssb_bfo"][EEPROM.lsb],
+        #            EEPROM.Mem_Address["ssb_bfo"][EEPROM.msb],
+        #            EEPROM.Mem_Address["ssb_bfo"][EEPROM.memLength],
+        #            EEPROM.Mem_Address["ssb_bfo"][EEPROM.charFlag]
+        #            ]
+        # self.memoryQueue.append("SSB_BFO")
+        # self.sendCommandToMCU(bytes(command))
+
+    def Req_CW_BFO(self, setter_CB):
+        print("Req_CW_BFO")
+
+        # self.CW_BFO_Setter = setter_CB
+        #
+        # command = [self.toRadioCommandDict["TS_CMD_READMEM"],
+        #            EEPROM.Mem_Address["cw_bfo"][EEPROM.lsb],
+        #            EEPROM.Mem_Address["cw_bfo"][EEPROM.msb],
+        #            EEPROM.Mem_Address["cw_bfo"][EEPROM.memLength],
+        #            EEPROM.Mem_Address["cw_bfo"][EEPROM.charFlag]
+        #            ]
+        #
+        # self.memoryQueue.append("CW_BFO")
+        # self.sendCommandToMCU(bytes(command))
+
+    def Req_Factory_Master_Cal(self, setter_CB):
+        print("Req_Factory_Master_Cal")
+
+        # self.Factory_Master_Cal_Setter = setter_CB
+        #
+        # command = [self.toRadioCommandDict["TS_CMD_READMEM"],
+        #            EEPROM.Mem_Address["factory_master_cal"][EEPROM.lsb],
+        #            EEPROM.Mem_Address["factory_master_cal"][EEPROM.msb],
+        #            EEPROM.Mem_Address["factory_master_cal"][EEPROM.memLength],
+        #            EEPROM.Mem_Address["factory_master_cal"][EEPROM.charFlag]
+        #            ]
+        #
+        # self.memoryQueue.append("Factory_MasterCal")  # tell the command that receives the data what is it for
+        #
+        # self.sendCommandToMCU(bytes(command))
+
+    def Req_Factory_SSB_BFO(self, setter_CB):
+        print("Req_Factory_SSB_BFO")
+
+        # self.Factory_SSB_BFO_Setter = setter_CB
+        #
+        # command = [self.toRadioCommandDict["TS_CMD_READMEM"],
+        #            EEPROM.Mem_Address["factory_ssb_bfo"][EEPROM.lsb],
+        #            EEPROM.Mem_Address["factory_ssb_bfo"][EEPROM.msb],
+        #            EEPROM.Mem_Address["factory_ssb_bfo"][EEPROM.memLength],
+        #            EEPROM.Mem_Address["factory_ssb_bfo"][EEPROM.charFlag]
+        #            ]
+        #
+        # self.memoryQueue.append("Factory_SSB_BFO")
+        # self.sendCommandToMCU(bytes(command))
+
+    def Req_Factory_CW_Speed(self, setter_CB):
+        print("Req_Factory_CW_Speed")
+
+        # self.Factory_CW_Speed_Setter = setter_CB
+        #
+        # command = [self.toRadioCommandDict["TS_CMD_READMEM"],
+        #            EEPROM.Mem_Address["factory_cw_wpm"][EEPROM.lsb],
+        #            EEPROM.Mem_Address["factory_cw_wpm"][EEPROM.msb],
+        #            EEPROM.Mem_Address["factory_cw_wpm"][EEPROM.memLength],
+        #            EEPROM.Mem_Address["factory_cw_wpm"][EEPROM.charFlag]
+        #            ]
+        #
+        # self.memoryQueue.append("Factory_CW_Speed")
+        # self.sendCommandToMCU(bytes(command))
+
+    def Req_Factory_CW_Sidetone(self, setter_CB):
+        print("Req_Factory_CW_Sidetone")
+
+        # self.Factory_CW_Sidetone_Setter = setter_CB
+        #
+        # command = [self.toRadioCommandDict["TS_CMD_READMEM"],
+        #            EEPROM.Mem_Address["factory_cw_sidetone"][EEPROM.lsb],
+        #            EEPROM.Mem_Address["factory_cw_sidetone"][EEPROM.msb],
+        #            EEPROM.Mem_Address["factory_cw_sidetone"][EEPROM.memLength],
+        #            EEPROM.Mem_Address["factory_cw_sidetone"][EEPROM.charFlag]
+        #            ]
+        #
+        # self.memoryQueue.append("Factory_CW_Sidetone")
+        # self.sendCommandToMCU(bytes(command))
+
+    def Freq_Encode(self, freq):
+
+        encodedBytes = bytearray()
+        intFreq = int(freq)
+        encodedBytes.append(intFreq & 0xff)
+
+        intFreq = (intFreq >> 8)
+        encodedBytes.append(intFreq & 0xff)
+
+        intFreq = (intFreq >> 8)
+        encodedBytes.append(intFreq & 0xff)
+
+        intFreq = (intFreq >> 8)
+        encodedBytes.append(intFreq & 0xff)
+
+        return encodedBytes
+
+    def Set_Master_Cal(self, cal):
+        print("Set_Master_Cal")
+
+        #
+        #   Now have to write it to EEPROM as this is not one of the values that are automatically saved to EEPROM
+        #   This requires reboot to take effect
+        #
+
+        # checksum = (EEPROM.Mem_Address["master_cal"][EEPROM.lsb] + EEPROM.Mem_Address["master_cal"][EEPROM.msb]
+        #             + EEPROM.Mem_Address["master_cal"][EEPROM.memLength]) % 256
+        #
+        # fourBytes = self.Freq_Encode(str(cal))
+        #
+        # command = [self.toRadioCommandDict["TS_CMD_WRITEMEM"],
+        #            EEPROM.Mem_Address["master_cal"][EEPROM.lsb],
+        #            EEPROM.Mem_Address["master_cal"][EEPROM.msb],
+        #            EEPROM.Mem_Address["master_cal"][EEPROM.memLength],
+        #            checksum,
+        #            fourBytes[0],
+        #            fourBytes[1],
+        #            fourBytes[2],
+        #            fourBytes[3]
+        #            ]
+        # self.sendCommandToMCU(bytes(command))
+
+    def Set_SSB_BFO(self, cal):
+        print("Set_SSB_BFO")
+
+        #
+        #   Now have to write it to EEPROM as this is not one of the values that are automatically saved to EEPROM
+        #   This requires reboot to take effect
+        #
+
+        # checksum = (EEPROM.Mem_Address["ssb_bfo"][EEPROM.lsb] + EEPROM.Mem_Address["ssb_bfo"][EEPROM.msb]
+        #             + EEPROM.Mem_Address["ssb_bfo"][EEPROM.memLength]) % 256
+        #
+        # fourBytes = self.Freq_Encode(str(cal))
+        #
+        # command = [self.toRadioCommandDict["TS_CMD_WRITEMEM"],
+        #            EEPROM.Mem_Address["ssb_bfo"][EEPROM.lsb],
+        #            EEPROM.Mem_Address["ssb_bfo"][EEPROM.msb],
+        #            EEPROM.Mem_Address["ssb_bfo"][EEPROM.memLength],
+        #            checksum,
+        #            fourBytes[0],
+        #            fourBytes[1],
+        #            fourBytes[2],
+        #            fourBytes[3]
+        #            ]
+        # self.sendCommandToMCU(bytes(command))
+
+    def Set_CW_BFO(self, cal):
+        print("setting the CW BFO in the radio")
+
+        #
+        #   Now have to write it to EEPROM as this is not one of the values that are automatically saved to EEPROM
+        #   This requires reboot to take effect
+        #
+        # print("lsb=", hex(EEPROM.Mem_Address["cw_bfo"][EEPROM.lsb]), "msb=",
+        #       hex(EEPROM.Mem_Address["cw_bfo"][EEPROM.msb]),
+        #       "memlength=", EEPROM.Mem_Address["cw_bfo"][EEPROM.memLength])
+        #
+        # checksum = (EEPROM.Mem_Address["cw_bfo"][EEPROM.lsb] + EEPROM.Mem_Address["cw_bfo"][EEPROM.msb]
+        #             + EEPROM.Mem_Address["cw_bfo"][EEPROM.memLength]) % 256
+        #
+        # fourBytes = self.Freq_Encode(str(cal))
+        #
+        # command = [self.toRadioCommandDict["TS_CMD_WRITEMEM"],
+        #            EEPROM.Mem_Address["cw_bfo"][EEPROM.lsb],
+        #            EEPROM.Mem_Address["cw_bfo"][EEPROM.msb],
+        #            EEPROM.Mem_Address["cw_bfo"][EEPROM.memLength],
+        #            checksum,
+        #            fourBytes[0],
+        #            fourBytes[1],
+        #            fourBytes[2],
+        #            fourBytes[3]
+        #            ]
+        # self.sendCommandToMCU(bytes(command))
+
+    def Set_Tuning_Preset(self, rate: bytes):
+        print("Set_Tuning_Preset")
+        command = [self.toRadioCommandDict["TS_CMD_TUNESTEP"], rate, 0, 0, 0]
+        self.sendCommandToMCU(bytes(command))
+
+    def set_role_frequency(self, role, hz):
+        """
+        Moves what a role is tuned to.
+
+        RECEIVE is easy: the rig writes to whichever VFO is primary, and
+        receive IS the primary one.
+
+        TRANSMIT in split is not. The rig can only write to the primary VFO,
+        and transmit is by definition the one that is not -- so the frequency
+        has to be written while the other VFO is borrowed into the primary
+        slot, then the slot handed back.
+
+        ONE STEP AT A TIME, EACH WAITING FOR ITS CONFIRMATION. Sending
+        toggle, frequency and toggle back-to-back is precisely the overrun
+        the MCU headroom settings exist to prevent, and worse, the write can
+        reach the rig before the toggle has taken effect -- putting the
+        frequency on the wrong VFO. The sequence below sends the next command
+        only when the rig has confirmed the last one.
+        """
+        # The caller hands us what the operator SEES. The rig wants what
+        # goes in the VFO, and the two differ by the CW sidetone on transmit.
+        # role_to_vfo_hz is the inverse of role_frequency -- without it a
+        # 1 kHz step moved 400 Hz while the tone was 600.
+        hz = self._model.role_to_vfo_hz(role, hz)
+
+        if role == "rx" or not self._model.split:
+            self._request_frequency(hz)     # FIX: paced -- see _request_frequency
+            return
+
+        self._begin_tx_write(hz)
+
+    # ------------------------------------------------------------------
+    # FIX (2026-11-08): RIT KEPT ACROSS A VFO SWITCH (Mark)
+    # ------------------------------------------------------------------
+    # The firmware keeps one RIT, and its VFO switch turns it off
+    # (menuVfoToggle: FrequencyToVFO, then ritDisable). The VFO left keeps
+    # the receive frequency -- base + offset -- and the base is lost. So the
+    # app remembers the base, and on coming back to that VFO puts RIT back:
+    # the VFO to the base, RIT on (the rig takes the base from where it is),
+    # then receive to where it was. Each step waits for the rig's report.
+    RIT_RESTORE_TIMEOUT_S = 3.0
+
+    def _rit_cleared_by_switch(self, vfo):
+        """
+        RIT turned off by switching away from `vfo`. Its base is remembered;
+        NOTHING IS WRITTEN -- before, _leave_rit ran here and sent the old
+        VFO's base to the NEW one, which was now primary.
+        """
+        base = self._model.rit_base_hz
+        if base:
+            # The receive frequency too -- the VFO left holds it, but a
+            # restore cut short moves that VFO to the base (see below).
+            self._rit_saved[vfo] = (base, self._model.frequency(vfo))
+            print(f"[rig] VFO switch cleared RIT on {vfo.upper()} -- kept, base {base}")
+        self._model.rit_base_hz = 0
+        self._model.rit = False
+        self._model.rit_vfo = None
+        # FIX (2026-11-08): undo the firmware's overwrite of the VFO switched
+        # TO -- see cv_UX_VFO_Toggle. Receive is that VFO now, so an ordinary
+        # write lands on it. Not if it has its own RIT to come back: that
+        # restore puts it where it belongs.
+        to = getattr(self, "_rit_switch_to", None)
+        self._rit_switch_to = None
+        if to is not None:
+            new_vfo, its_hz = to
+            if (new_vfo == self._model.rx_vfo and new_vfo not in self._rit_saved
+                    and its_hz and self._model.frequency(new_vfo) != its_hz):
+                print(f"[rig] the switch tuned {new_vfo.upper()} to the old RIT base "
+                      f"-- putting it back to {its_hz}")
+                self._request_frequency(its_hz)
+
+    def _maybe_restore_rit(self):
+        """Starts putting RIT back if the receive VFO is one that had it."""
+        m = self._model
+        vfo = m.rx_vfo
+        if m.rit or self._rit_restore is not None or vfo not in self._rit_saved:
+            return                 # still on (its "off" report to come), or busy
+        if m.split:
+            return     # FIX (2026-11-08): kept for when split goes off -- see _rit_split_changed
+        if m.transmitting or m.locked:
+            self._rit_saved.pop(vfo, None)      # not now: forgotten, not forced
+            return
+        base, rx = self._rit_saved.pop(vfo)
+        print(f"[rig] back on {vfo.upper()} -- RIT again: base {base}, receive {rx}")
+        self._rit_restore = {"vfo": vfo, "base": base, "rx": rx, "step": "base",
+                             "until": monotonic() + self.RIT_RESTORE_TIMEOUT_S}
+        if m.frequency(vfo) != base:
+            self._request_frequency(base)
+        self.root.after(STEP_SETTLE_MS, self._step_rit_restore)
+
+    def _step_rit_restore(self):
+        r = self._rit_restore
+        if r is None:
+            return
+        m = self._model
+        if (m.rx_vfo != r["vfo"] or m.transmitting
+                or monotonic() > r["until"]):
+            print("[rig] RIT not put back -- the rig moved on or did not answer")
+            self._rit_restore = None
+            # FIX (2026-11-08): KEPT, not lost -- switched away again before it
+            # was back (quick A/B/A), it is put back next time. Unless it did
+            # get back on: then the switch away saved it the usual way.
+            if not (m.rit and m.rit_vfo == r["vfo"]):
+                self._rit_saved[r["vfo"]] = (r["base"], r["rx"])
+                self._maybe_restore_rit()
+            return
+        if r["step"] == "base":
+            if m.frequency(r["vfo"]) == r["base"] and self._freq_sent is None:
+                r["step"] = "on"
+                self.Toggle_RIT()
+        elif r["step"] == "on":
+            if m.rit and m.rit_base_hz == r["base"]:
+                self._rit_restore = None
+                if r["rx"] != r["base"]:
+                    self._request_frequency(r["rx"])
+                return
+        self.root.after(STEP_SETTLE_MS, self._step_rit_restore)
+
+    def _leave_rit(self):
+        """
+        Puts receive back where RIT started, then forgets the base.
+
+        TURNING RIT OFF MEANS ZERO OFFSET: receive and transmit on the same
+        frequency again. Under the rig's model the VFO was what moved, so it
+        has to be sent back to the base -- and the firmware does not do that
+        by itself, which left receive stranded wherever it had been tuned.
+
+        Called however RIT ends: from the RIT button, or as a side effect of
+        turning split on, which the firmware reports as cr_ 0 just before
+        cs_ 1.
+        """
+        print("[rig] leaving RIT -- receive back to the base")
+        base = self._model.rit_base_hz
+        self._model.rit_base_hz = 0
+        self._model.rit = False
+        # FIX (2026-11-08): turned off by the operator: nothing to put back.
+        if self._model.rit_vfo:
+            self._rit_saved.pop(self._model.rit_vfo, None)
+        self._model.rit_vfo = None
+        # FIX: no flag for the SDR. The offset is now 0 in the model, and the
+        # SDR link's follow() gives the SDR that, as it gives it everything.
+        if base and base != self._model.frequency(self._model.rx_vfo):
+            # Receive is the primary VFO, so an ordinary write lands on it.
+            self._request_frequency(base)   # FIX: paced -- see _request_frequency
+
+    def set_mode_everywhere(self, mode):
+        """
+        Sets the mode on the active VFO, and in split on the other one too.
+
+        THE RIG KEEPS A MODE PER VFO, and set_mode only reaches the primary.
+        So in split, choosing USB changed receive and left transmit in CW --
+        the transmit readout kept its sidetone offset because, as far as the
+        rig was concerned, the transmit VFO really was still in CW.
+
+        The mode picker sits between the two frequency panels because it
+        acts on both, and that is what an operator means by it: split is a
+        different FREQUENCY for transmit, not a different mode. Cross-mode
+        split exists, but it is rare enough to be done deliberately from the
+        rig rather than be what the everyday control does.
+
+        Out of split the two VFOs are not in use together, so only the
+        active one changes -- the standby VFO keeps whatever it had.
+        """
+        self.set_mode(mode)
+        if self._model.split:
+            # The non-primary VFO, written by borrowing the slot. Its
+            # frequency is sent back unchanged: the borrow is there for the
+            # mode, and re-sending the frequency it already has is harmless.
+            other = self._model.tx_vfo
+            self.root.after(
+                STEP_SETTLE_MS,
+                lambda: self._begin_borrowed_write(
+                    self._model.frequency(other), mode=mode))
+
+    def set_split_offset(self, offset_hz):
+        """
+        Puts transmit a given distance from receive, turning split on.
+
+        WRITES TO THE VFO THAT IS NOT PRIMARY, named explicitly, not to the
+        "tx" role. Split may not be confirmed yet -- Toggle_Split only sends a
+        command -- and until it is, the tx role still resolves to the active
+        VFO, which is receive. Addressing the other VFO by name is right
+        whether or not split has landed, and the borrow already knows how to
+        reach it.
+
+        Measured from the receive frequency AS DISPLAYED, and converted for
+        the other VFO's mode, so the gap between the two panels is exactly
+        what the button says. Adding the offset to the raw VFO came out 500
+        Hz short in CW.
+        """
+        m = self._model
+        other = "b" if m.active == "a" else "a"
+        vfo_hz = m.transmit_vfo_hz(other,
+                                   m.role_frequency("rx") + int(offset_hz))
+        if m.split:
+            self._begin_borrowed_write(vfo_hz)
+        else:
+            # Split first, then the write once the rig has settled -- the
+            # same pacing as any command sent straight after another.
+            self.Toggle_Split()
+            self.root.after(STEP_SETTLE_MS,
+                            lambda: self._begin_borrowed_write(vfo_hz))
+
+    # ------------------------------------------------------------------
+    # Memory channels
+    # ------------------------------------------------------------------
+    def read_channels(self):
+        """
+        Reads the rig's memory channels into the model, one read at a time.
+
+        38 reads: twenty frequency-and-mode slots, then nine labels and nine
+        label flags. See CHANNEL_READ_TIMEOUT_MS for why one at a time.
+
+        Not while WRITING, either: reads and writes share the rig's
+        attention, and a read slipped in among the writes would be answered
+        between them and upset both.
+        """
+        if self._model.channels_state in ("reading", "writing"):
+            return
+        # FIX (2026-11-06): nor while the settings are being read -- the two
+        # share the memory queue, and one reply would be filed against the other.
+        if self._model.settings_state == "reading":
+            return
+
+        requests = []
+        for category, key in (("Freq", "channel_freq_Mode"),
+                              ("Label", "channel_Label"),
+                              ("ShowLabel", "channel_ShowLabel")):
+            spec = EEPROM.Mem_Address[key]
+            base = spec[EEPROM.lsb]
+            for slot in range(spec[EEPROM.totalSlots]):
+                requests.append((category, slot, [
+                    self.toRadioCommandDict["TS_CMD_READMEM"],
+                    base,
+                    spec[EEPROM.msb],
+                    spec[EEPROM.memLength],
+                    spec[EEPROM.charFlag]]))
+                base += spec[EEPROM.memOffset]
+
+        self._channel_requests = requests
+        self._channel_attempts = 0
+        self._channel_timer = None
+        model = self._model
+        model.channels_state = "reading"
+        model.channels_progress = 0
+        model.channels_expected = len(requests)
+        model.channels_failed = []
+        model.channels_done = {"Freq": 0, "Label": 0, "ShowLabel": 0}
+        model.changed()
+        self._send_next_channel_request()
+
+    def _send_next_channel_request(self):
+        """
+        Sends the read at the head of the list, and waits for its reply.
+
+        The request stays at the head until it is answered or given up on, so
+        a retry sends exactly the same read.
+        """
+        requests = getattr(self, "_channel_requests", None)
+        if not requests:
+            self._model.channels_state = "read"
+            self._model.changed()
+            return
+        category, slot, command = requests[0]
+        self.memoryQueue.append(category)
+        self.sendCommandToMCU(bytes(command))
+        self._channel_timer = self.root.after(CHANNEL_READ_TIMEOUT_MS,
+                                              self._channel_read_timed_out)
+
+    def _channel_read_timed_out(self):
+        """
+        The rig did not answer. Withdraw the request, then retry or give up.
+
+        WITHDRAWN FROM THE QUEUE FIRST. Its entry is still there, and left in
+        place it would claim the next reply -- the misalignment this whole
+        arrangement exists to prevent.
+        """
+        self._channel_timer = None
+        if self.memoryQueue:
+            self.memoryQueue.pop()
+        category, slot, _ = self._channel_requests[0]
+
+        self._channel_attempts += 1
+        if self._channel_attempts <= CHANNEL_READ_RETRIES:
+            print(f"[chan] no reply for {category} slot {slot + 1}; "
+                  f"retrying ({self._channel_attempts} of {CHANNEL_READ_RETRIES})")
+            self._send_next_channel_request()
+            return
+
+        print(f"[chan] giving up on {category} slot {slot + 1}")
+        self._model.channels_failed.append((category, slot))
+        self._finish_channel_request()
+
+    def _finish_channel_request(self):
+        """This read is done with, answered or not. On to the next."""
+        category = self._channel_requests[0][0]
+        self._model.channels_done[category] += 1
+        self._channel_requests.pop(0)
+        self._channel_attempts = 0
+        self._model.channels_progress += 1
+        self._model.changed()
+        self.root.after(CHANNEL_READ_PACE_MS, self._send_next_channel_request)
+
+    def _on_memory_reply(self, value):
+        """
+        The answer to the read now outstanding, decoded into the model.
+
+        Only one read is ever outstanding, so the reply belongs to the request
+        at the head of the list. One that arrives with nothing outstanding --
+        a straggler from a read already given up on -- is ignored rather than
+        filed against whatever is sent next.
+        """
+        # FIX (2026-11-06): a settings read, if one is outstanding -- see
+        # read_settings. Never both at once.
+        if getattr(self, "_setting_requests", None):
+            self._on_setting_reply(value)
+            return
+        if not self.memoryQueue or not getattr(self, "_channel_requests", None):
+            print("[chan] a memory reply arrived with nothing outstanding; ignored")
+            return
+        category = self.memoryQueue.pop(0)
+        if self._channel_timer is not None:
+            self.root.after_cancel(self._channel_timer)
+            self._channel_timer = None
+
+        expected, slot, _ = self._channel_requests[0]
+        if category != expected:
+            print(f"[chan] reply for {category} while waiting on {expected}; ignored")
+            return
+
+        decode = {"Freq": self._decode_channel_freq,
+                  "Label": self._decode_channel_label,
+                  "ShowLabel": self._decode_channel_show_label}[category]
+        try:
+            decode(slot, value)
+        except (TypeError, ValueError) as err:
+            print(f"[chan] could not decode {category} slot {slot + 1}: "
+                  f"{value!r} ({err})")
+        self._finish_channel_request()
+
+    # ------------------------------------------------------------------
+    # The radio's stored settings -- for backup
+    # ------------------------------------------------------------------
+    # FIX (2026-11-06): THE CALIBRATION AND BFOs, and the factory values,
+    # read from EEPROM for the backup dialog -- the rig reports none of them
+    # at connect. The CW values in the radio come from the reports already
+    # (model.cw_*); only their factory copies are read here. One read at a
+    # time, paced, retried and given up on exactly as the channel reads are.
+    SETTING_READS = ("master_cal", "ssb_bfo", "cw_bfo", "factory_master_cal",
+                     "factory_ssb_bfo", "factory_cw_wpm", "factory_cw_sidetone",
+                     "callsign_head", "display_option1", "smeter_levels")
+
+    # FIX (2026-11-06): RIG SETTINGS NOT IN EEPROM.py, from KD8CEC's own map
+    # (ubitx_eemap.h), in EEPROM.py's layout. Read as raw bytes in order --
+    # flag 0x59, the firmware's "C order"; 0x48, used for the numbers, sends
+    # them reversed. Every one fits the firmware's checksum (see set_stored):
+    #   callsign_head  780 (0x30C): 0x59 when a callsign is set, then
+    #                  bit 7 "show at start-up" + its length; the text at 782
+    #   display_option1 361 (0x169): bit 3 (0x08) turns the S-meter reports on
+    #   smeter_levels  230 (0x0E6): the 8 levels A7/4 is compared with
+    RIG_EEPROM = {"callsign_head": [0x0C, 0x03, 2, 0x59, 0, 1],
+                  "display_option1": [0x69, 0x01, 1, 0x59, 0, 1],
+                  "smeter_levels": [0xE6, 0x00, 8, 0x59, 0, 1]}
+    CALLSIGN_KEY = 0x59
+    CALLSIGN_MAX = 18
+    SMETER_DISPLAY_BIT = 0x08
+
+    def _mem_spec(self, name):
+        """EEPROM.py's entry for a setting, or RIG_EEPROM's."""
+        return EEPROM.Mem_Address.get(name) or self.RIG_EEPROM[name]
+
+    def read_settings(self):
+        """Reads SETTING_READS into model.eeprom_settings."""
+        model = self._model
+        if model.settings_state == "reading" or \
+                model.channels_state in ("reading", "writing"):
+            return
+        requests = []
+        for name in self.SETTING_READS:
+            spec = self._mem_spec(name)
+            requests.append((name, [self.toRadioCommandDict["TS_CMD_READMEM"],
+                                    spec[EEPROM.lsb], spec[EEPROM.msb],
+                                    spec[EEPROM.memLength], spec[EEPROM.charFlag]]))
+        self._setting_requests = requests
+        self._setting_attempts = 0
+        self._setting_timer = None
+        model.settings_state = "reading"
+        model.settings_failed = []
+        model.changed()
+        self._send_next_setting_request()
+
+    def _send_next_setting_request(self):
+        requests = getattr(self, "_setting_requests", None)
+        if not requests:
+            self._model.settings_state = "read"
+            self._model.changed()
+            return
+        name, command = requests[0]
+        self.memoryQueue.append(name)
+        self.sendCommandToMCU(bytes(command))
+        self._setting_timer = self.root.after(CHANNEL_READ_TIMEOUT_MS,
+                                              self._setting_read_timed_out)
+
+    def _setting_read_timed_out(self):
+        self._setting_timer = None
+        if self.memoryQueue:
+            self.memoryQueue.pop()
+        name = self._setting_requests[0][0]
+        self._setting_attempts += 1
+        if self._setting_attempts <= CHANNEL_READ_RETRIES:
+            print(f"[settings] no reply for {name}; retrying")
+            self._send_next_setting_request()
+            return
+        print(f"[settings] giving up on {name}")
+        self._model.settings_failed.append(name)
+        self._finish_setting_request()
+
+    def _finish_setting_request(self):
+        self._setting_requests.pop(0)
+        self._setting_attempts = 0
+        self._model.changed()
+        self.root.after(CHANNEL_READ_PACE_MS, self._send_next_setting_request)
+
+    def _on_setting_reply(self, value):
+        if not self.memoryQueue:
+            return
+        name = self.memoryQueue.pop(0)
+        if self._setting_timer is not None:
+            self.root.after_cancel(self._setting_timer)
+            self._setting_timer = None
+        expected = self._setting_requests[0][0]
+        if name != expected:
+            print(f"[settings] reply for {name} while waiting on {expected}; ignored")
+            return
+        try:
+            self._model.eeprom_settings[name] = self._decode_setting(name, value)
+        except (TypeError, ValueError) as err:
+            print(f"[settings] could not decode {name}: {value!r} ({err})")
+        self._finish_setting_request()
+
+    @staticmethod
+    def _decode_setting(name, value):
+        """
+        A setting from its reply -- hex, as for channels -- in the operator's
+        units. The CALIBRATION IS SIGNED: a 32-bit two's complement, so a
+        negative correction does not show as four thousand million. The
+        factory speed is a dot length, like the live one (1200 / wpm); zero,
+        or erased EEPROM (all ones), is no value.
+        """
+        if name in uBITX_Link.RIG_EEPROM:
+            # FIX (2026-11-06): raw bytes, in order -- see RIG_EEPROM.
+            return list(bytes.fromhex(str(value).strip()))
+        raw = int(str(value).strip(), 16)
+        if name in ("master_cal", "factory_master_cal"):
+            return raw - (1 << 32) if raw >= (1 << 31) else raw
+        if name == "factory_cw_wpm":
+            raw &= 0xFF
+            return round(1200 / raw) if raw not in (0, 0xFF) else None
+        return None if raw == 0xFFFFFFFF else raw
+
+    # -- decoding. Every value from EEPROM is distrusted: a slot that was
+    # -- never written holds whatever the chip was left with.
+    def _decode_channel_freq(self, slot, value):
+        """
+        32 bits: the frequency in the low 29, the mode number in the top 3.
+
+        An unwritten slot reads as erased EEPROM -- all ones -- which decodes
+        to 536 MHz in mode 7. A frequency out of range makes the slot EMPTY,
+        whatever the mode says. A believable frequency with a mode number the
+        rig does not use keeps the frequency and shows the mode as unknown.
+        """
+        raw = int(str(value).strip(), 16)
+        freq = raw & 0x1FFFFFFF
+        number = (raw >> 29) & 0x7
+        if not 0 < freq <= CHANNEL_FREQ_MAX_HZ:
+            self._model.set_channel_freq_mode(slot, 0, "")
+            return
+        self._model.set_channel_freq_mode(slot, freq, CHANNEL_MODES.get(number, "?"))
+
+    def _decode_channel_label(self, slot, value):
+        """
+        Five characters -- printable ones only.
+
+        Erased EEPROM reads as 0xFF bytes, and a label written short is padded
+        with NULs; neither is text. Everything outside printable ASCII is
+        removed, so a slot never written shows no label rather than a row of
+        boxes.
+        """
+        text = "".join(ch for ch in str(value) if 32 <= ord(ch) < 127)
+        self._model.set_channel_label(slot, text.strip())
+
+    def _decode_channel_show_label(self, slot, value):
+        """One byte: zero means do not show the label, anything else show it."""
+        text = str(value)
+        self._model.set_channel_show_label(slot, bool(text) and ord(text[0]) != 0)
+
+    def tune_to(self, hz, mode=None):
+        """
+        Puts receive on a frequency, and in a mode, as one operation.
+
+        THE MODE WAITS FOR THE RIG TO SETTLE. Sent straight after the
+        frequency, it was dropped: the Nano is still carrying out the
+        frequency write, and a command arriving then is lost -- the rig
+        answered the frequency and never the mode, so tuning to a USB channel
+        from CWL arrived in CWL. The same behaviour the transmit borrow paces
+        for, with the same interval.
+
+        The mode is skipped when the rig is already in it, and when it is not
+        one the rig has -- a channel may say DFT, `?`, or an SDR++ mode.
+        """
+        self.set_role_frequency("rx", hz)
+        # DFT is "the default for the band", not "no mode". Treated as no
+        # mode, it left the rig in whatever it was last in -- a DFT channel
+        # on 20 m tuned from a CWL one stayed in CWL.
+        if mode == "DFT":
+            mode = self._model.default_sideband(hz)
+        if mode not in ("LSB", "USB", "CWL", "CWU"):
+            return
+        if mode == self._model.mode_of(self._model.rx_vfo):
+            return
+        self.root.after(STEP_SETTLE_MS,
+                        lambda m=mode: self.set_mode_everywhere(m))
+
+    def copy_active_to_other(self):
+        """
+        Copies the active VFO's frequency and mode to the other one.
+
+        THE FIRMWARE HAS NO COMMAND FOR THIS, so it is done the only way the
+        rig allows: the same borrow the transmit write uses. The rig writes
+        only to whichever VFO is primary, so the other one has to be made
+        primary for a moment.
+
+        Worth noticing that "write to the VFO that is not primary" is the
+        real operation here, and transmit-in-split was only its first use.
+        """
+        which = self._model.active
+        self._begin_borrowed_write(self._model.frequency(which),
+                                   mode=self._model.mode_of(which))
+
+    def exchange_vfos(self):
+        """
+        FIX (2026-11-08): EXCHANGES A AND B -- frequency and mode -- as an SDR's
+        swap does (Brown's A<->B). Not the app's A/B, which only makes the
+        other VFO primary. The firmware has no exchange either, so: the other
+        VFO is written with the active one's contents through the borrow, and
+        once the slot is handed back, the active one gets the other's old
+        contents with an ordinary write. Each step on the rig's reports.
+
+        FIX (2026-11-09): WITH RIT ON TOO (Mark). A RIT is part of its VFO's
+        contents, so it goes with them: the active VFO's RIT is taken off
+        first -- the firmware's turned off (it retunes to the base, which is
+        expected, not "the operator leaving RIT"), the app's just dropped --
+        and carried to the other VFO as a remembered RIT; the other VFO's,
+        if it had one, comes back on the active VFO at the end.
+        """
+        m = self._model
+        act = m.active
+        if m.rit and self._exchange_carry is None:
+            # The receive frequency is the RIT's -- base + offset -- and the
+            # base: both go with the contents.
+            self._exchange_carry = (m.rit_base_hz, m.frequency(m.rit_vfo or act))
+            if m.rit_virtual:
+                self._end_virtual_rit(write_base=False)
+            else:
+                self._exchange_rit_off = True
+                self._exchange_wait_until = monotonic() + EXCHANGE_TIMEOUT_S
+                self.Toggle_RIT()
+                self.root.after(STEP_SETTLE_MS, self._exchange_after_rit_off)
+                return
+        self._exchange_now()
+
+    def _exchange_after_rit_off(self):
+        """Waits for the firmware to say its RIT is off, then exchanges."""
+        if self._model.rit and monotonic() < self._exchange_wait_until:
+            self.root.after(STEP_SETTLE_MS, self._exchange_after_rit_off)
+            return
+        self._exchange_rit_off = False
+        if self._model.rit:
+            print("[rig] the rig kept its RIT -- no exchange")
+            self._exchange_carry = None
+            return
+        self._exchange_now()
+
+    def _exchange_now(self):
+        m = self._model
+        act = m.active
+        oth = "b" if act == "a" else "a"
+        carry = self._exchange_carry
+        self._exchange_carry = None
+        mine = (carry[1] if carry else m.frequency(act), m.mode_of(act))
+        theirs = (m.frequency(oth), m.mode_of(oth))
+        print(f"[rig] exchanging VFOs: {act.upper()} {mine} <-> {oth.upper()} {theirs}"
+              + (f" -- RIT base {carry[0]} goes with {act.upper()}'s" if carry else ""))
+        # Each VFO's remembered RIT goes with its contents.
+        a_saved, b_saved = self._rit_saved.pop("a", None), self._rit_saved.pop("b", None)
+        if a_saved:
+            self._rit_saved["b"] = a_saved
+        if b_saved:
+            self._rit_saved["a"] = b_saved
+        # FIX (2026-11-09): and the app's own (split) ones, the same way.
+        vsaved = self.__dict__.setdefault("_vrit_saved", {})
+        va, vb = vsaved.pop("a", None), vsaved.pop("b", None)
+        if va:
+            vsaved["b"] = va
+        if vb:
+            vsaved["a"] = vb
+        # FIX (2026-11-09): IN SPLIT, a RIT remembered as the rig's kind (set
+        # before split went on, on the VFO not receiving) becomes the app's,
+        # so it comes back on the receive VFO now -- not only once split goes
+        # off (Mark, D3b). Split off turns these back into the rig's kind.
+        if m.split:
+            for vfo, (base, _rx) in list(self._rit_saved.items()):
+                vsaved[vfo] = base
+            self._rit_saved.clear()
+        # The active VFO's live RIT, taken off above, is remembered for the
+        # VFO its contents go to -- the app's kind in split, the rig's else.
+        if carry:
+            if m.split:
+                vsaved[oth] = carry[0]
+            else:
+                self._rit_saved[oth] = carry
+        self._begin_borrowed_write(mine[0], mode=mine[1])
+        self._exchange = (theirs, monotonic() + EXCHANGE_TIMEOUT_S)
+        self.root.after(STEP_SETTLE_MS, self._exchange_step)
+
+    def _exchange_step(self):
+        """The second half of exchange_vfos, once the borrow is over."""
+        pending = getattr(self, "_exchange", None)
+        if pending is None:
+            return
+        (hz, mode), until = pending
+        if self._tx_write_state and monotonic() < until:
+            self.root.after(STEP_SETTLE_MS, self._exchange_step)
+            return
+        self._exchange = None
+        m = self._model
+        act = m.active
+        if mode and mode != m.mode_of(act):
+            self.set_mode(mode)
+        # FIX (2026-11-09): the contents that arrived may bring a RIT. The
+        # rig's kind: its restore puts the VFO at base, RIT on, receive back --
+        # so no separate write. The app's kind: written, then started.
+        if act in self._rit_saved and not m.split:
+            self._maybe_restore_rit()
+            return
+        self._request_frequency(hz)
+        vsaved = self.__dict__.setdefault("_vrit_saved", {})
+        if m.split and act in vsaved:
+            # FIX (2026-11-09): started once the rig reports the new frequency.
+            # Started at once, its offset came from the OLD one, and Brown was
+            # sent RIT -1700 for a moment before -200 (Mark).
+            self._exchange_rit_when_tuned(act, hz, vsaved.pop(act),
+                                          monotonic() + EXCHANGE_TIMEOUT_S)
+
+    def _exchange_rit_when_tuned(self, vfo, hz, base, until):
+        """The app's RIT for an exchange, once its VFO holds hz (or time's up)."""
+        m = self._model
+        if m.frequency(vfo) != hz and monotonic() < until:
+            self.root.after(STEP_SETTLE_MS, lambda: self._exchange_rit_when_tuned(
+                vfo, hz, base, until))
+            return
+        if m.split and m.rx_vfo == vfo and not m.rit:
+            self._start_virtual_rit(base)
+        else:
+            self.__dict__.setdefault("_vrit_saved", {})[vfo] = base
+
+    def _begin_tx_write(self, vfo_hz):
+        """Transmit's entry to the borrow. Carries no mode change."""
+        self._begin_borrowed_write(vfo_hz)
+
+    def _begin_borrowed_write(self, vfo_hz, mode=None):
+        """
+        Starts, or queues, a borrow-write-return against the non-primary VFO.
+
+        TAKES A VFO VALUE, not a displayed one. set_role_frequency has
+        already applied role_to_vfo_hz, and the follow-up path re-enters here
+        rather than going back through that -- converting a second time would
+        add the sidetone twice.
+
+        `mode` is written alongside the frequency while the slot is borrowed,
+        for callers that are copying a whole VFO rather than retuning one.
+        """
+        hz = vfo_hz
+
+        if self._tx_write_state:
+            # COALESCED, not dropped.
+            #
+            # The dial produces detents faster than a borrow-write-return can
+            # complete, so a wheel spin arrives here many times over. Dropping
+            # them meant the whole spin moved one step. Keeping only the
+            # LATEST is right: the intermediate frequencies were never wanted,
+            # only passed through on the way to this one.
+            self._tx_write_next = int(hz)
+            self._tx_write_next_mode = mode
+            return
+
+        self._tx_write_hz = int(hz)
+        self._tx_write_mode = mode
+        self._tx_write_state = "awaiting-borrow"
+
+        # The borrow is a mechanism, not a state worth showing. Without this
+        # the receive panel briefly displays the transmit frequency, because
+        # the rig really does make the other VFO primary and really does say
+        # so. Accurate, and confusing.
+        self._model.suspend_notifications()
+
+        self._arm_tx_write_timeout()
+        self.toggle_vfo()
+
+    def _advance_tx_write(self, confirmation, value=None):
+        """
+        Drives the borrow-write-return sequence, one confirmation at a time.
+
+        CONFIRMS THE TOGGLES, FIRES THE WRITE AND MOVES ON.
+
+        The two are not alike. A lost TOGGLE leaves the rig on the wrong VFO
+        with the roles inverted -- receive showing transmit -- and it does
+        not heal, because the next write goes to the wrong VFO as well. That
+        has to be confirmed.
+
+        A lost WRITE costs nothing. The rig reports the VFO's frequency
+        afterwards whatever happened, so the model learns the truth either
+        way; the worst case is a dial that did not move, which the operator
+        sees and repeats.
+
+        Waiting for the write's confirmation as well was where most of the
+        difficulty came from -- a toggle makes the rig report the borrowed
+        VFO's own frequency first, which looks exactly like an answer to the
+        write, and the rig rounds what it stores to the tuning preset, so
+        the value it reports need not be the value that was sent. Neither
+        problem exists once nothing is waiting for it.
+        """
+        state = self._tx_write_state
+        print(f"[seq] {state} + {confirmation}")
+        self._arm_tx_write_timeout()
+
+        if state == "awaiting-borrow" and confirmation == "cv":
+            # The other VFO is primary now. Write to it, then hand the slot
+            # back -- both deferred, because a command arriving while the rig
+            # is still reporting a VFO change is sometimes simply dropped.
+            self._tx_write_state = "awaiting-return"
+            self.root.after(
+                STEP_SETTLE_MS,
+                lambda hz=self._tx_write_hz: self._write_then_return(hz))
+
+        elif state == "awaiting-return" and confirmation == "cv":
+            self._tx_write_state = None
+            self._tx_write_hz = None
+            if self._tx_write_timer is not None:
+                try:
+                    self.root.after_cancel(self._tx_write_timer)
+                except Exception:
+                    pass
+                self._tx_write_timer = None
+            # The slot is back. One redraw now, showing the result.
+            self._model.resume_notifications()
+
+            # Anything the dial asked for while that was running goes next,
+            # after the rig's trailing reports have settled -- starting it
+            # inline means the new sequence consumes one of them as its own
+            # confirmation and never sees the cv it is waiting for.
+            if self._tx_write_next is not None:
+                pending, self._tx_write_next = self._tx_write_next, None
+                pending_mode = self._tx_write_next_mode
+                self._tx_write_next_mode = None
+                if pending != self._model.frequency(self._model.tx_vfo):
+                    self.root.after(
+                        FOLLOW_UP_DELAY_MS,
+                        lambda hz=pending, m=pending_mode:
+                            self._begin_borrowed_write(hz, mode=m))
+
+    def _write_then_return(self, hz):
+        """
+        Sends the frequency, and the mode if one was asked for, then hands
+        the primary slot back.
+
+        Neither write is acknowledged and nothing waits for them. The toggle
+        that follows is, which is what the sequence is really protecting.
+        """
+        print("set frequency from _write_then_return")
+        self.set_frequency(hz)
+
+        if self._tx_write_mode is not None:
+            mode, self._tx_write_mode = self._tx_write_mode, None
+            # After a settle of its own: two commands back to back while the
+            # rig is mid-write is the same hazard as writing mid-toggle.
+            self.root.after(STEP_SETTLE_MS,
+                            lambda m=mode: self.set_mode(m))
+            self.root.after(STEP_SETTLE_MS * 2, self.toggle_vfo)
+            return
+
+        self.root.after(STEP_SETTLE_MS, self.toggle_vfo)
+
+    def _arm_tx_write_timeout(self):
+        """
+        Restarts the deadline for the next confirmation.
+
+        THIS IS WHAT MAKES WAITING SAFER THAN NOT WAITING. A sequence that
+        waits for confirmations is correct even when timing varies, and it
+        never blocks the interface -- each command goes out on a different
+        pass of the event loop rather than behind a sleep(). What it risks in
+        exchange is a lost reply leaving the flag set, after which every
+        later transmit write is silently dropped.
+
+        A deadline closes that. The worst case becomes one write that does
+        not happen, announced on the console, instead of a feature that stops
+        working until the application is restarted.
+        """
+        if self._tx_write_timer is not None:
+            try:
+                self.root.after_cancel(self._tx_write_timer)
+            except Exception:
+                pass
+        self._tx_write_timer = self.root.after(TX_WRITE_TIMEOUT_MS,
+                                               self._abandon_tx_write)
+
+    def _abandon_tx_write(self):
+        """
+        Gives up on a sequence that never finished.
+
+        HANDS THE PRIMARY SLOT BACK if the borrow got that far.
+
+        Leaving it was the earlier behaviour and it is wrong: after the first
+        toggle the rig really is on the other VFO, so rx_vfo becomes that one
+        and the RECEIVE panel starts showing the transmit frequency. It looks
+        like the two VFOs are bleeding into each other, and it persists until
+        something else toggles -- which is why the receive readout settles on
+        one or two values rather than wandering.
+
+        The model is left alone -- the rig is the authority on which VFO is
+        primary and reports it -- but the borrow itself has to be undone,
+        because nothing else will.
+        """
+        self._tx_write_timer = None
+        if self._tx_write_state:
+            print("tx write abandoned in state", self._tx_write_state,
+                  "-- no confirmation within", TX_WRITE_TIMEOUT_MS, "ms")
+            # Undo the borrow if it happened. awaiting-borrow means the
+            # first toggle was sent but never confirmed, so the rig may or
+            # may not have moved -- its own cv will tell us either way, and
+            # toggling on a guess would be worse than leaving it.
+            if self._tx_write_state == "awaiting-return":
+                print("   handing the primary slot back")
+                self.toggle_vfo()
+
+            # Whatever went wrong, the view must not stay frozen: release the
+            # suspend so the operator sees where the radio actually is, even
+            # if that is mid-borrow.
+            self._model.resume_notifications()
+        self._tx_write_state = None
+        self._tx_write_hz = None
+        # Dropped too: a pending value fired against an abandoned sequence
+        # would start a new one from a state we have just admitted we do not
+        # trust. The next dial turn will ask again.
+        self._tx_write_next = None
+
+    # ------------------------------------------------------------------
+    # Receive writes: one at a time, and an impossible report refused
+    # ------------------------------------------------------------------
+    def _request_frequency(self, hz):
+        """
+        Asks for the primary VFO to be tuned to hz -- when the rig is ready.
+
+        ONE WRITE IN FLIGHT. A request made while a write awaits its report
+        only replaces the intent; the latest intent goes out when the report
+        arrives. A dial spin skips the frequencies it passed through, which
+        nobody was listening to, and the Nano is never sent a write while it
+        is still carrying out the last one. See FREQ_CONFIRM_TIMEOUT_MS.
+        """
+        self._freq_intent = int(hz)
+        if self._freq_sent is None and self._freq_follow_timer is None:
+            self._send_frequency_intent()
+        else:
+            print("not sending intent", self._freq_sent, self._freq_follow_timer is None)
+
+    def _send_frequency_intent(self):
+        """Sends the current intent, unless a split borrow has the slot."""
+        self._freq_follow_timer = None
+        if self._freq_intent is None:
+            return
+        if self._tx_write_state:
+            # A borrow has made the transmit VFO primary; a receive write now
+            # would land on it. Wait for the slot to come back.
+            self._freq_follow_timer = self.root.after(
+                STEP_SETTLE_MS, self._send_frequency_intent)
+            return
+        self._freq_sent = self._freq_intent
+        self.set_frequency(self._freq_sent)
+        self._freq_timer = self.root.after(FREQ_CONFIRM_TIMEOUT_MS,
+                                           self._frequency_write_timed_out)
+
+    def _clear_frequency_write(self):
+        """The write in flight is answered or abandoned. Returns what it sent."""
+        sent, self._freq_sent = self._freq_sent, None
+        if self._freq_timer is not None:
+            try:
+                self.root.after_cancel(self._freq_timer)
+            except Exception:
+                pass
+            self._freq_timer = None
+        return sent
+
+    def _frequency_confirmed(self):
+        """
+        The rig reported the primary VFO while a write was in flight.
+
+        ANY REPORT COUNTS, whatever value it carries. The rig rounds to the
+        tuning preset, and does not answer every write one-for-one, so the
+        report need not match. What decides whether another write is needed
+        is the intent against what was SENT.
+        """
+        sent = self._clear_frequency_write()
+        self._freq_retries = 0
+        if self._freq_intent is not None and self._freq_intent != sent:
+            self._freq_follow_timer = self.root.after(
+                FREQ_FOLLOW_MS, self._send_frequency_intent)
+        else:
+            self._freq_intent = None
+
+    def _frequency_write_timed_out(self):
+        """
+        No report for the write in flight -- lost, or torn and discarded by
+        the reader. The protocol has no way to ask where the rig is, so the
+        intent is sent again: setting a frequency the rig already has changes
+        nothing.
+        """
+        self._freq_timer = None
+        sent = self._clear_frequency_write()
+        if self._freq_intent is None:
+            return
+        self._freq_retries += 1
+        if self._freq_retries > FREQ_RETRIES:
+            print(f"[rig] no report for {self._freq_intent} after "
+                  f"{FREQ_RETRIES} retries; giving up on it")
+            self._freq_intent = None
+            self._freq_retries = 0
+            return
+        print(f"[rig] no report after sending {sent}; "
+              f"sending {self._freq_intent} again")
+        self._send_frequency_intent()
+
+    def _frequency_report(self, vfo, text):
+        """
+        A VFO frequency the rig reported: the value to record, or None.
+
+        AN IMPOSSIBLE VALUE IS REFUSED, and the model keeps the last good
+        one. The report is truthful -- the rig really is there, after a write
+        that arrived corrupted -- so asking again would get the same answer.
+        The rig is put back instead, once things are quiet.
+
+        "p" is the primary VFO, "a" and "b" the named ones. The rig reports a
+        change to the primary under both its names, so only the primary
+        report recovers it; an "a" or "b" report recovers only the VFO that
+        is not primary, which a corrupted split write can leave wrong.
+        """
+        try:
+            hz = int(str(text).strip())
+        except ValueError:
+            hz = None
+        good = hz is not None and 0 < hz <= VFO_FREQ_MAX_HZ
+
+        if vfo == "p":
+            if good:
+                if self._freq_sent is not None:
+                    self._frequency_confirmed()
+                return hz
+            print(f"[rig] refused an impossible frequency report: {text!r}")
+            self._clear_frequency_write()
+            # During a split borrow the primary slot holds the OTHER VFO, so
+            # that is the one the corrupted write landed on -- recovered by
+            # name, with a borrow of its own once this one has finished.
+            self._schedule_frequency_recovery(
+                self._model.active if self._tx_write_state else "p")
+            return None
+
+        if good:
+            return hz
+        print(f"[rig] refused an impossible VFO {vfo.upper()} report: {text!r}")
+        if vfo != self._model.active:
+            self._schedule_frequency_recovery(vfo)
+        return None
+
+    def _schedule_frequency_recovery(self, vfo):
+        """Puts the rig back after an impossible report -- after a settle."""
+        if vfo in self._freq_recovery_timers:
+            return                      # one is already coming for this VFO
+        self._freq_recovery_timers[vfo] = self.root.after(
+            STEP_SETTLE_MS, lambda: self._recover_frequency(vfo))
+
+    def _recover_frequency(self, vfo):
+        """
+        Sends the rig back to the last good frequency for a VFO.
+
+        NOT WHILE ANYTHING ELSE IS WRITING. A receive write in flight or
+        queued heals the primary by itself -- it overwrites the bad value --
+        so recovery simply stands down. A split borrow in progress is waited
+        for. Each resend counts against FREQ_RETRIES; a rig that will not
+        hold a frequency is reported, not argued with.
+        """
+        self._freq_recovery_timers.pop(vfo, None)
+        if vfo == "p" and (self._freq_sent is not None
+                           or self._freq_follow_timer is not None):
+            return
+        if self._tx_write_state:
+            self._schedule_frequency_recovery(vfo)
+            return
+
+        self._freq_retries += 1
+        if self._freq_retries > FREQ_RETRIES:
+            print(f"[rig] VFO {vfo} will not hold a good frequency after "
+                  f"{FREQ_RETRIES} attempts; left as it is")
+            self._freq_retries = 0
+            # Forgotten too, or a later recovery would tune to this stale
+            # target rather than the last good frequency.
+            self._freq_intent = None
+            return
+
+        if vfo == self._model.active:
+            vfo = "p"                   # it is primary again; an ordinary write
+        if vfo == "p":
+            hz = self._freq_intent or self._model.frequency(self._model.active)
+        else:
+            hz = self._model.frequency(vfo)
+        if not hz or not 0 < hz <= VFO_FREQ_MAX_HZ:
+            print(f"[rig] no good frequency known for VFO {vfo}; nothing to restore")
+            return
+        print(f"[rig] putting VFO {vfo} back on {hz}")
+        if vfo == "p":
+            self._request_frequency(hz)
+        else:
+            self._begin_borrowed_write(hz)
+
+    def set_frequency(self, value):
+        print("[rig] setting frequency", value)
+        fourBytes = self.Freq_Encode(value)
+        command = [self.toRadioCommandDict["TS_CMD_FREQ"], fourBytes[0], fourBytes[1], fourBytes[2], fourBytes[3]]
+        self.sendCommandToMCU(bytes(command))
+
+    #
+    #   This function tells the Radio that a new mode has been selected for
+    #   the primary (displayed) VFO. After receiving the new mode, the
+    #   Radio will separately send back the mode to the UX
+    #
+    def set_mode(self, mode):
+        encode_mode = MODES.index(mode)
+        command = [self.toRadioCommandDict["TS_CMD_MODE"], encode_mode, 0, 0, 0]
+        self.sendCommandToMCU(bytes(command))
+
+    #
+    #   This function tells the Radio that a button up or down has been pushed
+    #   in the UX. After receiving this command the radio will send back a new frequency
+    #   and mode for the displayed VOF
+    #
+    def Change_Band(self, direction):
+        command = [self.toRadioCommandDict["TS_CMD_BAND"], direction, 0, 0, 0]
+        self.sendCommandToMCU(bytes(command))
+
+    def Tuning_Rate(self, value: bytes):
+        command = [self.toRadioCommandDict["TS_CMD_TUNESTEP"], value, 0, 0, 0]
+        self.sendCommandToMCU(bytes(command))
+
+    def toggle_vfo(self):
+        command = [self.toRadioCommandDict["TS_CMD_VFO"], 0, 0, 0, 0]
+        self.sendCommandToMCU(bytes(command))
+
+    def Toggle_Lock(self):
+        command = [self.toRadioCommandDict["TS_CMD_LOCK"], 0, 0, 0, 0]
+        self.sendCommandToMCU(bytes(command))
+
+    def Toggle_Speaker(self):
+        command = [self.toRadioCommandDict["TS_CMD_SDR"], 0, 0, 0, 0]
+        self.sendCommandToMCU(bytes(command))
+
+    def Toggle_Stop(self):
+        command = [self.toRadioCommandDict["TS_CMD_TXSTOP"], 0, 0, 0, 0]
+        self.sendCommandToMCU(bytes(command))
+
+    def Toggle_Split(self):
+        command = [self.toRadioCommandDict["TS_CMD_SPLIT"], 0, 0, 0, 0]
+        self.sendCommandToMCU(bytes(command))
+
+    # ------------------------------------------------------------------
+    # FIX (2026-11-08): THE APP'S OWN RIT, IN SPLIT (Mark)
+    # ------------------------------------------------------------------
+    # The firmware's RIT and its split do not mix: with RIT on, startTx sends
+    # on the RIT base and never reaches the split swap -- split is silently
+    # ignored on transmit. But in split the receive VFO's frequency is never
+    # used to transmit, so RIT there needs no help at the moment of keying:
+    # the app keeps it. The base is remembered, the receive VFO really tunes
+    # to base + offset, transmit stays on the other VFO; off, the base is
+    # written back. Out of split it becomes the firmware's real RIT, since
+    # transmit goes on the receive VFO again.
+    def toggle_rit_for_operator(self):
+        """RIT on or off as the operator means it -- the app's in split."""
+        m = self._model
+        if m.rit_virtual:
+            self._end_virtual_rit(write_base=True)
+        elif m.split and not m.rit:
+            self._start_virtual_rit()
+        else:
+            self.Toggle_RIT()
+
+    def _start_virtual_rit(self, base=None):
+        m = self._model
+        m.rit_base_hz = base or m.frequency(m.rx_vfo)
+        m.rit_vfo = m.rx_vfo
+        m.rit_virtual = True
+        m.rit = True
+        print(f"[rig] RIT in split, kept by the app -- base {m.rit_base_hz}")
+        m.changed()
+
+    def _end_virtual_rit(self, write_base):
+        m = self._model
+        base, vfo = m.rit_base_hz, m.rit_vfo
+        m.rit_virtual = False
+        m.rit = False
+        m.rit_base_hz = 0
+        m.rit_vfo = None
+        if write_base and base and vfo == m.rx_vfo and m.frequency(vfo) != base:
+            print(f"[rig] RIT off -- receive back to the base {base}")
+            self._request_frequency(base)
+        m.changed()
+
+    def _virtual_rit_vfo_changed(self):
+        """
+        The receive VFO changed with the app's RIT on: the firmware's swap to
+        transmit in split, or A/B. The RIT stays with its VFO -- remembered
+        while away, back on its return (nothing to write: the firmware moved
+        no frequency).
+        """
+        m = self._model
+        saved = self.__dict__.setdefault("_vrit_saved", {})
+        if m.rit_vfo and m.rx_vfo != m.rit_vfo:
+            saved[m.rit_vfo] = m.rit_base_hz
+            m.rit = False
+            m.rit_virtual = False
+            m.rit_base_hz = 0
+            m.rit_vfo = None
+        if not m.rit and m.split and m.rx_vfo in saved:
+            self._start_virtual_rit(saved.pop(m.rx_vfo))
+        m.changed()
+
+    def _split_vfo_hold(self, new):
+        """
+        A cv in split, not a borrow's. Returns True if it has been dealt with.
+
+        The first change is HELD: active follows the rig (frequency reports
+        go to the right VFO) but the roles stay frozen, so receive and
+        transmit keep their panels and the app's RIT its VFO. The change back
+        ends the hold with nothing to do -- the transmit swap, or a quick
+        A/B/A. No transmit within SPLIT_TX_GRACE_MS: it was A/B, decided by
+        _split_vfo_decide.
+        """
+        m = self._model
+        hold = getattr(self, "_split_hold", None)
+        if hold is None:
+            if new == m.active:
+                return False
+            self._split_hold_id = getattr(self, "_split_hold_id", 0) + 1
+            self._split_hold = {"from": m.active, "tx": False, "id": self._split_hold_id}
+            if m._frozen_active is None:
+                m._frozen_active = m.active
+            m.set_active(new)
+            self.root.after(SPLIT_TX_GRACE_MS,
+                            lambda i=self._split_hold_id: self._split_vfo_decide(i))
+            return True
+        if new == hold["from"]:
+            # Back where it was: the transmit swap ending, or A/B undone.
+            self._split_hold = None
+            m._frozen_active = None
+            m.set_active(new)
+            m.changed()
+            return True
+        m.set_active(new)
+        return True
+
+    def _split_vfo_decide(self, hold_id):
+        """The grace is over: a transmit means wait for the swap back; else A/B."""
+        m = self._model
+        hold = getattr(self, "_split_hold", None)
+        if hold is None or hold["id"] != hold_id:
+            return
+        if hold["tx"] or m.transmitting:
+            self.root.after(SPLIT_TX_GRACE_MS,
+                            lambda i=hold_id: self._split_vfo_decide(i))
+            return
+        self._split_hold = None
+        m._frozen_active = None
+        if m.rit_virtual or self.__dict__.get("_vrit_saved"):
+            self._virtual_rit_vfo_changed()
+        m.changed()
+
+    def _decide_rit_off(self):
+        """The firmware's RIT went off without a VFO switch, and no split came."""
+        pending = getattr(self, "_rit_off_pending", None)
+        self._rit_off_pending = None
+        if pending is None:
+            return
+        self._model.rit = False
+        self._leave_rit()
+        self._maybe_restore_rit()
+        # FIX (2026-11-10): SAID, not left to a frequency report. This runs
+        # from a timer, after the report's own notification has gone; with
+        # receive already on the base (RIT +0) no frequency report follows
+        # either, so the view kept showing RIT on at +0 (Mark, A2) and each
+        # press of RIT looked like it did nothing.
+        self._model.changed()
+
+    def _rit_split_changed(self, split_on):
+        """
+        Split ON: the firmware's RIT, just cleared by it (cr_ 0 came first),
+        becomes the app's -- same base, receive left where it is.
+        Split OFF: the app's RIT becomes the firmware's real RIT (transmit is
+        on the receive VFO again, so only the firmware can move it in time):
+        the VFO to the base, RIT on, receive back -- as after a VFO switch.
+        """
+        m = self._model
+        if split_on:
+            # FIX (2026-11-10): THE OTHER VFO'S REMEMBERED RIT becomes the
+            # app's kind too, so A/B in split brings it back at once (Mark,
+            # D5: B showed 7.095.800 with no RIT until split went off). Split
+            # off turns it back into the rig's kind, below. The transmit swap
+            # does not show it: that cv is held (SPLIT_TX_GRACE_MS).
+            vsaved = self.__dict__.setdefault("_vrit_saved", {})
+            for vfo, (base, _rx) in list(self._rit_saved.items()):
+                vsaved[vfo] = base
+            self._rit_saved.clear()
+        pending = getattr(self, "_rit_off_pending", None)
+        if split_on and pending is not None:
+            self._rit_off_pending = None
+            vfo, base = pending
+            m.rit = False
+            if base and vfo == m.rx_vfo:
+                self._start_virtual_rit(base)
+            return
+        if not split_on:
+            saved = self.__dict__.setdefault("_vrit_saved", {})
+            if m.rit_virtual:
+                base, vfo = m.rit_base_hz, m.rit_vfo
+                self._end_virtual_rit(write_base=False)
+                if base and vfo:
+                    self._rit_saved[vfo] = (base, m.frequency(vfo))
+            for vfo, base in list(saved.items()):          # the other VFO's
+                self._rit_saved[vfo] = (base, m.frequency(vfo))
+            saved.clear()
+            self._maybe_restore_rit()
+
+    def Toggle_RIT(self):
+        print("[rig] toggling RIT")    # FIX: was "turning on RIT" -- it toggles
+        command = [self.toRadioCommandDict["TS_CMD_RIT"], 0, 0, 0, 0]
+        self.sendCommandToMCU(bytes(command))
+
+    def Set_ATT(self, value: bytes):
+        print("setting att, value =", value)
+        command = [self.toRadioCommandDict["TS_CMD_ATT"], value, 0, 0, 0]
+        self.sendCommandToMCU(bytes(command))
+
+    def Toggle_IFS(self):
+        print("toggling IFS")
+        command = [self.toRadioCommandDict["TS_CMD_IFS"], 0, 0, 0, 0]
+        self.sendCommandToMCU(bytes(command))
+
+    def Set_IFS_Level(self, level):
+        print("setting IFS Level", level)
+        encodedBytes = self.Freq_Encode(str(level))
+
+        command = [self.toRadioCommandDict["TS_CMD_IFSVALUE"], encodedBytes[0], encodedBytes[1], encodedBytes[2], 0]
+        self.sendCommandToMCU(bytes(command))
+
+    # ------------------------------------------------------------------
+    # The keyer's settings
+    # ------------------------------------------------------------------
+    # FIX (2026-11-06): THE CW TAB'S EDITS REACH THE RIG. The five Set_CW_*
+    # methods this replaces were never called and had their EEPROM writes
+    # commented out; Set_CW_Speed's one live command was a byte short of the
+    # five every other command sends.
+    #
+    # Per setting: its EEPROM entry, the operator's value -> the bytes
+    # stored, the command that applies it AT ONCE (or None), and whether the
+    # firmware reads it only as it boots. Addresses from EEPROM.py, checked
+    # against what the rig reports at connect (2026-11-06).
+    #
+    #   key type  0x166, 1 byte, 0/1/2           TS_CMD_KEYTYPE -- at once
+    #   speed     0x01C, 4 bytes, the DOT LENGTH  TS_CMD_WPM     -- at once
+    #             in ms (1200 / wpm), low first; the live command takes one
+    #             byte, so 5 wpm (240 ms) is the slowest
+    #   tone      0x018, 4 bytes, Hz, low first                  -- at boot
+    #   to TX     0x103, 1 byte, ms / 2                          -- at boot
+    #   to RX     0x102, 1 byte, ms / 10                         -- at boot
+    CW_KEY_VALUES = {"STRAIGHT": 0, "IAMBICA": 1, "IAMBICB": 2}
+    CW_LIMITS = {"cw_wpm": (5, 60), "cw_tone": (100, 2000),
+                 "cw_delay_tx_ms": (0, 500), "cw_delay_rx_ms": (0, 2550)}
+
+    def _cw_setting(self, key, value):
+        """
+        (EEPROM name, bytes to store, command applying it now or None, needs
+        a reboot, the value as the rig will report it). The last because the
+        rig keeps whole units: 25 ms to TX is stored as 12 and reads back 24,
+        45 wpm as a 27 ms dot that reads back 44 -- the tab shows that.
+        """
+        if key == "cw_key_type":
+            code = self.CW_KEY_VALUES[value]
+            return ("cw_key_type", bytes([code]),
+                    [self.toRadioCommandDict["TS_CMD_KEYTYPE"], code, 0, 0, 0], False, value)
+        low, high = self.CW_LIMITS[key]
+        value = int(value)
+        if not low <= value <= high:
+            raise ValueError(f"{key} {value} outside {low}-{high}")
+        if key == "cw_wpm":
+            dot = round(1200 / value)
+            return ("cw_wpm", bytes(self.Freq_Encode(dot)),
+                    [self.toRadioCommandDict["TS_CMD_WPM"], dot, 0, 0, 0], False,
+                    round(1200 / dot))
+        if key == "cw_tone":
+            return ("cw_sidetone", bytes(self.Freq_Encode(value)), None, True, value)
+        if key == "cw_delay_tx_ms":
+            return ("cw_Delay_Starting_TX", bytes([value // 2]), None, True, value // 2 * 2)
+        return ("cw_Delay_Returning_to_RX", bytes([value // 10]), None, True, value // 10 * 10)
+
+    def set_cw(self, key, value):
+        """
+        Sets one keyer setting: applied at once where the rig has a command
+        for it, and written to EEPROM so it stays.
+
+        THE MODEL CHANGES ON THE RIG'S WORD, not on sending: when the EEPROM
+        write is acknowledged -- the acknowledgement names the address, as for
+        channels. Speed and key type then show the new value, since the
+        command has applied it. Tone and the delays are only READ AS THE RIG
+        BOOTS, so until a restart the rig still uses the old ones: the new
+        value goes in model.cw_pending, and the live one (cw_tone sets the CW
+        transmit offset) is left alone until the rig reports it after booting.
+        """
+        name, data, now, reboot, value = self._cw_setting(key, value)
+        if now is not None:
+            self.sendCommandToMCU(bytes(now))
+        address, command = self._eeprom_write(EEPROM.Mem_Address[name], 0, data)
+        queue = self.__dict__.setdefault("_cw_writes", [])
+        queue[:] = [w for w in queue if w[0] != key]     # the latest wins
+        queue.append((key, value, address, command, reboot))
+        self._model.cw_write_failed = None
+        if len(queue) == 1:
+            self._cw_write_attempts = 0
+            self._send_cw_write()
+
+    # FIX (2026-11-06): THE CALIBRATION AND BFOs, written for a restore from
+    # the config file. Same queue and acknowledgement as the keyer settings.
+    # All three are read by the firmware AS IT BOOTS, so they wait in
+    # model.settings_pending until a restart. Limits as globalvars'
+    # MASTER_CAL_BOUNDS, BFO_CAL_BOUNDS and CW_CAL_BOUNDS. The FACTORY copies
+    # are never written (Mark) -- they are not in this table.
+    STORED_LIMITS = {"master_cal": (-500000, 500000),
+                     "ssb_bfo": (11048000, 12010000),
+                     "cw_bfo": (11048000, 12010000)}
+
+    def set_stored(self, name, value):
+        """Writes the master calibration or a BFO to EEPROM. 4 bytes, low first;
+        the calibration as 32-bit two's complement, as the rig keeps it."""
+        low, high = self.STORED_LIMITS[name]
+        value = int(value)
+        if not low <= value <= high:
+            raise ValueError(f"{name} {value} outside {low}-{high}")
+        data = bytes(self.Freq_Encode(value & 0xFFFFFFFF))
+        spec = list(EEPROM.Mem_Address[name])
+        # FIX (2026-11-06): THE FIRMWARE'S CHECKSUM DOES NOT WRAP. KD8CEC's
+        # TS_CMD_WRITEMEM (ubitx_lcd_nextion.ino) compares the checksum BYTE
+        # with addr0 + addr1 + length as an int, so a write whose sum reaches
+        # 256 is always refused -- answered with -2 (65534), nothing written.
+        # The CW BFO at 252 with 4 bytes sums to 256: it could never be
+        # written this way. Its top byte is zero for any BFO (under 16.7 MHz),
+        # so it is written as THREE bytes, 252+0+3 = 255, provided the byte
+        # already there is zero -- known from the value just read.
+        spec, data = self._fit_firmware_checksum(name, spec, data)
+        address, command = self._eeprom_write(spec, 0, data)
+        queue = self.__dict__.setdefault("_cw_writes", [])
+        queue[:] = [w for w in queue if w[0] != name]
+        queue.append((name, value, address, command, "stored"))
+        self._model.cw_write_failed = None
+        if len(queue) == 1:
+            self._cw_write_attempts = 0
+            self._send_cw_write()
+
+    def set_rig_bytes(self, name, data, shown=None):
+        """
+        FIX (2026-11-06): writes one of RIG_EEPROM's settings as raw bytes --
+        the S-meter levels or the display options. Same queue, same
+        acknowledgement as set_stored; the rig reads them as it boots, so they
+        wait in model.settings_pending. `shown`: what the radio column holds
+        after the write (the bytes, unless given).
+        """
+        spec = list(self._mem_spec(name))
+        data = bytes(data)
+        if len(data) != spec[EEPROM.memLength]:
+            raise ValueError(f"{name}: {len(data)} bytes, not {spec[EEPROM.memLength]}")
+        address, command = self._eeprom_write(spec, 0, data)
+        self._queue_stored(name, list(data) if shown is None else shown, address, command)
+
+    def set_callsign(self, callsign, show=False):
+        """
+        FIX (2026-11-06): the callsign into the rig's EEPROM -- key, length
+        with the show-at-start-up bit, then the text, in one write (780 +
+        20 bytes fits the firmware's checksum). An empty callsign clears the
+        key, so the rig has none. Upper case; letters, digits and / only,
+        up to 18. The rig reads it as it boots.
+        """
+        text = str(callsign or "").strip().upper()
+        if len(text) > self.CALLSIGN_MAX or any(not (c.isalnum() or c == "/") for c in text):
+            raise ValueError(f"callsign {text!r}: letters, digits and / only, "
+                             f"{self.CALLSIGN_MAX} at most")
+        if text:
+            head = [self.CALLSIGN_KEY, (0x80 if show else 0) | len(text)]
+        else:
+            head = [0, 0]
+        data = bytes(head) + text.encode("ascii")
+        spec = [0x0C, 0x03, len(data), 0x59, 0, 1]
+        address, command = self._eeprom_write(spec, 0, data)
+        self._queue_stored("callsign", (text, bool(show and text)), address, command)
+
+    def _queue_stored(self, name, value, address, command):
+        queue = self.__dict__.setdefault("_cw_writes", [])
+        queue[:] = [w for w in queue if w[0] != name]
+        queue.append((name, value, address, command, "stored"))
+        self._model.cw_write_failed = None
+        if len(queue) == 1:
+            self._cw_write_attempts = 0
+            self._send_cw_write()
+
+    def _fit_firmware_checksum(self, name, spec, data):
+        """
+        (spec, data) shortened from the top until address + length < 256, as
+        the firmware needs (see set_stored). Only zero bytes are dropped, and
+        only where EEPROM already holds zeros there; otherwise ValueError --
+        the setting cannot be written over this command.
+        """
+        lsb, msb, length = spec[EEPROM.lsb], spec[EEPROM.msb], spec[EEPROM.memLength]
+        if lsb + msb + length < 256:
+            return spec, data
+        keep = 255 - lsb - msb
+        current = self._model.eeprom_settings.get(name)
+        if keep < 1 or any(data[keep:]) or current is None \
+                or (current & 0xFFFFFFFF) >> (8 * keep):
+            raise ValueError(f"{name}: the firmware refuses a write at {lsb + 256 * msb} "
+                             f"of {length} bytes, and it cannot be shortened safely")
+        spec[EEPROM.memLength] = keep
+        return spec, data[:keep]
+
+    def _send_cw_write(self):
+        queue = getattr(self, "_cw_writes", [])
+        if not queue:
+            return
+        key, value, address, command, _ = queue[0]
+        # FIX (2026-11-06): each EEPROM write said, with its bytes -- to see
+        # what reached the rig when a setting does not stick.
+        print(f"[eeprom] writing {key} = {value} at {address} (0x{address:03x}): "
+              f"{bytes(command).hex(' ')}")
+        self.sendCommandToMCU(bytes(command))
+        self._cw_write_timer = self.root.after(CHANNEL_WRITE_TIMEOUT_MS,
+                                               self._cw_write_timed_out)
+
+    def _cw_write_timed_out(self):
+        self._cw_write_timer = None
+        self._cw_write_attempts += 1
+        if self._cw_write_attempts <= CHANNEL_READ_RETRIES:
+            print(f"[cw] write to {self._cw_writes[0][2]} not acknowledged; retrying")
+            self._send_cw_write()
+            return
+        key = self._cw_writes.pop(0)[0]
+        print(f"[cw] giving up on the write of {key}")
+        self._model.cw_write_failed = key
+        self._model.changed()
+        self._cw_write_attempts = 0
+        self.root.after(STEP_SETTLE_MS, self._send_cw_write)
+
+    def _on_cw_written(self, address):
+        """True if this acknowledgement was the keyer write outstanding."""
+        queue = getattr(self, "_cw_writes", [])
+        if not queue or queue[0][2] != address:
+            return False
+        if getattr(self, "_cw_write_timer", None) is not None:
+            self.root.after_cancel(self._cw_write_timer)
+            self._cw_write_timer = None
+        key, value, _, _, reboot = queue.pop(0)
+        print(f"[eeprom] {key} confirmed by the rig (address {address})")
+        model = self._model
+        if reboot == "stored":
+            # What EEPROM now holds -- the dialog's radio column -- and in use
+            # after the next restart.
+            model.eeprom_settings[key] = value
+            model.settings_pending[key] = value
+            if key == "callsign":           # FIX (2026-11-06): its head too
+                text, show = value
+                model.eeprom_settings["callsign_head"] = (
+                    [self.CALLSIGN_KEY, (0x80 if show else 0) | len(text)] if text else [0, 0])
+        elif reboot:
+            model.cw_pending[key] = value
+        else:
+            setattr(model, key, value)
+        model.changed()
+        self._cw_write_attempts = 0
+        self.root.after(STEP_SETTLE_MS, self._send_cw_write)
+        return True
+
+    # ------------------------------------------------------------------
+    # Writing memory channels
+    # ------------------------------------------------------------------
+    def _channel_write_commands(self, slot, freq, mode, label, show_label):
+        """
+        The EEPROM writes one channel needs, as (address, command) pairs.
+
+        A frequency-and-mode write for every slot. A label and a show-label
+        write only for slots 1 to 9 -- the first nine carry a label, and the
+        tenth label slot is broken in the v2 firmware. The code this replaces
+        checked `channelNum > 9`, which let slot index 9 through and would
+        have written into that broken slot; this stops at the ninth.
+        """
+        commands = []
+
+        spec = EEPROM.Mem_Address["channel_freq_Mode"]
+        mode_number = EEPROM.Text_To_ModeNum.get(mode, 0)   # "?", "" -> DFT
+        encoded = (int(freq) & 0x1FFFFFFF) | ((mode_number & 0x7) << 29)
+        commands.append(self._eeprom_write(spec, slot, self.Freq_Encode(encoded)))
+
+        if slot < EEPROM.Mem_Address["channel_Label"][EEPROM.totalSlots]:
+            spec = EEPROM.Mem_Address["channel_Label"]
+            length = spec[EEPROM.memLength]
+            text = "".join(ch for ch in str(label or "").strip()
+                           if 32 <= ord(ch) < 127)[:length]
+            commands.append(self._eeprom_write(
+                spec, slot, text.ljust(length).encode("ascii")))
+
+            spec = EEPROM.Mem_Address["channel_ShowLabel"]
+            commands.append(self._eeprom_write(
+                spec, slot, bytes([0x3 if show_label else 0x0])))
+        return commands
+
+    def _eeprom_write(self, spec, slot, data):
+        """One TS_CMD_WRITEMEM command for a slot, and the address it writes."""
+        # FIX (2026-11-06): no slot offset for a single setting -- the
+        # calibration and BFO entries in EEPROM.py stop at the flag and have
+        # no memOffset to read.
+        lsb = spec[EEPROM.lsb] + (slot * spec[EEPROM.memOffset] if slot else 0)
+        msb = spec[EEPROM.msb]
+        length = spec[EEPROM.memLength]
+        checksum = (lsb + msb + length) % 256
+        command = [self.toRadioCommandDict["TS_CMD_WRITEMEM"],
+                   lsb, msb, length, checksum] + list(data)
+        return (msb << 8) | lsb, command
+
+    def write_channels(self, channels):
+        """
+        Writes channels to the rig's EEPROM, then reads them all back.
+
+        `channels` is a list of (slot, freq, mode, label, show_label).
+
+        ONE WRITE AT A TIME, each confirmed by an acknowledgement naming the
+        address it wrote, so an acknowledgement cannot be credited to the
+        wrong write. One not acknowledged is retried, then given up on.
+
+        READ BACK AFTERWARDS, in full. The list then shows what the rig
+        actually holds rather than what was sent, so a write that did not
+        take shows its old value -- the rig is the authority here, as it is
+        everywhere else in this application.
+        """
+        if self._model.channels_state in ("reading", "writing"):
+            return
+        writes = []
+        for slot, freq, mode, label, show_label in channels:
+            for address, command in self._channel_write_commands(
+                    slot, freq, mode, label, show_label):
+                writes.append((slot, address, command))
+        if not writes:
+            return
+
+        self._channel_writes = writes
+        self._channel_write_attempts = 0
+        self._channel_write_timer = None
+        model = self._model
+        # Progress in CHANNELS, not writes: a channel is one write or three,
+        # depending on whether it carries a label, and "7 of 21" would be as
+        # meaningless as the 38 reads were.
+        model.channels_state = "writing"
+        model.channels_progress = 0
+        model.channels_expected = len(channels)
+        model.channels_write_failed = []
+        model.changed()
+        self._send_next_channel_write()
+
+    def _send_next_channel_write(self):
+        writes = getattr(self, "_channel_writes", None)
+        if not writes:
+            # All written. Read the lot back so the list shows the rig's
+            # values, not ours.
+            self._model.channels_state = "read"
+            self.read_channels()
+            return
+        _, address, command = writes[0]
+        self.sendCommandToMCU(bytes(command))
+        self._channel_write_timer = self.root.after(
+            CHANNEL_WRITE_TIMEOUT_MS, self._channel_write_timed_out)
+
+    def _channel_write_timed_out(self):
+        self._channel_write_timer = None
+        _, address, _ = self._channel_writes[0]
+        self._channel_write_attempts += 1
+        if self._channel_write_attempts <= CHANNEL_READ_RETRIES:
+            print(f"[chan] write to {address} not acknowledged; retrying "
+                  f"({self._channel_write_attempts} of {CHANNEL_READ_RETRIES})")
+            self._send_next_channel_write()
+            return
+        print(f"[chan] giving up on the write to {address}")
+        self._model.channels_write_failed.append(address)
+        self._finish_channel_write()
+
+    def _finish_channel_write(self):
+        slot = self._channel_writes.pop(0)[0]
+        self._channel_write_attempts = 0
+        # A channel is done when its last write is: the next one queued is
+        # for another slot, or there is none.
+        if not self._channel_writes or self._channel_writes[0][0] != slot:
+            self._model.channels_progress += 1
+        self._model.changed()
+        self.root.after(STEP_SETTLE_MS, self._send_next_channel_write)
+
+    def _on_memory_written(self, value):
+        """
+        An acknowledgement. Matched by the address it names.
+
+        One naming any other address is not the write outstanding -- a late
+        acknowledgement of a retried write, or a setting written elsewhere --
+        and is ignored rather than allowed to advance the sequence.
+        """
+        try:
+            address = int(str(value).strip())
+        except ValueError:
+            return
+        # FIX (2026-11-06): A REFUSAL. The firmware answers -2 -- 65534 as
+        # reported -- when it rejects a write (a checksum it does not accept;
+        # see set_stored). Before, that matched nothing, so the write was
+        # retried twice and given up on, with no hint why. Now it fails the
+        # write outstanding at once, and says so. One outstanding write per
+        # queue: a keyer/settings write is taken to be the one refused if
+        # there is one, otherwise the channel write.
+        if address in (65534, -2):
+            print("[eeprom] the rig REFUSED a write (it answered -2)")
+            queue = getattr(self, "_cw_writes", [])
+            if queue:
+                if getattr(self, "_cw_write_timer", None) is not None:
+                    self.root.after_cancel(self._cw_write_timer)
+                    self._cw_write_timer = None
+                key = queue.pop(0)[0]
+                self._model.cw_write_failed = key
+                self._model.changed()
+                self._cw_write_attempts = 0
+                self.root.after(STEP_SETTLE_MS, self._send_cw_write)
+            elif getattr(self, "_channel_writes", None):
+                if self._channel_write_timer is not None:
+                    self.root.after_cancel(self._channel_write_timer)
+                    self._channel_write_timer = None
+                self._model.channels_write_failed.append(self._channel_writes[0][1])
+                self._finish_channel_write()
+            return
+        # FIX (2026-11-06): a keyer setting's write is acknowledged the same
+        # way, by its address -- see set_cw.
+        if self._on_cw_written(address):
+            return
+        writes = getattr(self, "_channel_writes", None)
+        if not writes:
+            return
+        _, expected, _ = writes[0]
+        if address != expected:
+            print(f"[chan] acknowledgement for {address} while waiting on "
+                  f"{expected}; ignored")
+            return
+        if self._channel_write_timer is not None:
+            self.root.after_cancel(self._channel_write_timer)
+            self._channel_write_timer = None
+        self._finish_channel_write()
+
+    def startFrequencySpectrumScan(self, freq, count):
+        print("startFrequencySpectrumScan")
+
+        # print("Starting Frequency Spectrum Scan", freq, count)
+        self.mainWindow.startingspectrum = True
+
+        # for _ in range(count):
+        #     self.memoryQueue.append("Spectrum_Scan")
+
+        # print('queue lenght=',self.lenMemoryQueue())
+
+        fourBytes = self.Freq_Encode(str(freq))
+
+        command = [self.toRadioCommandDict["TS_CMD_SPECTRUM"], fourBytes[0], fourBytes[1], fourBytes[2], fourBytes[3]]
+        self.sendCommandToMCU(bytes(command))
+        # print("started spectrum", command)
+
+        for _ in range(count):
+            self.memoryQueue.append("Spectrum_Scan")
+
+        # print('queue length=', self.lenMemoryQueue())
+
+    def Set_Spectrum_Mode(self, value):
+        print("setting Spectrum_Mode")
+
+        # MyAddr = random.randint(5, 255)     # Not clear why a specific address is needed. Perhaps for future?
+        # MyAddr = 66
+        # DSPCode = 0x6A  # magic# indicating that this loop back result of DSP
+        #
+        # checksum = ((MyAddr + DSPCode + value) % 256)
+        #
+        # command = [self.toRadioCommandDict["TS_CMD_LOOPBACK0"], MyAddr, value, DSPCode, checksum]
+        # # print("sending loopback command", "myaddr:", hex(MyAddr), "value passed:", hex(value), "dspcode:",hex(DSPCode), "checksum:", hex(checksum))
+        #
+        # self.sendCommandToMCU(bytes(command))
+
+    def Set_Signal_Value(self, scale_value):
+        print("setting Signal_Value, scale_value:", scale_value)
+        # MyAddr = 55
+        # DSPCode = 0x6A
+        # value = int(scale_value) + 146
+        #
+        # checksum = ((MyAddr + DSPCode + value) % 256)
+        # command = [self.toRadioCommandDict["TS_CMD_LOOPBACK0"], MyAddr, value, DSPCode, checksum]
+        # # print("sending loopback command for signal", "myaddr:", hex(MyAddr), "value passed:", hex(int(scale_value)), "adjusted value", hex(value), "dspcode:", hex(DSPCode),
+        # #       "checksum:", hex(checksum))
+        # self.sendCommandToMCU(bytes(command))
+
+    def Set_DSP_State(self, flag):
+        print("setting DSP_State")
+
+        # if flag == "True":  # Turn DSP On
+        #     value = 51  # This turns the DSP on and sets it into Spectrum Mode
+        #     self.mainWindow.frequencySpectrumMode == "FreqScan"
+        #     gv.config.set_DSP_Switch(flag)
+        #     # print("turning on DSP")
+        #
+        # else:
+        #     value = 50  # This turns off the DSP
+        #     # print("Turning off DSP")
+        #     gv.config.set_DSP_Switch(flag)
+        #     self.mainWindow.mainScreenPlotter.clearCanvas()
+        #
+        # # MyAddr = random.randint(5, 255)     # Not clear why a specific address is needed. Perhaps for future?
+        # MyAddr = 88
+        # DSPCode = 0x6A  # magic# indicating that this loop back result of DSP
+        #
+        # checksum = ((MyAddr + DSPCode + value) % 256)
+        #
+        # command = [self.toRadioCommandDict["TS_CMD_LOOPBACK0"], MyAddr, value, DSPCode, checksum]
+        # # print("sending loopback command", "myaddr:", hex(MyAddr), "value passed:", hex(value), "dspcode:",hex(DSPCode), "checksum:", hex(checksum))
+        #
+        # self.sendCommandToMCU(bytes(command))
+
+    # WHAT THE INTERFACE NEEDS FROM THE RIG, by report code. Not everything
+    # the rig sends: the tuning presets, the spectrum settings and the green
+    # box lines are of no use here and are not waited for.
+    EXPECTED_REPORTS = {
+        "va": "VFO A frequency", "vb": "VFO B frequency",
+        "ca": "VFO A mode", "cb": "VFO B mode",
+        "sv": "firmware version", "sc": "callsign",
+        "vt": "CW tone", "ck": "CW key type", "vs": "CW speed",
+        "ve": "CW delay to transmit", "vy": "CW delay to receive",
+        "ch": "CW offset switch",
+    }
+
+    # REPORTED ONLY WHEN NOT IN THEIR DEFAULT STATE, so silence about these is
+    # an answer rather than a gap: the rig comes up with VFO A active and
+    # split, RIT, lock and transmit inhibit all off, and its speaker on.
+    # RadioModel starts in exactly those states, so nothing needs to be asked
+    # for or assumed.
+    #
+    # THIS ONLY HOLDS BECAUSE WE REBOOT. Connecting to a rig that has been
+    # running -- which is what a future connect-without-reboot would be --
+    # makes the same silence mean "unknown", and these would have to be asked
+    # for. Worth remembering before that option is offered.
+    DEFAULTED_AFTER_REBOOT = {
+        "cv": "which VFO is active (A)", "cs": "split (off)",
+        "cr": "RIT (off)", "cl": "lock (off)",
+        "cj": "speaker (on)", "cx": "transmit inhibit (off)",
+    }
+
+    def check_expected_reports(self):
+        """
+        Says which of the values the interface needs have not arrived.
+
+        PRINTS, for now. The rig sends its settings as it boots and the
+        reader takes them as they come, so a missing one is not an error --
+        it is something to ask for. Asking is not built yet; knowing which
+        are missing is the first half of it, and worth having while the rest
+        of the interface is wired to these values one at a time.
+        """
+        missing = {code: name for code, name in self.EXPECTED_REPORTS.items()
+                   if code not in self.seen_reports}
+        defaulted = [name for code, name in sorted(self.DEFAULTED_AFTER_REBOOT.items())
+                     if code not in self.seen_reports]
+        if defaulted:
+            print(f"[rig] at their defaults after the reboot: {', '.join(defaulted)}")
+        if not missing:
+            print(f"[rig] all {len(self.EXPECTED_REPORTS)} expected values arrived")
+            return missing
+        print(f"[rig] {len(missing)} of {len(self.EXPECTED_REPORTS)} expected values "
+              f"have not arrived:")
+        for code, name in sorted(missing.items()):
+            print(f"        {code}  {name}")
+        return missing
+
+    def reboot_ubitx(self):
+        """
+        Asks the rig's firmware to restart.
+
+        WHY ANYTHING WANTS THIS: the rig does not answer a request for its
+        settings -- it SENDS them, all 26, as it boots, and _read_all_values
+        sits collecting that burst. So something has to make it boot. Opening
+        the serial port used to, as a side effect of DTR, but that depends on
+        the adapter driving the line and the auto-reset capacitor being
+        fitted; on this station it does not happen. A command does not care
+        about either.
+        """
+        print("reboot_ubitx")
+        self._t_reboot = monotonic()
+        self._t_first_byte = None
+
+        # To reboot need to send key 1497712748  (5945486C)
+
+        lsb1 = 0x6C
+        lsb2 = 0x48
+        lsb3 = 0x45
+        lsb4 = 0x59
+
+        checksum = (lsb1 + lsb2 + lsb3 + lsb4) % 256
+
+        command = [self.toRadioCommandDict["TS_CMD_UBITX_REBOOT"], lsb1, lsb2, lsb3, lsb4, checksum]
+        self.sendCommandToMCU(bytes(command))
+
+    def restart_rig(self):
+        """
+        FIX (2026-11-06): a restart AFTER connecting -- to fetch values that
+        did not arrive, or to make the rig read settings it takes only as it
+        boots. The rig sends everything again as it boots and the reader,
+        already running, takes it through the ordinary handlers.
+
+        THE TUNING PRESET AGAIN, as at connect (see __init__): the reboot puts
+        the rig's own back, and at a coarse one the rig rounds away fine
+        tuning steps. Sent at the same moment after the reboot command as at
+        connect.
+        """
+        self.reboot_ubitx()
+        self.root.after(int(REBOOT_SETTLE * 1000), lambda: self.Set_Tuning_Preset(1))
+        # The calibration and BFOs written are in use from this boot; the rig
+        # does not report them, so nothing else would clear them.
+        self._model.settings_pending.clear()
+
+    def _since_reboot(self):
+        """Seconds since the reboot command -- for UBITX_RIG_TIMING."""
+        t0 = getattr(self, "_t_reboot", None)
+        return monotonic() - t0 if t0 is not None else -1.0
+
+    def sendCommandToMCU(self, commandList):
+        currentTime = timer()
+        timeDiff = currentTime - self.time_of_last_sent
+
+        # FIX (2026-11-06): the operator's headroom, set from Machine settings.
+        headroom = getattr(self, "command_headroom", MCU_COMMAND_HEADROOM)
+        if (timeDiff < headroom):
+            sleep(headroom - timeDiff)
+        self.time_of_last_sent = timer()
+
+        self.tx_to_mcu_preamble = b'\x59\x58\x68'  # all commands to MCU must start with these three bytes
+        self.tx_to_mcu_postscript = b'\xff\xff\x73'  # all commands to MCU must end with these three numbers
+
+        try:
+            self.port.write(self.tx_to_mcu_preamble + commandList + self.tx_to_mcu_postscript)
+        except:
+            sCTkMessagebox.showerror(title="ERROR Communicating with uBITX",
+                                 message="Communication failed with uBITX.", parent=self,
+                                 DETAILS="Did you select the right com port?\n" + "You selected: " + self.tty)
+            sys.exit(-1)
+
+    def popMemoryQueue(self):
+        if len(self.memoryQueue) == 0:
+            return None
+        else:
+            return self.memoryQueue.pop(0)
+
+    def lenMemoryQueue(self):
+        return len(self.memoryQueue)

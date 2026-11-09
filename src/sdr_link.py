@@ -47,13 +47,15 @@ from rigctl_sdr import RigctlSDR, VFO_AB
 from rest_sdr import RestSDR
 from sdr_programs import (profile_for, CW_EITHER, FILTER, VOLUME, MUTE, SQUELCH, SIGNAL,
                           AGC, NR, NOTCH, NB, CW_PEAK, SQUELCH_SWITCH, RF_GAIN,
-                          BANDWIDTH, DECODER, RIT)
+                          BANDWIDTH, DECODER, RIT, SPLIT)
 
 # FIX: how long a RIT change asked of the rig because the SDR changed waits
 # for the rig to confirm it. Past this the rig is taken as having said no, and
 # the SDR is put back to the rig's RIT -- the rig leads. The rig answers in well
 # under a second; this only stops a lost report from leaving the two apart.
 RIT_CONFIRM_SECONDS = 3.0
+# FIX (2026-11-10): the same wait for a split asked of the rig from the SDR.
+SPLIT_CONFIRM_SECONDS = 3.0
 
 # A mode asked of the rig because the SDR changed is PENDING until the rig
 # reports it. Meanwhile the rig's older mode is not pushed back to the SDR:
@@ -127,6 +129,8 @@ class SDR_Link:
         self._sent_rit = None
         self._rit_asked = None
         self._rit_rx_asked = None
+        self._sent_split = None         # FIX (2026-11-10): see _follow_split
+        self._split_asked = None
         # FIX: a QSY made in the SDR with RIT on, waiting for the rig to
         # leave RIT -- see _from_sdr_frequency.
         self._qsy = None
@@ -246,6 +250,8 @@ class SDR_Link:
         self._sent_rit = None
         self._rit_asked = None
         self._rit_rx_asked = None
+        self._sent_split = None         # FIX (2026-11-10): see _follow_split
+        self._split_asked = None
         self._qsy = None
         self._rig_mode_asked = None     # see RIG_MODE_PENDING_SECONDS
         self._rig_mode_asked_at = 0.0
@@ -324,6 +330,8 @@ class SDR_Link:
         self._sent_rit = None
         self._rit_asked = None
         self._rit_rx_asked = None
+        self._sent_split = None         # FIX (2026-11-10): see _follow_split
+        self._split_asked = None
         self._qsy = None
         self._rig_mode_asked = None     # see RIG_MODE_PENDING_SECONDS
         self._rig_mode_asked_at = 0.0
@@ -633,6 +641,7 @@ class SDR_Link:
                 self.controller.set_frequency(hz - self._model.rit_offset)
 
         self._follow_rit()
+        self._follow_split()            # FIX (2026-11-10)
 
         rig_mode = self._model.mode_of(self._model.rx_vfo)
         if self._rig_mode_asked is not None:
@@ -857,6 +866,7 @@ class SDR_Link:
         if offset != self._sent_rit:
             self._sent_rit = offset
             self.controller.set_rit(offset)
+            self._rit_sent_at = monotonic()     # FIX (2026-11-10): see _from_sdr_rit
 
     def _from_sdr_rit(self, offset):
         """
@@ -870,7 +880,14 @@ class SDR_Link:
         offset = int(offset)
         # FIX (2026-11-08): not just after a VFO switch -- the SDR's RIT is
         # still its old VFO's (VFO_RIT_QUIET_SECONDS). The rig's is sent back.
-        if monotonic() - getattr(self, "_vfo_switch_at", -1e9) < VFO_RIT_QUIET_SECONDS:
+        # FIX (2026-11-10): ...UNTIL THE SDR HAS BEEN GIVEN THE RIG'S RIT. Once
+        # it has, since the switch, the SDR's old VFO's value is gone (and a
+        # late read of it is _stale in the transport), so a change now is the
+        # operator's. Held for the whole window, RIT off pressed in Brown just
+        # after a switch was undone (Mark, E: "turn off RIT on Brown ignored").
+        switched = getattr(self, "_vfo_switch_at", -1e9)
+        if (monotonic() - switched < VFO_RIT_QUIET_SECONDS
+                and getattr(self, "_rit_sent_at", -1e9) <= switched):
             self._sent_rit = None
             return
         want_on = offset != 0
@@ -997,9 +1014,50 @@ class SDR_Link:
             return
         self._rig.exchange_vfos()
 
-    def _from_sdr_split(self, *args):
-        # Not acted on yet: the rig leads split as it leads RIT.
-        pass
+    # ------------------------------------------------------------------
+    # FIX (2026-11-10): SPLIT, both ways (Mark, E/B1). It was not followed at
+    # all: Brown's Split did nothing on the rig, and the rig's never reached
+    # Brown. The rig leads, as for RIT: a change made in the SDR is asked of
+    # the rig, and the SDR follows the rig's report.
+    # ------------------------------------------------------------------
+    def _follow_split(self):
+        """Gives the SDR the rig's split, if it has changed."""
+        if SPLIT not in self.capabilities:
+            return
+        m = self._model
+        asked = self._split_asked
+        if asked is not None:
+            want, at = asked
+            if bool(m.split) == want:
+                self._split_asked = None
+                self._sent_split = want           # the SDR is there already
+                return
+            if monotonic() - at <= SPLIT_CONFIRM_SECONDS:
+                return                            # the model is the rig's old state
+            print(f"[sdr] the rig did not confirm split "
+                  f"{'on' if want else 'off'} -- following the rig")
+            self._split_asked = None
+            self._sent_split = None
+        if bool(m.split) != self._sent_split:
+            self._sent_split = bool(m.split)
+            self.controller.set_split(bool(m.split))
+
+    def _from_sdr_split(self, on, *args):
+        """Split turned on or off in the SDR. Asked of the rig, which leads."""
+        m = self._model
+        on = bool(on)
+        if self._split_asked is not None and self._split_asked[0] == on:
+            return
+        if on == bool(m.split):
+            self._sent_split = on
+            return
+        if m.transmitting or m.locked:
+            print("[sdr] split changed in the SDR -- not now; the SDR is put back")
+            self._sent_split = None
+            self.follow()
+            return
+        self._split_asked = (on, monotonic())
+        self._rig.Toggle_Split()
 
     # ------------------------------------------------------------------
     # Audio

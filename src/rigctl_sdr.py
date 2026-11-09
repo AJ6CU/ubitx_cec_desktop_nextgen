@@ -729,6 +729,21 @@ class RigctlSDR:
             return True
         return False
 
+    def set_split(self, on):
+        """
+        FIX (2026-11-10): split on or off in the SDR -- "S 1 VFOx", transmit on
+        the VFO not receiving. Recorded like any setting, so the poll does not
+        report it back as a change made in the SDR.
+        """
+        if SPLIT not in self.capabilities:
+            return False
+        tx = "VFOA" if self.active_vfo == "b" else "VFOB"
+        if self._command(f"S {1 if on else 0} {tx}"):
+            self.split, self.split_vfo = bool(on), tx
+            self._set("split", bool(on))
+            return True
+        return False
+
     def set_mode(self, sdr_mode, width=0):
         """
         Sets the mode, with a filter width where the SDR accepts one.
@@ -1126,6 +1141,7 @@ class RigctlSDR:
             # what "f" reads; reported first, the link knows the new frequency
             # is the other VFO's, not a QSY on this one.
             holding = False
+            switched = False
             if VFO_AB in self.capabilities:
                 reply = self._client.query("v")
                 named = _vfo_letter(reply.values[0]) if reply.ok and reply.values else None
@@ -1145,14 +1161,24 @@ class RigctlSDR:
                         holding = True
                 elif named != self.active_vfo:
                     self.active_vfo = named
+                    # FIX (2026-11-10): A SWITCH IS NOT AN EXCHANGE. Read under
+                    # the new VFO's name, the active frequency is the old
+                    # other one and the other the old active -- exactly what
+                    # the exchange check below looks for -- so every A/B made
+                    # in Brown was also reported as A<->B, and the rig
+                    # exchanged (Mark, E/A3: A got B's frequency, RIT lost).
+                    # The two remembered values change places with the names.
+                    if self.other_vfo_hz:
+                        self.frequency, self.other_vfo_hz = self.other_vfo_hz, self.frequency
+                    switched = True
                     self._call(self.on_vfo, named)
             # FIX (2026-11-08): AN EXCHANGE IN THE SDR. Brown's A<->B swaps
             # the two VFOs' contents, leaving the same one active -- seen
             # alone, the active frequency moving looks like a retune. So the
             # other VFO is read too: both now holding each other's old
             # frequency is an exchange, reported as one.
-            if (VFO_AB in self.capabilities and not holding and self.active_vfo
-                    and self.other_vfo_hz):
+            if (VFO_AB in self.capabilities and not holding and not switched
+                    and self.active_vfo and self.other_vfo_hz):
                 other = "b" if self.active_vfo == "a" else "a"
                 o_reply = self._client.query(f"f VFO{other.upper()}")
                 a_reply = self._client.query(f"f VFO{self.active_vfo.upper()}")
@@ -1237,8 +1263,15 @@ class RigctlSDR:
                         and not self._stale("bandwidth", int(span))):
                     self._take_span(int(span))
 
-            if SPLIT in self.capabilities and not hopping:
-                pass
+            # FIX (2026-11-10): SPLIT TURNED ON OR OFF IN THE SDR is reported
+            # (Mark, E/B1: Brown's Split was not seen). Brown's "s" answers
+            # Split and the TX VFO; the TX VFO is always the other one there.
+            if SPLIT in self.capabilities and not hopping and not holding:
+                status, tx_vfo = _split_and_vfo(self._client.query("s", lines=2))
+                if (status is not None and not self._stale("split", status)
+                        and status != self.split):
+                    self.split, self.split_vfo = status, tx_vfo
+                    self._call(self.on_split, status)
 
 
             if RF_GAIN in self.capabilities and not hopping:
