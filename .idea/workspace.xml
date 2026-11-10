@@ -5,17 +5,7 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="ffee8cb6-f9f7-4a7a-aac5-5c8718d71e6d" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/tests/test_sdr_rit_tuning.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_sdrangel_version.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/docs/OPEN_ITEMS.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/OPEN_ITEMS.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/docs/TODO.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/TODO.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/rest_sdr.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/rest_sdr.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/sdr_controls.json" beforeDir="false" afterPath="$PROJECT_DIR$/src/sdr_controls.json" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/sdr_controls.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/sdr_controls.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/sdr_link.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/sdr_link.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/test_att_ifs.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_att_ifs.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/test_logbook.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_logbook.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.gitignore" beforeDir="false" afterPath="$PROJECT_DIR$/.gitignore" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
