@@ -50,6 +50,8 @@ import atexit
 import json
 import os
 import webbrowser                      # FIX (2026-11-10): the Help button
+from datetime import datetime, timezone   # FIX (2026-11-10): Log QSO, UTC
+import logbook                         # FIX (2026-11-10): Log QSO writes
 import signal
 import random
 import serial
@@ -2390,6 +2392,10 @@ class UbitxCecDesktop(sCTk):
         # Log QSO at the end of the row: what you do when a contact ends.
         log = sCTkButtonPrimary(self.offset_row, text="Log QSO", height=26, command=self._log_qso)
         log.grid(row=0, column=4, columnspan=2, padx=(10, 2), pady=2, sticky="ew")
+        # FIX (2026-11-10): greyed while logging is off in Setup (Mark).
+        self.log_qso_button = log
+        HoverNote(log, "Logs this contact to the logbook set in Setup > Logbook. "
+                       "Greyed while logging is off there.")
 
         for column, (label, khz) in enumerate(SPLIT_OFFSETS):
             btn = sCTkButtonSecondary(
@@ -4248,6 +4254,20 @@ class UbitxCecDesktop(sCTk):
 
     def _save_logbook_switch(self):
         gv.config.set_Logbook_Switch("True" if self.logbook_switch.get() else "False")
+        self._show_log_button()                 # FIX (2026-11-10)
+
+    def _logging_on(self):
+        """FIX (2026-11-10): the Logbook switch in Setup, as saved."""
+        try:
+            return str(gv.config.get_Logbook_Switch()).lower() == "true"
+        except AttributeError:
+            return False
+
+    def _show_log_button(self):
+        """FIX (2026-11-10): Log QSO live only while logging is on."""
+        button = getattr(self, "log_qso_button", None)
+        if button is not None:
+            button.configure(state="normal" if self._logging_on() else "disabled")
 
     def _save_logbook_backup(self):
         try:
@@ -5828,43 +5848,74 @@ class UbitxCecDesktop(sCTk):
         """
         The log dialog: everything known is filled in, and the only field
         needing typing has the focus.
+
+        FIX (2026-11-10): IT WRITES. The Log button only closed the dialog --
+        nothing reached the logbook (Mark). Now the QSO goes to the file
+        Setup > Logbook names (logbook.append_qso: ADIF or CSV, the old
+        application's format, duplicates refused, backed up per the interval),
+        and the dialog says what happened. Every field is editable -- a QSO is
+        often logged a little after it ends -- and the time is UTC, as logs
+        are kept. Only while logging is on: the button is greyed otherwise.
         """
+        if not self._logging_on():
+            return
         win = sCTkToplevel(self)
         win.title("Log QSO")
-        self._over_app(win, 340, 300)
+        self._over_app(win, 360, 400)
         win.transient(self)
 
         body = sCTkFrame(win, fg_color="transparent", border_width=0)
         body.pack(fill="both", expand=True, padx=16, pady=14)
 
-        sCTkLabelSecondary(body, text="Callsign").pack(anchor="w")
-        call = sCTkEntryPrimary(body, width=200)
-        call.pack(anchor="w", pady=(2, 10))
-        call.focus_set()
-
         s = self.model
-        known = (
-            ("Frequency", f"{s.frequency(s.tx_vfo) / 1_000_000:.6f} MHz"),
-            ("Band", s.band_name()),
-            # ("Band", BANDS[s.band_index][0]),
-            ("Mode", s.mode),
-            ("RST sent", "599"),
-            ("RST received", "599"),
+        now = datetime.now(timezone.utc)
+        cw = str(s.mode).upper().startswith("CW")
+        fields = (
+            ("call", "Callsign", ""),
+            ("freq", "Frequency (MHz)", f"{s.frequency(s.tx_vfo) / 1_000_000:.6f}"),
+            ("band", "Band", logbook.adif_band(s.band_name(s.tx_vfo))),
+            ("mode", "Mode", logbook.adif_mode(s.mode)),
+            ("qso_date", "Date (UTC, YYYYMMDD)", now.strftime("%Y%m%d")),
+            ("time_on", "Time (UTC, HHMM)", now.strftime("%H%M")),
+            ("rst_sent", "RST sent", "599" if cw else "59"),
+            ("rst_rcvd", "RST received", "599" if cw else "59"),
         )
-        for label, value in known:
+        entries = {}
+        for key, label, value in fields:
             line = sCTkFrame(body, fg_color="transparent", border_width=0)
-            line.pack(anchor="w", pady=1)
-            sCTkLabelTertiary(line, text=label, width=110).pack(side="left")
-            sCTkLabelSecondary(line, text=value).pack(side="left")
+            line.pack(fill="x", pady=2)
+            sCTkLabelTertiary(line, text=label, width=150, anchor="w").pack(side="left")
+            entry = sCTkEntryPrimary(line, width=150)
+            entry.pack(side="left")
+            entry.insert(0, value)
+            entries[key] = entry
+        entries["call"].focus_set()
+
+        status = sCTkLabelTertiary(body, text=" ", wraplength=320, justify="left")
+        status.pack(anchor="w", pady=(8, 0))
+
+        def log(_event=None):
+            qso = {key: entry.get().strip() for key, entry in entries.items()}
+            path = self._logbook_path()
+            try:
+                minutes = float(gv.config.get_Logbook_Backup_Interval() or 0)
+            except (AttributeError, TypeError, ValueError):
+                minutes = 0
+            ok, message = logbook.append_qso(path, qso, minutes)
+            print(f"[log] {message} ({path})")
+            if ok:
+                win.destroy()
+            else:
+                status.configure(text=message)
 
         row = sCTkFrame(body, fg_color="transparent", border_width=0)
-        row.pack(anchor="w", pady=(14, 0))
-        sCTkButtonPrimary(row, text="Log", width=80,
-                          command=win.destroy).pack(side="left", padx=(0, 6))
+        row.pack(anchor="w", pady=(10, 0))
+        sCTkButtonPrimary(row, text="Log", width=80, command=log).pack(side="left", padx=(0, 6))
         sCTkButtonSecondary(row, text="Cancel", width=80,
                             command=win.destroy).pack(side="left")
 
-        win.bind("<Return>", lambda e: win.destroy())
+        win.bind("<Return>", log)
+        win.bind("<Escape>", lambda e: win.destroy())
 
     # -- redraw -----------------------------------------------------------
     def refresh(self):
@@ -5896,6 +5947,7 @@ class UbitxCecDesktop(sCTk):
         self.panel_rx.update_view(s)
         self.panel_tx.update_view(s)
         self._show_lock()
+        self._show_log_button()  # FIX (2026-11-10): greyed while logging is off
         self._show_cw()          # FIX (2026-11-06): the keyer, as reported
         self._show_front_end()   # FIX (2026-11-10): ATT and IFS, as reported
         self._show_callsign()    # FIX (2026-11-06): the rig's callsign

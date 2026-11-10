@@ -396,7 +396,8 @@ rig and SDR++. Still to do, roughly in order of value:
   * **"Copy VFO A to B on split" is a SETTING, not the rig's** -- it belongs
     with the configuration, not on this tab's rig controls.
 * **The RX tab** -- ATT (`vf_`) and IFS (`ci_`, `vi_`). BUILT 2026-11-10
-  (att_ifs_none.zip), NOT YET TRIED AT THE STATION. A switch and a slider
+  (att_ifs_none.zip). ATT AND IFS CONFIRMED at the station 2026-11-10 (Mark);
+  "-none-" not yet reported. A switch and a slider
   each, KD8CEC menu limits (ATT 0-250 in 5s, 0 = off; IFS -20000..20000 Hz
   in 50s); live only listening through the rig, rig connected, not locked --
   else greyed with a line saying why. The rig leads: the model changes on
@@ -418,6 +419,22 @@ rig and SDR++. Still to do, roughly in order of value:
   now, as split and RIT do (rig_states.zip, test_rig_states.py 6/6).
 * ~~The CW offset switch (`ch_`)~~ -- DROPPED 2026-09-27: not needed with
   receive and transmit shown side by side; each panel says what it is.
+* **HELP (Mark, 2026-11-10) -- BUILT (help_page.zip), to check.** A local page,
+  help/index.html beside the program, opened in the browser by the HELP
+  button (where "on top" was) -- no internet needed. Getting started (what
+  you need; installing KD8CEC 1.2, Nextion build, two routes; the USB-to-TTL
+  adapter -- PLACEHOLDER for photos and wiring, the firmware's pins noted
+  from source: adapter RX to D9, TX to D8, GND, no VCC -- to confirm; first
+  start; SDR setup per program), Operate, RX, Channels, CW, Setup, and when
+  things go wrong. Screenshots: placeholders that turn into the picture once
+  a file of that name is in help/images/ -- the list in help/SHOTLIST.md;
+  Mark takes them (no display here). "To fill in" boxes: hex file names and
+  the upload steps, ubitx.h and IDE screenshots, each SDR program's server
+  setting, an SDRangel guide. KEEP ON TOP moved to Setup > Station as a
+  switch, saved under "Preferences" and ON by default. test_help.py 3/3.
+* **TEST LOG QSO (Mark, 2026-11-10):** check the button still works after
+  the recent changes -- the dialog opens over the app, and a QSO is
+  written to the logbook file.
 * **Log QSO, the Setup tab, EEPROM backup and restore.** Setup's fields do
   not yet read or save the configuration -- including the MCU headroom, which
   the link hardcodes as 0.04 while the settings file holds its own value.
@@ -933,6 +950,17 @@ again. Same fault, same cure: it is the adapter.
 low during the boot burst, reboot the rig once more to get the burst again
 -- ties in with the item below.
 
+**UNRECOVERABLE START-UP, 2026-11-10 (Mark):** caught in an endless loop
+on "Tuning Preset 1". Not diagnosed: Mark will catch the console next time.
+Two readings: (1) the rig flooding unasked (the adapter's symptom above --
+`Tuning Preset 1:` and vs/vy/ve/cn over and over, READER_REPEAT_WARNING's
+line); (2) the app resending -- but Set_Tuning_Preset goes only at connect and
+in restart_rig, which runs at most RIG_REPORT_RETRIES (2) times, so that would
+be a bug. PLAN if (1): when the repeat warning fires, restart the rig (not
+while transmitting), at most twice, then tell the operator to power-cycle or
+unplug the adapter -- instead of scrolling forever. Ask: was the adapter
+plugged in, and what cleared it.
+
 **Ask the rig for values that have not arrived.** *Done 2026-11-06; the late-answer fix confirmed at the station.*
 
 `_read_all_values()` is GONE -- 101 lines that blocked, counted to 26, timed
@@ -1402,8 +1430,22 @@ Five PRs prepared 2026-09-28/29 (sdroxide_prs_bundle.zip, with instructions):
    9199f8a2; src/sprintflst.c "%.0f " each) -- and corrects "ascending":
    Hamlib only requires the list to end with 0, the rigs list narrowest
    first; TODO.md's line carries "[#641](...) · rigctl: list the spans...".
-   Reply posted (REPLY.md). Waiting on the merge.
-   PR 2 NEXT: the waterfall refit -- OPTION A (Mark, 2026-11-10): interface
+   Reply posted (REPLY.md). MERGED 2026-11-10. Next: Mark checks whether
+   it is in the overnight build; once in a release, remove MAX_SPAN_HZ and
+   the trim-on-refusal from rigctl_sdr.py.
+   PR 2 OPENED 2026-11-11: #666, "Refit the view when the span is changed
+   from outside" -- option A below, as built: spectrum::refit_on_outside_
+   span_change (decimation changed on the same device, not the value this
+   screen's DEC chip asked for -- decim_asked), checked first in
+   recenter_if_tuned_away; 3 tests + a ctr_zoom_sim case (Sim::dev_span).
+   ALSO carries #641's review points: the maintainer merged #641's FIRST
+   commit (90e783a), before the amended push, so the Hamlib citation and the
+   TODO number were not in main. Checked on the Mac: the 4 new tests,
+   ctr_zoom_sim 11/11, rigctld 58, red check, and at the station (wider,
+   narrower, Brown's DEC chip keeps the zoom, CTR keeps the line in the
+   middle; narrowing past the dial recentres -- Brown's own, expected).
+   NOTE: brown's tree is LF now (aa485d0c6) -- plain git am again.
+   Was: PR 2 NEXT: the waterfall refit -- OPTION A (Mark, 2026-11-10): interface
    only, no wire change -- brown's window refits to the whole new span when
    the decimation changes and that window did not ask for it (rigctl,
    another client); its own DEC chip keeps the zoom as today. Beside
