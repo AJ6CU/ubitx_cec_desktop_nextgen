@@ -5,18 +5,17 @@ The short list. Detail for each is in TODO.md.
 ## The app
 
 - **Power/SWR meter:** waits for the future Pico board's sensor (the switch and factors are in Machine settings, greyed).
-- **S-meter calibration:** set the SDR's S9 point from a known signal, and the radio S-meter sensor's eight levels from the SDR's reading (today the levels are typed in EEPROM settings).
+- **S-meter scale (s_meter_scale.zip):** a 0-200 % factor in Setup > SDR settings (100 = as before), to check at the station.
 - **SDR "-none-" choice:** built, to check at the station.
 - **Help page:** built (help_page.zip): getting started, firmware, the four tabs and Setup. Needs your screenshots and photos (help/SHOTLIST.md), the USB-TTL wiring, and the "To fill in" parts. "Keep on top" is now in Setup > Station.
-- **Log QSO:** test the button still works, and check what Setup and Log QSO still don't read or save. The Appearance choice on Station is still a placeholder.
+- **Log QSO:** now writes the logbook and is greyed while logging is off (log_qso.zip), to check at the station.
+- **Appearance (appearance.zip):** Dark / Light / Follow system in Setup > Station, Follow system by default -- to check: switch each, and the Mac's own dark/light switch with Follow system.
 - **Startup flood (2026-11-10):** an unrecoverable start-up, looping on "Tuning Preset 1". Mark to catch the console next time. If it is the rig flooding (as with the USB-TTL adapter): restart the rig once when the repeat warning fires, a second time at most, then say to power-cycle or unplug the adapter.
 - **Startup:** watch the "skipped bytes" at startup -- the hex lines will show if reports run together.
 - **The SDR connection can stall the window** for half a second when the SDR stops answering. A thread would fix it.
-- **SDRangel VFO B (later):** needs new REST code -- a second channel kept on the rig's other VFO.
 - **SDRoxide vs. SDRoxide Brown on the Mac:** they have the same app name, so the app can start or attach to the wrong one. Pick one of the three options in TODO.
 - **Frequency calibration:** a WWV routine in the app (master cal from a zero-beat); later, measuring the TX carrier through Brown's TCI IQ.
 - **TX offset:** key-down lands ~950 Hz above the dial in USB -- tone or calibration? Check master cal.
-- **Test upkeep:** the lock test's stand-in lacks `toggle_rit_for_operator` (8/10); one stale case in test_cw_values.py (the restart offer).
 - **Low priority:**
   - `socket://` doesn't take an IPv6 address;
   - there's no way to give a command line for rigctld;
@@ -34,12 +33,13 @@ The short list. Detail for each is in TODO.md.
 - **Brown #641 in a release:** then drop the 20 MHz span guess in the app.
 - **brown SUB over rigctl:** a second receiver for split listening. Ask in an issue first.
 - **Upstream SDRoxide:** port APF and the span.
-- **SDRangel bugs:** remove our workarounds as each gets fixed.
+- **SDRangel:** report the frozen `channelPowerDB` in the WDSP receiver's report (34.89 dB whatever the signal, 8.1.0).
 
 ## Needs an antenna
 
 - **CW pitch:** check it's heard at the right pitch through SDRangel.
 - **WDSP receiver:** go through its checks on the station.
+- **SDRangel 8.1.0 (sdrangel_version.zip):** check the console says "SDRangel 8.1.0"; USB/LSB/CW from the rig; dragging the filter in SDRangel's WDSP window moves the rig; optional: the SSB demodulator's NR scheme knob turns (only when it is the only demodulator -- the app prefers WDSP). Then remove the temporary SSB demodulator and save.
 
 ## Library and Designer
 

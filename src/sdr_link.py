@@ -151,6 +151,9 @@ class SDR_Link:
         # times a second where the SDR reports one. The interface redraws the
         # meter alone, not the whole window.
         self.on_signal = None
+        # FIX (2026-11-10): THE OPERATOR'S S-METER SCALE, 1.0 as it was --
+        # set by the window from Setup > SDR settings (0-200 %). See s_units.
+        self.s_meter_scale = 1.0
         # Asked before closing or forcing another program -- see
         # _close_for_switch. Each is called with the program's name and
         # answers True to go ahead. Nothing here opens a window: this link
@@ -635,10 +638,11 @@ class SDR_Link:
             band = self._framing_for(hz)
             if band is not None:
                 # FIX: less the RIT offset here too -- the SDR is sent the base
-                # either way. (0 for anything without RIT.)
-                self.controller.set_frequency(hz - self._model.rit_offset, band=band)
+                # either way. FIX (2026-11-11): only an SDR with RIT -- see
+                # _sdr_tuning().
+                self.controller.set_frequency(self._sdr_tuning(hz), band=band)
             else:
-                self.controller.set_frequency(hz - self._model.rit_offset)
+                self.controller.set_frequency(self._sdr_tuning(hz))
 
         self._follow_rit()
         self._follow_split()            # FIX (2026-11-10)
@@ -827,6 +831,22 @@ class SDR_Link:
     # off -- and stays in step, because receive and transmit are the same
     # frequency either way.
     # ------------------------------------------------------------------
+    def _sdr_tuning(self, hz):
+        """
+        FIX (2026-11-11): where the SDR is tuned for the rig receiving at hz.
+
+        An SDR with RIT of its own (Brown, over rigctl's J) is sent the BASE
+        and the offset separately -- see _follow_rit. Any other -- SDRangel,
+        SDR++, Gqrx -- is sent where the rig is actually listening, base PLUS
+        offset, or it would sit on the base while the rig hears the offset.
+        Found reading the code for SDRangel's VFO work (2026-11-11): since
+        RIT went to Brown, the others were sent the base, on the belief that
+        rit_offset is 0 for them -- it is the RIG's offset, whatever the SDR.
+        """
+        if RIT in self.capabilities:
+            return hz - self._model.rit_offset
+        return hz
+
     def _follow_rit(self):
         """Gives the SDR the rig's RIT offset, if it has changed."""
         if RIT not in self.capabilities:
@@ -1469,9 +1489,9 @@ class SDR_Link:
             if hz:
                 self._sent_hz = hz
                 band = self._band_of(hz)
-                # FIX: less the RIT offset, as in follow() -- the SDR is sent
-                # the base. (0 for anything without RIT.)
-                base = hz - self._model.rit_offset
+                # FIX: less the RIT offset, as in follow() -- only for an SDR
+                # with RIT of its own; see _sdr_tuning().
+                base = self._sdr_tuning(hz)
                 if band is not None:
                     self.controller.set_frequency(base, band=band)
                 else:
@@ -1752,8 +1772,13 @@ class SDR_Link:
             return None
         over = level if self._signal_over_s9 else level - self.S9_DBFS
         if over <= 0:
-            return max(0.0, 9.0 + over / self.DB_PER_S_UNIT)
-        return 9.0 + over
+            value = max(0.0, 9.0 + over / self.DB_PER_S_UNIT)
+        else:
+            value = 9.0 + over
+        # FIX (2026-11-10): times the operator's scale (Mark: "a factor
+        # 0-200% that the user enters manually to set S9. Let them worry about
+        # the source"). A known S9 reading S7 at 100 % wants about 129 %.
+        return value * getattr(self, "s_meter_scale", 1.0)
 
     def _signal_changed(self):
         if callable(self.on_signal):

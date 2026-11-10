@@ -21,8 +21,8 @@ refuses to connect and says what to add.
 
 THE S-METER comes from a Channel Power channel in the same device set, kept
 on the passband, where there is one; else the demodulator's own report --
-never the WDSP receiver's, which crashes SDRangel (REPORT_UNSAFE); else
-none. See discover() and _sync_meter().
+never the WDSP receiver's, which crashed SDRangel before 8.x and reads a
+frozen number since (REPORT_UNSAFE); else none. See discover() and _sync_meter().
 
 TUNING IS A PAIR. What is heard is the device's centre frequency plus the
 channel's offset from it. A move that stays well inside the sampled band
@@ -154,9 +154,16 @@ SPAN_BASE_BY_CHANNEL = {"SSBDemod": 48000, "WDSPRx": 48000}
 #     receiver used the new one. The passband last written rides along with
 #     each one, so the window stays true.
 # Changes made at SDRangel's own filter knobs cannot be seen, for the same
-# reason. Worth reporting to SDRangel; if a later build fixes it, this set
-# can be emptied.
+# reason.
+#
+# FIX (2026-11-11): FIXED IN SDRANGEL 8.x (its commit a0918b57 maps
+# rfBandwidth to the WDSP receiver's high cut). Checked by hand on 8.1.0 at
+# the station: LSB written as two PATCHes read back -3000 / -600, and USB
+# back again. So the workaround applies only to an SDRangel OLDER than
+# PASSBAND_FIXED_IN -- or one whose version cannot be read, the safe side.
+# 8.1.0 is the build tested; 8.0.0 may well be fixed too, untested.
 STALE_PASSBAND_CHANNELS = {"WDSPRx"}
+PASSBAND_FIXED_IN = (8, 1, 0)
 
 # THE DEMODULATOR'S DSP FUNCTIONS, PER CHANNEL TYPE, and each device's RF
 # gain: read from sdr_controls.json (see sdr_controls.py) -- which settings
@@ -168,8 +175,9 @@ STALE_PASSBAND_CHANNELS = {"WDSPRx"}
 # edge by its `store` and `load`.
 #
 # Facts behind the entries, kept here where the code that relies on them is:
-# SSBDemod's dnrScheme is accepted over REST and not applied (read-only --
-# see the notes); its alpha is 1 - 10^(-n/10), the 0.2056717... captured
+# SSBDemod's dnrScheme was accepted over REST and not applied before 8.x --
+# applied on 8.1.0, checked at the station 2026-11-11 (its "read_only_before"
+# in the file); its alpha is 1 - 10^(-n/10), the 0.2056717... captured
 # being exactly n = 1. WDSPRx: PATCH applies to every field, confirmed on the
 # station; agcSlope is stored in TENTHS (dial 10 read back 100); numbering
 # by the dialogs' order, 0 Long and 3 Fast, NR2 1, AM 1 and FM 2 confirmed.
@@ -193,6 +201,12 @@ METER_CHANNEL = "ChannelPower"
 # writes into the SSB demodulator's report object, never created for it: a
 # null pointer, and SDRangel crashes (seen on the station, 2026-09-27; the
 # cause read in its source -- see the notes).
+#
+# FIX (2026-11-11), NOT VERSION-GATED ON PURPOSE: SDRangel 8.x (commit
+# cf483c06) fills a WDSPRxReport of its own and no longer crashes -- but its
+# channelPowerDB is FROZEN, 34.89 dB on noise and on a signal alike, while
+# a Channel Power channel beside it read -64 and -60 (station, 8.1.0). So
+# still never read as the S-meter: on 8.x it is safe and useless.
 REPORT_UNSAFE = {"WDSPRx"}
 
 # SDRangel's Morse decoder, a FEATURE rather than a channel -- see
@@ -268,6 +282,9 @@ class RestClient:
     def __init__(self, reply_timeout=REPLY_TIMEOUT):
         self._base = None
         self.reply_timeout = reply_timeout
+        # FIX: what GET /sdrangel answered at open() -- its "version" says
+        # which of SDRangel's REST bugs this build has. None until open.
+        self.info = None
         # NO PROXY. urllib otherwise uses any proxy set in the environment,
         # and a request for 127.0.0.1 sent to a proxy fails in ways that
         # look nothing like "SDRangel is not running".
@@ -280,8 +297,11 @@ class RestClient:
     def open(self, host, port):
         """Whether SDRangel answers at this address."""
         self._base = f"http://{host}:{int(port)}/sdrangel"
+        self.info = None
         try:
-            if isinstance(self.get(""), dict):
+            reply = self.get("")
+            if isinstance(reply, dict):
+                self.info = reply       # FIX: kept, for its version
                 return True
         except ConnectionLost:
             pass
@@ -439,6 +459,9 @@ class RestSDR:
         self.profile = profile
         self._client = RestClient()
         self._poll_id = None
+        # FIX: SDRangel's version, (8, 1, 0), read at connect -- see
+        # _fixed(). None: not read, and every workaround applies.
+        self.sdrangel_version = None
 
         self.capabilities = frozenset()
         self.frequency = None
@@ -562,6 +585,13 @@ class RestSDR:
         self.last_failure = "unreachable"
         if not self._client.open(host, port):
             return False
+        # FIX (2026-11-11): which SDRangel this is, so the workarounds for
+        # bugs it no longer has are left off -- see _fixed().
+        text = (self._client.info or {}).get("version")
+        self.sdrangel_version = sdr_controls.parse_version(text)
+        print(f"[sdr] SDRangel {text or '(version not given)'}"
+              + ("" if self._stale_passband_possible() else
+                 "; its WDSP passband is read and written as SDRangel's own"))
         # FIX: forgotten, so discovery reads it afresh -- see discover().
         self.frequency = None
         self._wanted = None
@@ -1062,6 +1092,38 @@ class RestSDR:
         self._sync_meter()
         return self.frequency == hz
 
+    def _fixed(self, since):
+        """
+        FIX (2026-11-11): whether this SDRangel is at least `since`, a
+        version tuple -- so a bug fixed there needs no workaround. An
+        unknown version is taken as OLD: the workarounds are harmless on a
+        fixed build, and needed on an old one.
+        """
+        return self.sdrangel_version is not None and self.sdrangel_version >= since
+
+    def _stale_passband_possible(self):
+        """Whether this SDRangel has the WDSP write-only passband at all."""
+        return not self._fixed(PASSBAND_FIXED_IN)
+
+    @property
+    def _stale_passband(self):
+        """
+        FIX: whether the channel driven has a write-only passband -- see
+        STALE_PASSBAND_CHANNELS: the WDSP receiver, on an SDRangel before
+        PASSBAND_FIXED_IN.
+        """
+        return (self._channel_type in STALE_PASSBAND_CHANNELS
+                and self._stale_passband_possible())
+
+    def _read_only(self, spec):
+        """
+        FIX: whether an adjustment can only be shown -- always, or on an
+        SDRangel older than its "read_only_before" (the SSB demodulator's NR
+        scheme, applied over REST from 8.1.0).
+        """
+        before = spec.get("read_only_before")
+        return bool(spec["read_only"] or (before and not self._fixed(before)))
+
     def _patch_offset(self, offset):
         return self._patch_channel({"inputFrequencyOffset": int(offset)})
 
@@ -1071,7 +1133,7 @@ class RestSDR:
         last written riding along, for a channel whose stored passband is
         stale (see STALE_PASSBAND_CHANNELS).
         """
-        if (self._channel_type in STALE_PASSBAND_CHANNELS
+        if (self._stale_passband        # FIX: version-gated
                 and self._written_passband is not None
                 and "rfBandwidth" not in fields and "lowCutoff" not in fields):
             rf, lc = self._written_passband
@@ -1239,7 +1301,7 @@ class RestSDR:
         low, high = self._passband_for(mode, width)
         sideband = "L" if mode in ("LSB", "CWL") else "U"
         sign = -1 if sideband == "L" else 1
-        stale = self._channel_type in STALE_PASSBAND_CHANNELS
+        stale = self._stale_passband     # FIX: version-gated
         through_zero = tries > 0 or (self._sideband is not None
                                      and sideband != self._sideband)
         try:
@@ -1445,7 +1507,7 @@ class RestSDR:
             return {}
         held = self.dsp_settings.get(function, {})
         return {name: setting["default"] for name, setting in spec["settings"].items()
-                if setting["default"] is not None and not setting["read_only"]
+                if setting["default"] is not None and not self._read_only(setting)
                 and name in held}
 
     def reset_dsp(self, function):
@@ -1479,7 +1541,7 @@ class RestSDR:
     def dsp_adjustable(self, function, name):
         """Whether an adjustment can be set from here, or is only shown."""
         spec = self._dsp_setting_spec(function, name)
-        return bool(spec) and not spec["read_only"]
+        return bool(spec) and not self._read_only(spec)
 
     def dsp_setting_text(self, function, name, value):
         """An adjustment as the SDR's own dial shows it: "128 ms", "Medium"."""
@@ -1497,7 +1559,7 @@ class RestSDR:
     def set_dsp_setting(self, function, name, value):
         """Sets one adjustment, within its range, in dial units."""
         spec = self._dsp_setting_spec(function, name)
-        if spec is None or spec["read_only"]:
+        if spec is None or self._read_only(spec):   # FIX: version-gated
             return False
         if name not in self.dsp_settings.get(function, {}):
             return False
@@ -1689,7 +1751,7 @@ class RestSDR:
         # across zero is a change of sideband -- CWU to CWL if in CW, USB to
         # LSB otherwise -- and any other move is a new width.
         # Not where the read-back is stale -- see STALE_PASSBAND_CHANNELS.
-        if MODE in self.capabilities and self._channel_type not in STALE_PASSBAND_CHANNELS:
+        if MODE in self.capabilities and not self._stale_passband:   # FIX: version-gated
             rf, lc = settings.get("rfBandwidth"), settings.get("lowCutoff")
             if isinstance(rf, (int, float)) and isinstance(lc, (int, float)):
                 if isinstance(settings.get("spanLog2"), (int, float)):

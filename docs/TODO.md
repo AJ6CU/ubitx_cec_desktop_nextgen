@@ -305,11 +305,26 @@ rig and SDR++. Still to do, roughly in order of value:
   The SDR's S-meter is scaled in the app (sdr_link: S9_DBFS -44 dBFS, 6 dB
   per S-unit -- a guess from the noise floor) unless the SDR reports
   relative to S9 itself (SDRoxide's STRENGTH); the rig's levels calibrate
-  only the rig's A7 meter. To do: an S-meter calibration that sets S9_DBFS
-  from a known signal, and the rig's levels from the SDR's reading. Not done: a live A7
+  only the rig's A7 meter. DONE 2026-11-10 (s_meter_scale.zip), Mark's
+  way: no calibration routine -- an S-METER SCALE, 0-200 %, in Setup > SDR
+  settings, saved under Preferences ("s_meter_scale_pct"), 100 % being the
+  -44 dBFS / 6 dB-per-S as before. SDR_Link.s_units() is multiplied by it
+  (so the scanner's hold-on-signal threshold moves with it too). The
+  operator finds S9 with whatever source they trust: S9 reading S7 wants
+  9/7, ~129 %. test smscale/test_s_meter_scale.py 5/5 (2/5 on the old
+  files). The rig's eight levels from the SDR's reading -- DROPPED (Mark,
+  2026-11-10): the two are not connected; the eight levels serve only the
+  rig's own S-meter sensor, which is not used while the SDR is enabled. Not done: a live A7
   reading to calibrate against (the firmware's ADC command loops until the
   next command, and its `vn` reports collide with the write acknowledgement);
-  the Appearance choice on Station is still a placeholder.
+  the Appearance choice on Station -- DONE 2026-11-10 (appearance.zip):
+  Dark / Light / Follow system, saved under Preferences ("appearance"),
+  Follow system by default (Mark), applied before the window is built and
+  live from Setup. sCTk carries light and dark colours itself; CustomTkinter
+  switches them. Follow system: macOS and Windows 10/11 follow the OS
+  setting live; on Linux it depends on the desktop (GNOME-style settings
+  are read; where nothing can be read, CustomTkinter shows Light -- choose
+  Dark there). test appear/test_appearance.py 4/4 (0/4 on the old file).
 * **Machine and general settings dialogs (Mark, 2026-11-06).** The S-meter
   calibration (sMeterLevels) and many other machine and general settings
   need dialogs to set them -- they are in the original Main branch, to be
@@ -411,8 +426,8 @@ rig and SDR++. Still to do, roughly in order of value:
   the default; with it Connect, Start it, address and port are greyed
   (_show_sdr_fields), and choosing it applies at once -- an SDR in use let
   go, listening switched to the rig. test_att_ifs.py 8/8 (0/8 on the old
-  files). NOTE: test_cw_values.py has one stale case (the restart offer),
-  failing on the files before this change too -- the test, not the app.
+  files). (test_cw_values.py's stale case: passes 18/18 as of 2026-11-10.
+  The lock test's stand-in got `toggle_rit_for_operator`: 10/10.)
 * ~~Lock, mute and TX-stop are handled as toggles.~~ DONE 2026-11-06: all
   three report their STATE, checked on the rig -- lock 1/0, TX off 1/0,
   speaker 1 in SDR mode (muted) and 0 in speaker mode. The handlers read it
@@ -432,9 +447,17 @@ rig and SDR++. Still to do, roughly in order of value:
   the upload steps, ubitx.h and IDE screenshots, each SDR program's server
   setting, an SDRangel guide. KEEP ON TOP moved to Setup > Station as a
   switch, saved under "Preferences" and ON by default. test_help.py 3/3.
-* **TEST LOG QSO (Mark, 2026-11-10):** check the button still works after
-  the recent changes -- the dialog opens over the app, and a QSO is
-  written to the logbook file.
+* **LOG QSO WROTE NOTHING -- FIXED 2026-11-11 (log_qso.zip), to check.**
+  The new window's dialog was a mock-up: Log only closed it (Mark:
+  ~/uBITX_Logbook.adi never changed). New logbook.py -- the old app's
+  QSOLogger without its hidden tk.Tk() and message boxes: ADIF or CSV, the
+  same nine fields and ADIF header (an existing logbook carries on),
+  duplicates (call, date, time, band) refused, a timestamped backup at most
+  once per interval. The dialog: every field editable (call, frequency,
+  band, mode as ADIF -- CW/SSB --, date and time in UTC, RSTs 599/59),
+  Return logs, Escape cancels, the reason shown if refused. Log QSO is
+  GREYED while Setup's Logbook switch is off (Mark), with a hover saying
+  so. test_logbook.py 9/9 (0/9 on the old files).
 * **Log QSO, the Setup tab, EEPROM backup and restore.** Setup's fields do
   not yet read or save the configuration -- including the MCU headroom, which
   the link hardcodes as 0.04 while the settings file holds its own value.
@@ -560,9 +583,10 @@ each tested against a running SDRangel before the next. Findings are in
    flywheel knob), threshold (`agcPowerThreshold` -119..0 dB), gate
    (`agcThresholdGate` 0-500).
    NR (`dnr`): scheme (`dnrScheme`: 0 Average, 1 Avg Std Dev, 2 Peaks --
-   confirmed) is READ-ONLY -- accepted over REST and not applied, an
-   SDRangel bug (see the notes and sdrangel_dnrScheme_report.txt); chosen in
-   SDRangel's NR dialog, and followed. The middle knob is the scheme's own
+   confirmed) is READ-ONLY before SDRangel 8.1.0 -- accepted over REST and
+   not applied, an SDRangel bug (see the notes and
+   sdrangel_dnrScheme_report.txt); chosen in SDRangel's NR dialog, and
+   followed. Settable from 8.1.0 (2026-11-11, see "Waiting on SDRangel"). The middle knob is the scheme's own
    setting: `dnrAboveAvgFactor` 20-99, `dnrSigmaFactor` 2-16, `dnrNbPeaks`
    1-40. Alpha dial 0-40, stored as 1 - 10^(-n/10) (0 = no smoothing).
    No notch, squelch, NB or CW peak: those lamps are greyed under it.
@@ -595,8 +619,8 @@ each tested against a running SDRangel before the next. Findings are in
    and entries in DSP_FUNCTIONS -- so the application drives whichever of
    the two SDRangel has. Notch and SQL then work under WDSP.
    *WARNING:* `GET .../channel/N/report` on a WDSPRx channel CRASHES
-   SDRangel -- a null pointer in its report code (see the notes; to report
-   upstream). Never read it. The S-meter comes instead from a Channel Power
+   SDRangel before 8.x -- a null pointer in its report code (see the notes);
+   on 8.1.0 it answers but its power is frozen at 34.89 dB. Never read it. The S-meter comes instead from a Channel Power
    channel in the same device set, kept on the WDSP passband -- confirmed
    on the station to report channelPowerDB safely.
    *Decided:* prefer WDSP when SDRangel has it, the SSB demodulator
@@ -1674,7 +1698,7 @@ Five PRs prepared 2026-09-28/29 (sdroxide_prs_bundle.zip, with instructions):
    just after a VFO switch was ignored -- the quiet window ends once the rig's
    RIT has been given the SDR. RX/TX shown as blue badges, VFO in capitals.
    Tests: test_rit_vfo 21/21, test_exchange 8/8, test_vfo_sync 18/18.
-   The D5 "fix only if seen" item is DONE. Left: the lock test's stand-in.
+   The D5 "fix only if seen" item is DONE. The lock test's stand-in fixed 2026-11-10 (10/10).
    Noted: TX lands ~950 Hz above the dial in USB -- check whether it is the
    audio tone or calibration (master cal).
    FREQUENCY CALIBRATION (Mark, 2026-11-10). FIRST CHOICE: a routine in the
@@ -1699,7 +1723,19 @@ Five PRs prepared 2026-09-28/29 (sdroxide_prs_bundle.zip, with instructions):
    2026-11-08 with Brown's pre-release, and APF (#491) works in it. Still to watch: finding the
    started process to close it later, and the quit, go by the profile's app
    name -- with Brown and SDRoxide sharing one, see the app-name item.
-   *SDRangel, for later (Mark, 2026-11-06):* SDRangel has no VFO A/B -- the
+   *RIT on SDRs without RIT -- FIXED 2026-11-11 (sdr_rit_tuning.zip):*
+   since RIT went to Brown (sent the base, with J for the offset), SDRangel,
+   SDR++ and Gqrx were ALSO sent the base -- the code took `rit_offset` to be
+   0 for them, but it is the rig's -- so with the rig's RIT on they sat on
+   the base while the rig listened at the offset. Now `SDR_Link._sdr_tuning`
+   subtracts the offset only for an SDR with RIT; the others get where the
+   rig listens. Found reading the code; CONFIRMED with SDRangel at the
+   station 2026-11-10 (RIT tuned, SDRangel followed; RIT off, back).
+   test sdrrit/test_sdr_rit_tuning.py 4/4 (2/4 on the old file); RIT/VFO
+   suites still green. *To check:* SDRangel, RIT on at the rig, tune RIT --
+   SDRangel's channel moves with it; RIT off -- back to the dial.
+   *SDRangel VFO B -- DROPPED (Mark, 2026-11-10: too complicated).* Kept for
+   the record: SDRangel has no VFO A/B -- the
    REST transport keeps its one channel on the rig's receive frequency. To
    show VFO B there would need new REST code in rest_sdr.py: a second
    channel (a demodulator, or a marker) created in the device set and kept
@@ -1865,35 +1901,47 @@ upstream's. Checked in the source only, not yet against the two programs.
    muted. (The code path was right all along: discover reads `u MUTE` and the
    connect redraw shows it.)
 
-### Waiting on SDRangel -- workarounds to remove when fixed
+### Waiting on SDRangel -- workarounds, now version-gated
 
-Checked against 7.27.2-1315-gc43757c88, the latest build as of 2026-09-27.
-After each SDRangel update, run the check; when it passes, remove the
-workaround.
+First checked against 7.27.2-1315-gc43757c88 (2026-09-27). Re-checked on
+**SDRangel 8.1.0, 2026-11-11**, at the station, by curl with the app closed.
+The app now reads SDRangel's version at connect (`GET /sdrangel`, said in
+the console: "[sdr] SDRangel 8.1.0; its WDSP passband is read and written as
+SDRangel's own") and leaves off the workarounds a build no longer needs. An
+unreadable version counts as old, so every workaround stays on. Done in
+sdrangel_version.zip (rest_sdr.py, sdr_controls.py, sdr_controls.json;
+test sdrver/test_sdrangel_version.py 8/8, five fail without the change).
+8.1.0 is the build tested; 8.0.0 may well have the same fixes but is
+untested, so the gate is 8.1.0. Lower it only after checking an 8.0.0.
 
-- WDSP RECEIVER'S PASSBAND IS WRITE-ONLY over REST
-  (sdrangel_wdsp_cutoff_report.txt; notes: "WDSP receiver: the passband is
-  write-only"). *Check, app closed:* PATCH `{"rfBandwidth":-3000}` alone to
-  the WDSP channel, then GET -- fixed when it reads back -3000 and
-  SDRangel's window shows LSB. Also drag the far cut in the window and GET
-  -- fixed when the GET follows. *Then remove:* empty
-  `rest_sdr.STALE_PASSBAND_CHANNELS` (one line). That restores the
-  read-back check, following SDRangel's own filter knobs, and separate
-  PATCHes without the passband riding along. Run the USB/LSB/CW switches
-  again afterwards.
-- SSB DEMODULATOR'S dnrScheme IGNORED over REST
-  (sdrangel_dnrScheme_report.txt). *Check:* PATCH `{"dnrScheme":2}`, GET
-  -- fixed when it reads 2. *Then remove:* the scheme's `"read_only": true` in
-  `sdr_controls.json` (sdrangel / SSBDemod / nr), so the NR pop-up's scheme
-  knob turns.
-- WDSP RECEIVER'S REPORT CRASHES SDRangel (notes; not yet reported --
-  report text still to write). *Check:* ONLY with nothing unsaved in
-  SDRangel -- GET .../channel/1/report on the WDSP channel. Fixed when it
-  answers. *Then:* remove "WDSPRx" from `rest_sdr.REPORT_UNSAFE`, and the
-  S-meter no longer needs a Channel Power channel under WDSP.
+- ~~WDSP RECEIVER'S PASSBAND IS WRITE-ONLY over REST~~ FIXED in 8.1.0
+  (SDRangel commit a0918b57 maps rfBandwidth to the WDSP high cut). Checked:
+  `rfBandwidth -3000` then `lowCutoff -600` read back -3000 / -600 and the
+  window showed LSB; back to USB read 3000 / 0. *Done:* `rest_sdr.
+  PASSBAND_FIXED_IN = (8, 1, 0)`; `_stale_passband` is true only for a WDSPRx
+  on an older SDRangel. On 8.1.0: separate PATCHes, the read-back check, and
+  following SDRangel's own filter knobs again. *To check at the station:*
+  USB/LSB/CW switches from the rig, and dragging the filter in SDRangel's
+  WDSP window moves the rig's mode/width.
+- ~~SSB DEMODULATOR'S dnrScheme IGNORED over REST~~ FIXED in 8.1.0: PATCH
+  `{"dnrScheme":2}` read back 2. *Done:* `"read_only": true` replaced by
+  `"read_only_before": "8.1.0"` in sdr_controls.json (a new key, parsed by
+  `sdr_controls.parse_version`), so the NR pop-up's scheme knob turns on
+  8.1.0 and stays shown-only on 7.x. *To check:* turn the scheme knob in the
+  app with the SSB demodulator, and SDRangel's NR dialog follows.
+- WDSP RECEIVER'S REPORT: NO LONGER CRASHES in 8.1.0 (commit cf483c06 fills a
+  WDSPRxReport), BUT ITS channelPowerDB IS FROZEN -- 34.891578674316406 on
+  noise and on a signal, while a Channel Power channel beside it read -64
+  and -60. (Read in its source: `CalcDb::dbPower` of WDSP's
+  `getMeter(RXA_S_AV)`, a constant ~3084.) So `REPORT_UNSAFE` keeps
+  "WDSPRx" on every version -- safe now, but useless -- and the S-meter
+  under WDSP still needs a Channel Power channel. *To report upstream:* a
+  short issue, frozen channelPowerDB in WDSPRxReport (draft offered).
 - NR DIALOG LEAVES THE SSB DEMODULATOR'S WINDOW IGNORING CLICKS
   (sdrangel_nr_dialog_click_report.txt). Nothing in the app to remove;
-  listed so the report is followed up.
+  not re-checked on 8.1.0 (optional).
+- *Station setup after the 8.1.0 checks:* remove the temporary SSB
+  demodulator; keep WDSPRx as channel 0 and one Channel Power; save.
 
 ### Much later
 

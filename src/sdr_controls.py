@@ -73,6 +73,24 @@ TEXTS = {
 }
 
 
+def parse_version(text):
+    """
+    FIX (2026-11-11): a version as a tuple to compare -- "8.1.0" (8, 1, 0),
+    "7.27.2-1315" (7, 27, 2), the build number dropped -- or None.
+    """
+    parts = []
+    for piece in str(text or "").strip().lstrip("vV").split("-")[0].split("."):
+        digits = ""
+        for ch in piece:
+            if not ch.isdigit():
+                break
+            digits += ch
+        if not digits:
+            break
+        parts.append(int(digits))
+    return tuple(parts) if parts else None
+
+
 def _complain(where, what, why):
     print(f"[sdr] {where}: {what} {why} -- left out")
 
@@ -105,6 +123,15 @@ def _setting(entry, where, what):
         _complain(where, what, f"has default {default!r}, not a number from "
                                f"{entry['low']} to {entry['high']}")
         return None
+    # FIX (2026-11-11): read-only only on an SDR older than this version --
+    # a setting its REST once took and ignored, fixed in a later release.
+    before = entry.get("read_only_before")
+    if before is not None:
+        before = parse_version(before)
+        if before is None:
+            _complain(where, what, f"has read_only_before "
+                                   f"{entry.get('read_only_before')!r}, not a version")
+            return None
     labels = tuple(entry["labels"]) if entry.get("labels") else None
     short = tuple(entry["short"]) if entry.get("short") else labels
     store, load = CONVERSIONS[convert]
@@ -113,6 +140,7 @@ def _setting(entry, where, what):
             "unit": entry.get("unit", ""), "labels": labels, "short": short,
             "store": store, "load": load,
             "read_only": bool(entry.get("read_only", False)),
+            "read_only_before": before,
             "default": default,
             "text": TEXTS[text] if text else None}
 

@@ -1021,6 +1021,9 @@ class UbitxCecDesktop(sCTk):
         # that is how globalvars has always published it, and the controller
         # expects it there.
         gv.config = ConfigurationManager(self)
+        # FIX (2026-11-10): THE SAVED APPEARANCE, before anything is built, so
+        # the window is drawn once in it -- see _set_appearance.
+        self._set_appearance(self._appearance_saved(), save=False)
 
         # The channel sets, owned here -- see channel_sets.py. The Channels
         # tab edits them and the scanner will read them; nothing else keeps a
@@ -2049,6 +2052,63 @@ class UbitxCecDesktop(sCTk):
         except AttributeError:
             return True
 
+    # FIX (2026-11-10): THE SDR S-METER'S SCALE, in percent, 100 as it was --
+    # Setup > SDR settings. Saved with the preferences. See SDR_Link.s_units.
+    S_METER_SCALE_RANGE = (0, 200)
+
+    def _s_meter_scale_saved(self):
+        try:
+            value = int(gv.config.config_data.get(self.PREFERENCES_KEY, {})
+                        .get("s_meter_scale_pct", 100))
+        except (AttributeError, TypeError, ValueError):
+            return 100
+        low, high = self.S_METER_SCALE_RANGE
+        return max(low, min(high, value))
+
+    def _set_s_meter_scale(self, percent, save=True):
+        """Applies the S-meter scale to the SDR's readings; saved unless only applying."""
+        low, high = self.S_METER_SCALE_RANGE
+        percent = max(low, min(high, int(percent)))
+        self.sdr.s_meter_scale = percent / 100.0
+        if not save:
+            return
+        try:
+            gv.config.config_data.setdefault(self.PREFERENCES_KEY, {})["s_meter_scale_pct"] = percent
+            gv.config.saveConfig()
+        except AttributeError:
+            pass
+
+    # FIX (2026-11-10): APPEARANCE -- Setup's Station group, saved, "Follow
+    # system" by default (Mark). The library's widgets carry light and dark
+    # colours and CustomTkinter switches them; "Follow system" is its
+    # "system", which follows the OS's own setting as it changes.
+    APPEARANCES = {"Dark": "dark", "Light": "light", "Follow system": "system"}
+    APPEARANCE_DEFAULT = "Follow system"
+
+    def _appearance_saved(self):
+        try:
+            choice = (gv.config.config_data.get(self.PREFERENCES_KEY, {})
+                      .get("appearance", self.APPEARANCE_DEFAULT))
+        except AttributeError:
+            return self.APPEARANCE_DEFAULT
+        return choice if choice in self.APPEARANCES else self.APPEARANCE_DEFAULT
+
+    def _set_appearance(self, choice, save=True):
+        """Dark, Light or Follow system; saved unless only applying it."""
+        if choice not in self.APPEARANCES:
+            choice = self.APPEARANCE_DEFAULT
+        try:
+            ctk.set_appearance_mode(self.APPEARANCES[choice])
+        except Exception as err:
+            print(f"[setup] appearance {choice!r} not applied: {err}")
+        if not save:
+            return
+        try:
+            gv.config.config_data.setdefault(self.PREFERENCES_KEY, {})["appearance"] = choice
+            gv.config.saveConfig()
+        except AttributeError:
+            pass
+
     def _set_keep_on_top(self, wanted, save=True):
         """On top of other windows, or not; saved unless only applying it."""
         wanted = bool(wanted)
@@ -2438,6 +2498,7 @@ class UbitxCecDesktop(sCTk):
             command=self._open_help)
         self.help_button.pack(side="right", padx=8)
         self._set_keep_on_top(self._keep_on_top_saved(), save=False)
+        self._set_s_meter_scale(self._s_meter_scale_saved(), save=False)   # FIX (2026-11-10)
 
         # Pop-ups left pinned last time, back where they were.
         self.after(800, self._restore_pinned_aids)
@@ -3942,7 +4003,7 @@ class UbitxCecDesktop(sCTk):
         groups = (
             ("Station", (
                 ("Callsign", "entry", self.model.callsign),
-                ("Appearance", "choice", ["Dark", "Light", "Follow system"]),
+                ("Appearance", "appearance", list(self.APPEARANCES)),   # FIX (2026-11-10)
                 ("Keep on top", "keep_on_top", None),     # FIX (2026-11-10)
             )),
         )
@@ -3997,6 +4058,14 @@ class UbitxCecDesktop(sCTk):
                         self._callsign_shown = None
                 elif kind == "choice":
                     sCTkComboBox(line, values=value, width=150, height=SETTINGS_CONTROL_HEIGHT).pack(side="left")
+                elif kind == "appearance":
+                    # FIX (2026-11-10): was a placeholder choice, wired to nothing.
+                    self.appearance_choice = sCTkComboBox(
+                        line, values=value, width=150, height=SETTINGS_CONTROL_HEIGHT,
+                        state="readonly",
+                        command=lambda choice: self._set_appearance(choice))
+                    self.appearance_choice.pack(side="left")
+                    self.appearance_choice.set(self._appearance_saved())
                 elif kind == "keep_on_top":
                     # FIX (2026-11-10): was the "on top" button on Operate.
                     self.keep_on_top_switch = sCTkSwitch(
@@ -4546,7 +4615,7 @@ class UbitxCecDesktop(sCTk):
         """
         win = sCTkToplevel(self)
         win.title("SDR settings")
-        self._over_app(win, 470, 440)
+        self._over_app(win, 470, 540)   # FIX: taller, for the S-meter scale
         win.transient(self)
 
         body = sCTkFrame(win, fg_color="transparent", border_width=0)
@@ -4569,6 +4638,22 @@ class UbitxCecDesktop(sCTk):
             field.insert(0, str(value))
             sCTkLabelTertiary(line, text="Hz").pack(side="left", padx=6)
             fields[label] = field
+
+        # FIX (2026-11-10): THE S-METER'S SCALE (Mark). The SDR's S-units
+        # times this; the operator finds S9 with whatever source they trust.
+        sCTkLabelPrimary(body, text="S-meter scale").pack(anchor="w", pady=(16, 0))
+        sCTkLabelTertiary(
+            body,
+            text="The SDR's S-meter reading times this, 0 to 200 %. 100 % "
+                 "leaves it as it is. Tune a signal you know is S9: if it "
+                 "reads S7, set 9 / 7, about 129 %.",
+            wraplength=400, justify="left").pack(anchor="w", pady=(2, 6))
+        scale_row = sCTkFrame(body, fg_color="transparent", border_width=0)
+        scale_row.pack(anchor="w")
+        scale_field = sCTkEntryPrimary(scale_row, width=90, height=SETTINGS_CONTROL_HEIGHT)
+        scale_field.pack(side="left")
+        scale_field.insert(0, str(self._s_meter_scale_saved()))
+        sCTkLabelTertiary(scale_row, text="%").pack(side="left", padx=6)
 
         # WHERE THE PROGRAM IS, for an install this does not know about. Empty
         # means the usual places for that program on this platform, which are
@@ -4616,6 +4701,10 @@ class UbitxCecDesktop(sCTk):
                 except ValueError:
                     pass
             gv.config.set_sdr_path(path_field.get())
+            try:
+                self._set_s_meter_scale(float(scale_field.get()))   # FIX (2026-11-10)
+            except ValueError:
+                pass
             self._show_sdr_path()
             win.destroy()
 
