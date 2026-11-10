@@ -209,6 +209,22 @@ def _split_and_vfo(reply):
     return (None if status is None else bool(status)), vfo
 
 
+def _spectrum_spans(reply):
+    """
+    FIX (2026-11-10): the spans in a \\dump_caps reply's "Spectrum spans:"
+    line, narrowest first -- Hamlib prints them so, each as "%.0f ". None
+    when there is no such line (an SDR that does not list them).
+    """
+    if not reply or not reply.values:
+        return None
+    for line in reply.values:
+        if line.strip().lower().startswith("spectrum spans:"):
+            spans = sorted({int(n) for n in (_number(w) for w in line.split(":", 1)[1].split())
+                            if n is not None and n > 0})
+            return spans or None
+    return None
+
+
 def _offset_hz(reply):
     """
     The RIT offset in a "j" reply, in whole Hz; None if it could not be read.
@@ -285,6 +301,7 @@ class RigctlSDR:
         # asked for, until its read-back settles.
         self.bandwidth = None
         self._span_min = self._span_max = None
+        self._span_list = None          # FIX (2026-11-10): see discover
         self._span_asked = None
         self.on_split = None
         self.on_vfo = None           # FIX (2026-11-06): "a"/"b" chosen in the SDR
@@ -476,6 +493,14 @@ class RigctlSDR:
             if span is not None and span > 0:
                 self.bandwidth = int(span)
                 caps.add(BANDWIDTH)
+                # FIX (2026-11-10): THE SPANS THE SDR CAN GIVE, where it lists
+                # them -- Hamlib's "Spectrum spans:" line in \dump_caps
+                # (SDRoxide Brown, brown-spectrum-spans). Then the slider
+                # offers exactly those, and the guesses below (MAX_SPAN_HZ,
+                # trimming on a refused width) are not needed. Asked in the
+                # extended form, which ends with RPRT, so an SDR without the
+                # line costs no wait.
+                self._span_list = _spectrum_spans(client.query("+\\dump_caps", lines=20))
 
         # FIX (2026-11-06): discover VFO A/B -- see VFO_AB.
         self.active_vfo = None
@@ -659,6 +684,8 @@ class RigctlSDR:
         """
         if BANDWIDTH not in self.capabilities or not self._span_base:
             return []
+        if getattr(self, "_span_list", None):          # FIX (2026-11-10)
+            return list(self._span_list)
         low = max(MIN_SPAN_HZ, self._span_min or 0)
         high = min(MAX_SPAN_HZ, self._span_max or MAX_SPAN_HZ)
         widths = set()

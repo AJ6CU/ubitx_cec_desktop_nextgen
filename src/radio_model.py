@@ -176,6 +176,14 @@ class RadioModel:
         self.cw_pending = {}
         self.cw_write_failed = None    # the setting whose write went unconfirmed
 
+        # FIX (2026-11-10): THE RIG'S OWN FRONT END -- KD8CEC's ATT and IF
+        # shift, as the rig reports them (vf_, ci_, vi_). Reported only when
+        # not 0, so 0 / off is the default. ATT is the first IF's shift in
+        # 100 Hz units, 0-250 (0 = off); IFS moves the BFO, -20000..20000 Hz.
+        self.att_level = 0
+        self.ifs_on = False
+        self.ifs_hz = 0
+
         # FIX (2026-11-06): the radio's stored settings that it does not
         # report -- calibration, BFOs and the factory copies -- read from
         # EEPROM for backup (ubitx_link.read_settings). {name: value}; a name

@@ -122,6 +122,20 @@ operator's guide when it is written, collected here as they come up:
   EEPROM settings if listening through the radio's sensor; the SDR's meter
   is scaled in the app instead. The sensor is used only when listening
   through the radio -- never through an SDR, even one without a reading.
+* *RIT and VFO A/B*: the rig has one RIT and switching VFOs turns it off;
+  the app puts it back, with its offset, when you return to that VFO.
+* *RIT and split*: in split RIT applies to the receive VFO and is kept by
+  the app (the firmware's would ignore split on transmit); transmit stays on
+  the other VFO. Turning split off makes it the rig's own RIT. There is no
+  XIT.
+  A⇄B takes each VFO's RIT along with its frequency and mode.
+* *A/B, A⇄B, A→B*: A/B selects the other VFO; A⇄B exchanges the two VFOs'
+  frequency and mode; A→B copies A onto B. Brown's A<->B is an exchange too,
+  and the rig follows it.
+* *Starting on VFO A*: the app restarts the rig as it connects, and the
+  KD8CEC firmware always starts on VFO A (not saved in EEPROM) -- so the rig,
+  and an SDR with two VFOs, come up on A whatever they were on (Mark, 2026-11-08:
+  accepted as is).
 * *Settings that stay in SDRoxide's own window* -- the APF lift, the NR
   engine and the rest rigctl cannot reach; see the SDRoxide section below.
 
@@ -1339,6 +1353,39 @@ Five PRs prepared 2026-09-28/29 (sdroxide_prs_bundle.zip, with instructions):
    span change over rigctl resets the view to the whole new span, widening
    or narrowing, and the operator re-zooms; changes made in SDR Oxide itself
    unchanged. Offered a PR for either. Waiting.
+   2026-11-09: brown CLOSED #469 with no comment. CHECKED brown main
+   6c41fe8b (2026-11-08): neither follow-up is in -- no `spectrum_spans` in
+   any crate (no commit ever added it), and no commit refits the view on a
+   rigctl span change; #479 (the span itself) is all that landed. His own
+   TODO.md still lists #469 in its backlog. Mark asked him to confirm;
+   waiting on his answer. PLAN (Mark, 2026-11-09): next week, write the PRs ourselves --
+   `spectrum_spans` in `\dump_state` (its documented sentinel and order),
+   and the view refit on a rigctl span change (keep the `ctr_zoom_sim` tests
+   green and add the gesture) -- each its own PR, brown's house rules.
+   GO-AHEAD from the maintainer 2026-11-09 to make the PR(s); to do later.
+   PR 1 OPENED 2026-11-10: #641, "rigctl: list the spans SPECTRUM_SPAN can
+   give in \dump_caps" -- Hamlib's own "Spectrum spans:" line (narrowest
+   first, "%.0f " each) in \dump_caps, NOT \dump_state (the maintainer's
+   concern: netrigctl parses \dump_state line by line; it never sends
+   \dump_caps -- checked in Hamlib's source). Spans = device rate / each
+   power of two up to max_decimation; each one L SPECTRUM_SPAN sets exactly.
+   3 tests, 58 in sdroxide-rigctld; red check done; fmt clean for the crate
+   (brown main has unformatted files elsewhere -- use cargo fmt -p). Checked
+   on the station: \dump_caps lists 75000..2400000 at 2.4 MS/s; L 300000
+   then l reads 300000 once applied. NOTE: brown's rigctld files are CRLF --
+   apply our patches with `git am --keep-cr`. APP SIDE BUILT (rigctl_sdr.py):
+   at connect, where SPECTRUM_SPAN exists, "+\dump_caps" is asked (extended,
+   ends with RPRT -- no wait on an older brown); a "Spectrum spans:" line
+   makes the slider offer exactly those; without it, the old powers of two.
+   test_span.py 13/13. Works at the station with the PR build. When #641 is
+   merged and released: remove MAX_SPAN_HZ and the trim-on-refusal.
+   PR 2 NEXT: the waterfall refit -- OPTION A (Mark, 2026-11-10): interface
+   only, no wire change -- brown's window refits to the whole new span when
+   the decimation changes and that window did not ask for it (rigctl,
+   another client); its own DEC chip keeps the zoom as today. Beside
+   refit_on_window_growth in app/spectrum.rs; a ctr_zoom_sim case. Option B
+   (a RadioState field marking rigctl changes, PROTO_VERSION bump) rejected:
+   a wire change for what is basically one user.
    *App side when `spectrum_spans` lands:* read the spans from `\dump_state`
    at connect -- exact slider steps; remove MAX_SPAN_HZ and the 2 s pause
    at the top (SPAN_SETTLE_SECONDS' trim). None of our PRs added a
@@ -1401,6 +1448,196 @@ Five PRs prepared 2026-09-28/29 (sdroxide_prs_bundle.zip, with instructions):
    SPLIT lit) is display only, and open questions are whether it goes both
    ways and whether Brown draws a TX marker in split (its manual says only
    XIT does).
+   *VFO A/B DONE 2026-11-06 (vfo_sync.zip), to check at the station.* Over
+   rigctl, where the SDR has two VFOs (found at connect: "v" names one and
+   "f VFOB" answers -- SDRoxide, Brown; a program that then refuses V or
+   "F VFOB" drops back to one VFO): the SDR's ACTIVE VFO is the rig's
+   receive VFO, and its OTHER VFO holds the rig's other VFO's frequency
+   ("F VFOx hz", which Brown takes outside VFO mode) -- so in split the SDR's
+   other VFO is the TX frequency. A or B chosen IN THE SDR is asked of the
+   rig (toggle_vfo), the rig leading: the SDR's new reading is not taken for
+   a QSY, nothing is sent back while it waits, and if the rig has not
+   switched in VFO_CONFIRM_SECONDS (2 s) -- or is transmitting -- the SDR is
+   put back on the rig's VFO. The poll reads "v" before "f". Gqrx and SDR++
+   follow the rig's receive frequency on their one VFO, as before. Brown
+   keeps ONE mode for both VFOs (its get/set_mode ignore the VFO): on a
+   switch the rig's receive VFO's mode is sent, as always. Split itself
+   (SPLIT lit in the SDR, S/s) still deferred. test_vfo_sync.py 9/9 (0/9 on
+   the old files).
+   FIXED 2026-11-08 (vfo_hold.zip; Mark: A->B then quickly back to A, and
+   SDRoxide's late B -- with B's frequency -- was pushed onto the rig):
+   SDRoxide applies "V" late and its profile has no settle window, so its
+   late reading looked like the operator's. Now after the app switches the
+   SDR's VFO, "v" and "f" are not reported for VFO_SETTLE_SECONDS (3 s),
+   held by time alone (a matching read does not end it -- straight after
+   A->B->A the SDR still reading A is just the SDR not having moved yet).
+   When the hold ends, an SDR not on the VFO sent is sent it again rather
+   than taken as the operator's choice. A tune made in the SDR within those
+   3 s is reported once they are over. test_vfo_sync.py 12/12.
+   ROOT CAUSE FOUND 2026-11-08 (vfo_named.zip; Mark: SDRoxide "doesn't
+   switch back" and its B is forced onto the rig's VFO A): Brown parses a
+   bare "F hz" against the VFO its last PUBLISHED state calls active (proto.rs:
+   `vfo = st.active_vfo` from the snapshot), and "V" is applied later by the
+   engine -- so "V VFOB" then "F <B's frequency>" wrote B's frequency onto A.
+   Back on A, SDRoxide showed B's number, and after the hold it was reported
+   and pushed onto the rig. Now, with two VFOs, the active VFO's frequency is
+   always sent NAMED ("F VFOB hz"). test_vfo_sync.py 13/13; the old code
+   reproduces the overwrite. Worth telling Brown (an issue): a bare F right
+   after V lands on the previous VFO.
+   SPLIT TRANSMIT FIXED 2026-11-08 (vfo_split_tx.zip; Mark: in split,
+   SDRoxide switched to VFO B on transmit): KD8CEC's startTx makes the other
+   VFO active while transmitting in split and swaps back after (ubitx_20.ino),
+   reporting the swap BEFORE it reports TX. Now, with split on, a change of
+   the rig's VFO waits SPLIT_TX_GRACE_SECONDS (0.4 s) for a transmit to show,
+   and while transmitting in split nothing is sent -- the SDR stays on the
+   receive VFO and its frequency. A real A/B press in split goes through after
+   the grace. One-VFO SDRs keep the old behaviour (they follow receive, which
+   moves to the TX frequency during the swap) -- to look at if it matters.
+   test_vfo_sync.py 15/15. Split transmit CONFIRMED at the station 2026-11-08.
+   RIT KEPT ACROSS A VFO SWITCH (Mark, 2026-11-08; rit_per_vfo.zip): the
+   firmware has one RIT and its VFO switch turns it off (menuVfoToggle:
+   FrequencyToVFO, then ritDisable) -- the VFO left keeps base + offset and
+   the base is lost. The link now tells the two "RIT off"s apart (a VFO
+   already changed when cr_ 0 arrives = the switch did it), REMEMBERS the
+   base per VFO, and on coming back puts RIT back: the VFO to the base, RIT
+   on, receive back to base + offset, each step on the rig's report, given up
+   after 3 s. Not while transmitting, locked or in split; RIT the operator
+   turned off is not put back. FOUND ON THE WAY: _leave_rit ran on the
+   switch's "RIT off" and wrote the OLD VFO's base onto the NEW one (VFO B
+   jumped to A's base) -- the old code shows it in the test. test_rit_vfo.py
+   4/4 (0/4 on the old files). CONFIRMED at the station 2026-11-08 -- RIT comes back on
+   return, with SDRoxide's bracket.
+   TWO MORE (Mark, 2026-11-08; rit_both_vfos.zip): (1) a different RIT on
+   each VFO "lost all RIT" -- a restore cut short by switching again popped
+   the VFO's memory, and the restore's first step had already moved the VFO
+   to the base, so even kept the offset would read 0. Now each VFO keeps
+   (base, receive), and a restore cut short puts it back in memory.
+   (2) Switching in Brown kept one RIT for both VFOs: Brown has ONE RIT and
+   leaves it on across its VFO switch, and the link pushed that stale RIT at
+   the rig's new VFO. Now for VFO_RIT_QUIET_SECONDS (4 s) after the receive
+   VFO changes, from either side, a RIT seen in the SDR is not asked of the
+   rig; the SDR is given the rig's (that VFO's own, or none).
+   test_rit_vfo.py 6/6, test_vfo_sync.py 16/16. From the app: CONFIRMED.
+   From Brown, RIT still vanished (Mark): Brown's frequency moves several
+   times while the rig switches and puts that VFO's RIT back, reported late
+   -- taken as a tune, it was a QSY, and a QSY clears RIT. Now a frequency
+   from the SDR is not believed for the same VFO_RIT_QUIET_SECONDS after a
+   switch (rit_from_brown.zip). test_vfo_sync.py 17/17.
+   AND A FIRMWARE OVERWRITE (Mark: RIT on A, switch to B, B takes A's
+   frequency; rit_switch_fix.zip): menuVfoToggle selects the new VFO, then
+   ritDisable() calls setFrequency(ritTxFrequency) -- tuning the NEW VFO to
+   the OLD one's RIT base. cv arrives before the frequency reports, so the
+   link notes the new VFO's own frequency there (_rit_switch_to) and, once
+   cr_ 0 shows the switch cleared RIT, writes it back -- unless that VFO has
+   its own RIT to restore, which puts it right anyway. test_rit_vfo.py 6/6
+   (the old code shows B on A's base).
+   A/B, A⇄B, A→B -- THE USUAL MEANINGS (Mark, 2026-11-08: "our definition
+   is the wrong one"; vfo_exchange.zip). The app's "A⇄B" only SELECTED the
+   other VFO; elsewhere -- Brown's A<->B, most rigs -- it EXCHANGES contents.
+   Now three buttons: A/B selects (the old behaviour), A⇄B exchanges
+   frequency and mode (uBITX_Link.exchange_vfos: the other VFO written with
+   the active one's through the borrow, then the active one with the other's;
+   remembered RITs go with their contents), A→B copies. Not with RIT on (a
+   note under the buttons says to turn it off), transmitting or locked.
+   Brown's own A<->B is now SEEN as an exchange (the poll reads both VFOs:
+   each holding the other's old frequency) and done on the rig the same way,
+   in the RIT/frequency quiet window; with RIT on, transmitting or locked,
+   Brown is put back to the rig's VFOs instead. ALSO: notes cleared with
+   text="" never cleared -- sCTk labels ignore an empty string -- in the CW
+   tab, the callsign note, the scan note, the decoder note and the backup and
+   EEPROM dialogs' status lines; now a space. test_exchange.py 6/6 (1/6 on the
+   old files); test_cw_values.py updated for the space. A⇄B CONFIRMED at the station 2026-11-09 from the app and from
+   Brown.
+   RIT IN SPLIT, KEPT BY THE APP (Mark, 2026-11-09; rit_split.zip). In the
+   firmware RIT and split do not mix: startTx with RIT on sends on the RIT
+   base and never reaches the split swap -- split silently ignored on
+   transmit while the display says split. But in split the receive VFO's
+   frequency is never used to transmit, so the APP keeps RIT there
+   (model.rit_virtual): base remembered, the receive VFO really tuned to
+   base + offset, the firmware's RIT left off so transmit goes to the other
+   VFO; off -> the base written back. Out of split the firmware's RIT is
+   still needed: only it can change frequency at the instant of keying.
+   Hand-offs: split ON with the firmware's RIT on (it clears it without
+   retuning, cr_ 0 then cs_ 1 -- the link waits SPLIT_RIT_WAIT_MS to tell
+   that from the operator) -> carries on as the app's, receive unchanged;
+   split OFF with the app's -> the firmware's real RIT (VFO to base, RIT on,
+   receive back). The firmware's transmit swap in split leaves the app's RIT
+   with its VFO (rit_offset now uses rit_vfo); A/B in split keeps each VFO's.
+   RIT on the transmit VFO (XIT) is not offered -- the firmware has none.
+   The app's RIT button and the SDR's RIT both go through
+   toggle_rit_for_operator. test_rit_vfo.py 10/10 (the firmware stand-in now
+   does split and the transmit swap as ubitx_20.ino does). To watch: the RIT
+   lamp may flicker off for the length of each transmit in split (the swap
+   hides it, the return brings it back). EXCHANGE with RIT: refused while RIT is on (the
+   firmware's or the app's) -- the A⇄B note asks to turn it off; Brown's
+   swap is undone. Remembered RITs travel with their contents -- and, fixed
+   2026-11-09, the app's split ones too (rit_split_xchg.zip).
+   EXCHANGE WITH RIT ON (Mark, 2026-11-09; xchg_with_rit.zip): a RIT is part
+   of its VFO's contents and now goes with them. exchange_vfos takes the
+   active RIT off first -- the firmware's turned off (cr_ 0 marked as the
+   exchange's, so it is not "the operator leaving RIT"), the app's dropped --
+   carries base and receive frequency to the other VFO as a remembered RIT
+   (the app's kind in split, the rig's else), and if the arriving contents
+   bring a remembered RIT it is put back on the active VFO at the end.
+   Brown's A<->B with RIT on goes ahead too. test_rit_vfo.py 13/13;
+   test_exchange.py updated.
+   STATION TESTS A-D (Mark, 2026-11-09), four fixes, test_rit_vfo.py 19/19:
+   (1) a borrow's cv in split was taken by the app's-RIT branch, so A<->B
+   with the app's RIT was abandoned on the other VFO (+1800 shown) and
+   tuning the transmit VFO failed the same way -- the borrow is checked
+   first now. (2) D3b, RIT on both then split, A<->B: a RIT remembered as
+   the rig's kind becomes the app's, so it shows on the receive VFO at once.
+   (3) THE TRANSMIT SWAP IN SPLIT showed as A/B -- panels traded places for
+   the whole transmission (TX showed the receive VFO), the app's RIT jumped:
+   a cv in split is held SPLIT_TX_GRACE_MS (450) with the roles frozen; a
+   transmit makes it the swap, none makes it A/B. Confirmed at the station:
+   transmit on the right VFO, display steady. (4) Brown was sent RIT -1700
+   for a moment after an exchange -- the RIT now starts once the rig reports
+   the new frequency. DECIDED (Mark): in split a VFO transmits on its
+   contents, i.e. its receive frequency with any RIT offset, not its base.
+   Still open: RIT on both, split on, plain A/B to the other VFO -- its
+   rig-kind RIT shows only once split goes off (fix only if seen); the lock
+   test's stand-in lacks toggle_rit_for_operator (8/10, test not app).
+   2026-11-10, FULL RE-RUN A-F, app and Brown -- ALL PASS (Mark). Fixed on
+   the way: RIT off at +0 never repainted (_decide_rit_off now notifies);
+   D5 -- the other VFO's remembered RIT becomes the app's when split goes on;
+   Brown's A/B was also reported as A<->B (rigctl_sdr: the remembered pair
+   swaps with the names, no exchange check that poll); SPLIT NOW SYNCS BOTH
+   WAYS with Brown (rigctl "s"/"S", _follow_split/_from_sdr_split, rig
+   leads, SPLIT_CONFIRM_SECONDS 3, test_split_sync.py 6/6); RIT off in Brown
+   just after a VFO switch was ignored -- the quiet window ends once the rig's
+   RIT has been given the SDR. RX/TX shown as blue badges, VFO in capitals.
+   Tests: test_rit_vfo 21/21, test_exchange 8/8, test_vfo_sync 18/18.
+   The D5 "fix only if seen" item is DONE. Left: the lock test's stand-in.
+   Noted: TX lands ~950 Hz above the dial in USB -- check whether it is the
+   audio tone or calibration (master cal).
+   FREQUENCY CALIBRATION (Mark, 2026-11-10). FIRST CHOICE: a routine in the
+   app on WWV -- the rig's own receive on 10 MHz in CW through the rig's
+   speaker, tuned until the carrier sits at the CW tone (or matched to a
+   reference tone the app plays at the pitch); dial minus 10.000.000 is the
+   VFO error -> a suggested master cal, written with the backup dialog's
+   confirm-and-restart flow, then checked again (the cal's units are not
+   certain: measure, adjust, measure). Fixes TX too (same VFO). The SDR's
+   ppm the same way, clicking WWV's carrier in Brown. LATER OPTION: measure
+   the rig's CW carrier with the SDR -- rigctl cannot report where a signal
+   is (no Hamlib command; STRENGTH is only a level); Brown's TCI server can
+   stream IQ (iq_start), so a short FFT during key-down would find the
+   carrier to a few Hz. The SDR must be calibrated first (an RTL-SDR
+   without a TCXO can be tens of ppm off), and measure in CW, not USB.
+   *An .app as the SDR location (Mark, 2026-11-08; mac_app_path.zip):*
+   SDR settings' location naming /Applications/sdroxide-Brown.app failed
+   with "Permission denied" -- a bundle is a folder, and sdr_launcher ran it
+   as a program. Now an .app path on the Mac is opened with `open -a <path>`
+   (that copy, not another of the same name); other paths run as before.
+   test_mac_bundle.py 4/4 (2/4 on the old file). CONFIRMED at the station
+   2026-11-08 with Brown's pre-release, and APF (#491) works in it. Still to watch: finding the
+   started process to close it later, and the quit, go by the profile's app
+   name -- with Brown and SDRoxide sharing one, see the app-name item.
+   *SDRangel, for later (Mark, 2026-11-06):* SDRangel has no VFO A/B -- the
+   REST transport keeps its one channel on the rig's receive frequency. To
+   show VFO B there would need new REST code in rest_sdr.py: a second
+   channel (a demodulator, or a marker) created in the device set and kept
+   on the rig's other VFO -- muted unless chosen, and removed on disconnect.
    *RIT display:* Brown draws the RIT offset on its panadapter (a dashed dial
    line and a labelled bracket) whenever its RIT is on, which our `J` turns
    on. CONFIRMED 2026-11-06: it shows with RIT on at the rig.

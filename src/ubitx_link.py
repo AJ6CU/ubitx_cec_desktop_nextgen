@@ -140,6 +140,11 @@ MCU_COMMAND_HEADROOM_MAX = .2
 # going on caused it -- the firmware reports cr_ 0 just before cs_ 1.
 SPLIT_RIT_WAIT_MS = 300
 
+# FIX (2026-11-10): KD8CEC's limits for ATT and IFS, as its own menu sets them
+# (ubitx_menu.ino: ATT 0-250 in 5s, IFS -20000..20000 Hz in 50s).
+ATT_MAX, ATT_STEP = 250, 5
+IFS_MIN, IFS_MAX, IFS_STEP = -20000, 20000, 50
+
 # FIX (2026-11-09): THE FIRMWARE'S SWAP TO TRANSMIT IN SPLIT is not the
 # operator choosing a VFO. startTx makes the other VFO primary and reports cv
 # BEFORE ct 1, so the app took it as A/B: receive and transmit panels traded
@@ -1455,77 +1460,30 @@ class uBITX_Link:
 
 
         def vf_UX_ATT_Level(self, buffer):
-            value = int(self._extract_value(buffer, 10, len(buffer) - 3))
+            value = self._extract_value(buffer, 10, len(buffer) - 3)
             print("vf_UX_ATT_Level: ", value)
-
-            #
-            #   Zero Value indicated Radio turning off the ATT
-            #
-            # if (value == 0):
-            #     self.setATTScaleState('disabled')
-            #     self.ATT_Toggle_Button.configure(text="ATT OFF", style='Button2bRaised.TButton')
-            #     self.ATT_Button_On = False
-            # else:
-            #     self.setATTScaleState('normal')
-            #     self.ATT_Toggle_Button.configure(text="ATT ON", style='RedButton2bPressed.TButton')
-            #     self.ATT_Scale.set(value)
-            #     self.ATT_Button_On = True
-                # if self.ATT_Jogwheel.state == 'disabled':
-                #     self.ATT_Jogwheel.setStateNormal()
-                #     self.ATT_Status_VAR.set("ATT (ON)")
-                #     self.ATT_Button_On = True
-                #
-                # mjh normally ux should be set to the value ack-ed by mcu. Problem with this
-                # with jog wheels is that they jerk around too much because of all the callbacks
-                # This can also cause oscillation where are reported and stored in jogwheel
-                # much after and so when correcting generate more old traffic.
-                # On balance the chance of a lost packet is pretty low, so best option is to not
-                # repond to the ack-ed value from the MCU
-                #
-                # BUT...
-                # In Classic mode, still need to update the jogwheel...
-                #
-                # if self.classic_uBITX_ControlWindow != None:
-                #     self.ATT_Jogwheel.set(value)            # Set UX to value acked by MCU
+            # FIX (2026-11-10): STORED -- the RX tab's ATT shows the rig's.
+            # Reported only when it changes (KD8CEC idle_process), 0 = off.
+            try:
+                self._model.att_level = max(0, min(ATT_MAX, int(value)))
+            except ValueError:
+                pass
 
         def ci_UX_IFS_State_Set(self, buffer):
-            value = int(self._extract_value(buffer, 10, len(buffer) - 3))
+            value = self._extract_value(buffer, 10, len(buffer) - 3)
             print("ci_UX_IFS_State_Set: ", value)
-            # if (value == 0):  # Zero value indicates IFS being turned off
-            #     self.IFS_Jogwheel.setStateDisabled()
-            #     self.IFS_Status_VAR.set("IFS (OFF)")
-            #     self.IFS_Button_On = False
-            # else:
-            #     self.IFS_Jogwheel.setStateNormal()
-            #     self.IFS_Status_VAR.set("IFS (ON)")
-            #     self.IFS_Button_On = True
+            # FIX (2026-11-10): stored -- IF shift on or off (isIFShift).
+            self._model.ifs_on = str(value).strip() not in ("", "0")
 
-        def vi_UX_IFS_Level(self, buffer):  # verification by MCU of new value
-            value = int(self._extract_value(buffer, 10, len(buffer) - 3))
+        def vi_UX_IFS_Level(self, buffer):
+            value = self._extract_value(buffer, 10, len(buffer) - 3)
             print("vi_UX_IFS_Level: ", value)
-            # Note that if a "personalized" IF level is set in the EEPROM, then the radio comes
-            # Up with IFS enabled. If value here is 0, just disable the jogwheel
-            # if (value == 0):
-            #     self.IFS_Jogwheel.setStateDisabled()
-
-            # mjh normally ux should be set to the value ack-ed by mcu. Problem with this
-            # with jog wheels is that they jerk around too much because of all the callbacks
-            # This can also cause oscillation where are reported and stored in jogwheel
-            # much after and so when correcting generate more old traffic.
-            # On balance the chance of a lost packet is pretty low, so best option is to not
-            # repond to the ack-ed value from the MCU
-            #
-            # BUT.....
-            # Need to respond when in Classic UX Mode. Can use a check for null to figure out whether we update or not
-            #
-
-            # if self.classic_uBITX_ControlWindow != None:
-            #     self.IFS_Jogwheel.set(value)
-            #
-            # if self.IFS_On_Boot_Flag:  # A little hack. Generally will not respond to MCU IFS requests for efficiency
-            #     # On boot, the default setting is passed to the UX.
-            #     self.IFS_Jogwheel.set(value)
-            #     self.IFS_On_Boot_Flag = False
+            # FIX (2026-11-10): stored -- the IF shift in Hz, signed. A rig
+            # with a shift saved in EEPROM boots with IFS on and reports it.
+            try:
+                self._model.ifs_hz = int(value)
+            except ValueError:
+                pass
 
         def cx_UX_TX_Stop_Toggle(self, buffer):
             value = int(self._extract_value(buffer, 10, len(buffer) - 3))
@@ -3359,10 +3317,42 @@ class uBITX_Link:
 
     def Set_IFS_Level(self, level):
         print("setting IFS Level", level)
-        encodedBytes = self.Freq_Encode(str(level))
-
-        command = [self.toRadioCommandDict["TS_CMD_IFSVALUE"], encodedBytes[0], encodedBytes[1], encodedBytes[2], 0]
+        # FIX (2026-11-10): SIGNED, all four bytes. The firmware reads a long
+        # from the command (TS_CMD_IFSVALUE: *(long *)&buffer[4]); the fourth
+        # byte was sent as 0, so a shift below zero arrived as about +16 MHz.
+        encoded = (int(level) & 0xFFFFFFFF).to_bytes(4, "little")
+        command = [self.toRadioCommandDict["TS_CMD_IFSVALUE"], *encoded]
         self.sendCommandToMCU(bytes(command))
+
+    # ------------------------------------------------------------------
+    # FIX (2026-11-10): ATT AND IFS from the RX tab (Mark). The rig leads:
+    # the model changes on its reports (vf_, ci_, vi_), which the firmware
+    # sends after every command it applies.
+    # ------------------------------------------------------------------
+    def set_att(self, level):
+        """KD8CEC's ATT, 0 (off) to ATT_MAX, in the menu's steps of ATT_STEP."""
+        level = max(0, min(ATT_MAX, int(round(level / ATT_STEP)) * ATT_STEP))
+        if level != self._model.att_level:
+            self.Set_ATT(level)
+
+    def set_ifs(self, on, hz):
+        """
+        IF shift on or off, at hz (IFS_MIN..IFS_MAX, steps of IFS_STEP). The
+        value first, then the switch -- a toggle, so sent only when the rig is
+        not already where it should be, and a settle apart: the Nano drops a
+        command that arrives while it is still applying the last one.
+        """
+        hz = max(IFS_MIN, min(IFS_MAX, int(round(hz / IFS_STEP)) * IFS_STEP))
+        m = self._model
+        sent = False
+        if on and hz != m.ifs_hz:
+            self.Set_IFS_Level(hz)
+            sent = True
+        if bool(on) != bool(m.ifs_on):
+            if sent:
+                self.root.after(STEP_SETTLE_MS, self.Toggle_IFS)
+            else:
+                self.Toggle_IFS()
 
     # ------------------------------------------------------------------
     # The keyer's settings

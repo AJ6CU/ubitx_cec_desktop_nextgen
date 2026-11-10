@@ -1096,6 +1096,7 @@ class UbitxCecDesktop(sCTk):
         # whether volume does anything. Starts on SDR if an SDR is switched
         # on in the settings, since that is how the station is set up.
         self._listen_source = "SDR" if gv.config.sdr_enabled() else "Rig"
+        self._att_last = 0          # FIX (2026-11-10): ATT's level to switch on at
         # Whether the OPERATOR chose that, as against it being where the
         # application started. An SDR connecting later takes over the
         # listening -- but never over a choice somebody made.
@@ -2394,8 +2395,8 @@ class UbitxCecDesktop(sCTk):
             text="Everything about how you are listening. The choice below "
                  "decides where the audio and the signal reading come from, "
                  "and which of the controls under it can do anything: ATT and "
-                 "IFS belong to the rig's own front end, so they are inert "
-                 "while you are listening through the SDR.",
+                 "IFS belong to the rig's own front end, so they work only "
+                 "while you are listening through the rig.",
             wraplength=640, justify="left").pack(anchor="w", pady=(2, 12))
 
         row = sCTkFrame(wrap, fg_color="transparent", border_width=0)
@@ -2438,13 +2439,31 @@ class UbitxCecDesktop(sCTk):
             wrap, text="", wraplength=640, justify="left")
         self.audio_note.pack(anchor="w", pady=(4, 8))
 
-        for label, note in (("ATT", "rig front end only"),
-                            ("IFS", "rig front end only")):
+        # FIX (2026-11-10): ATT AND IFS WORK (Mark) -- the rig's own front end,
+        # so live only while listening through the rig, with a rig to send to
+        # and not locked. A switch and a slider each; the slider is sent once
+        # it settles, the switch at once. Both show what the rig reports.
+        self._front_end = {}
+        for key, label, lo, hi, step in (
+                ("att", "ATT", 0, ubitx_link.ATT_MAX, ubitx_link.ATT_STEP),
+                ("ifs", "IFS", ubitx_link.IFS_MIN, ubitx_link.IFS_MAX, ubitx_link.IFS_STEP)):
             line = sCTkFrame(wrap, fg_color="transparent", border_width=0)
             line.pack(anchor="w", pady=3)
-            sw = sCTkSwitch(line, text=label)
+            sw = sCTkSwitch(line, text=label, width=70,
+                            command=lambda _v=None, k=key: self._front_end_switched(k))
             sw.pack(side="left")
-            sCTkLabelTertiary(line, text=note).pack(side="left", padx=10)
+            slider = sCTkSlider(line, from_=lo, to=hi,
+                                number_of_steps=(hi - lo) // step, width=260,
+                                command=lambda v, k=key: self._front_end_moved(k, v))
+            slider.pack(side="left", padx=(8, 0))
+            value = sCTkLabelSecondary(line, text=" ", width=80)
+            value.pack(side="left", padx=(8, 0))
+            self._front_end[key] = {"switch": sw, "slider": slider, "value": value,
+                                    "held_until": 0.0, "after": None}
+        self.front_end_note = sCTkLabelTertiary(wrap, text=" ", wraplength=640,
+                                                justify="left")
+        self.front_end_note.pack(anchor="w", pady=(4, 0))
+        self._front_end_shown = None
 
         # AGC is on Operate, beside NR and Notch -- one control, not two.
 
@@ -3631,6 +3650,109 @@ class UbitxCecDesktop(sCTk):
     # The rig's key types, as the keyer button names them.
     CW_KEYERS = {"STRAIGHT": "Straight", "IAMBICA": "Iambic A", "IAMBICB": "Iambic B"}
 
+    # FIX (2026-11-10): ATT and IFS on the RX tab -------------------------
+    FRONT_END_HOLD_S = 1.5          # the rig reports the old value until then
+    FRONT_END_SETTLE_MS = 200       # a dragged slider is sent once it rests
+
+    def _front_end_live(self):
+        """ATT and IFS can be used: a rig, not locked, listening through it."""
+        return (self._ready and self.rig_state == "connected"
+                and not self.model.locked and self._listen_source == "Rig")
+
+    @staticmethod
+    def _front_end_text(key, value):
+        if key == "att":
+            return "off" if not value else f"{value}"
+        return f"{value:+d} Hz"
+
+    def _front_end_switched(self, key):
+        """The ATT or IFS switch: on at the slider's value, or off."""
+        part = self._front_end[key]
+        if not self._front_end_live():
+            self._front_end_shown = None            # put back what the rig has
+            self._show_front_end()
+            return
+        on = bool(part["switch"].get())
+        value = int(round(part["slider"].get()))
+        part["held_until"] = time.monotonic() + self.FRONT_END_HOLD_S
+        if key == "att":
+            if on and value == 0:
+                value = self._att_last or 50        # 0 is off: a level to go on at
+                part["slider"].set(value)
+            self.connection.set_att(value if on else 0)
+        else:
+            self.connection.set_ifs(on, value)
+        part["value"].configure(text=self._front_end_text(key, value if on or key == "ifs" else 0))
+
+    def _front_end_moved(self, key, value):
+        """A slider moved: shown at once, sent once it rests."""
+        part = self._front_end[key]
+        if not self._front_end_live():
+            return
+        value = int(round(value))
+        part["held_until"] = time.monotonic() + self.FRONT_END_HOLD_S
+        part["value"].configure(text=self._front_end_text(key, value))
+        if part["after"] is not None:
+            try:
+                self.after_cancel(part["after"])
+            except Exception:
+                pass
+        part["after"] = self.after(self.FRONT_END_SETTLE_MS,
+                                   lambda: self._front_end_send(key))
+
+    def _front_end_send(self, key):
+        part = self._front_end[key]
+        part["after"] = None
+        if not self._front_end_live():
+            return
+        value = int(round(part["slider"].get()))
+        part["held_until"] = time.monotonic() + self.FRONT_END_HOLD_S
+        if key == "att":
+            # Moving the slider is choosing a level: ATT on at it (0 = off).
+            self.connection.set_att(value)
+        else:
+            # The shift is set; IFS stays as switched -- moving it while off
+            # turns it on, as moving the ATT slider does.
+            self.connection.set_ifs(True, value)
+
+    def _show_front_end(self):
+        """ATT and IFS as the rig reports them, live or greyed. Only on a change."""
+        parts = getattr(self, "_front_end", None)
+        if not parts:
+            return
+        m = self.model
+        live = self._front_end_live()
+        if m.att_level:
+            self._att_last = m.att_level
+        shown = (m.att_level, m.ifs_on, m.ifs_hz, live)
+        now = time.monotonic()
+        if shown == self._front_end_shown or any(
+                now < p["held_until"] for p in parts.values()):
+            return
+        self._front_end_shown = shown
+        for key, on, value in (("att", bool(m.att_level), m.att_level or self._att_last or 0),
+                               ("ifs", bool(m.ifs_on), m.ifs_hz)):
+            part = parts[key]
+            part["switch"].configure(state="normal")
+            part["switch"].select() if on else part["switch"].deselect()
+            part["slider"].configure(state="normal")
+            part["slider"].set(value)
+            for w in (part["switch"], part["slider"]):
+                w.configure(state="normal" if live else "disabled")
+            part["value"].configure(text=self._front_end_text(key, value if on else 0)
+                                    if key == "att" else
+                                    (self._front_end_text(key, value) if on else "off"))
+        if live:
+            note = ("ATT shifts the rig's first IF away from the signal -- higher is "
+                    "quieter. IFS moves the passband.")
+        elif self._listen_source != "Rig":
+            note = "Listening through the SDR: ATT and IFS act on the rig's own receiver only."
+        elif m.locked:
+            note = "The rig is locked."
+        else:
+            note = "No rig connected."
+        self.front_end_note.configure(text=note)
+
     def _show_cw(self):
         """
         FIX (2026-11-06): the CW tab shows what the rig reported -- tone,
@@ -4104,7 +4226,7 @@ class UbitxCecDesktop(sCTk):
     # -- where the SDR is ---------------------------------------------------
     def _build_sdr_settings(self, box):
         """
-        Which SDR program, and where. "None" means there is no SDR: nothing
+        Which SDR program, and where. "-none-" means there is no SDR: nothing
         is tried, and the interface greys everything an SDR would serve.
         """
         # FIX: no fonts on sCTk widgets here or in _sdr_advanced -- the
@@ -4118,8 +4240,9 @@ class UbitxCecDesktop(sCTk):
                                     height=SETTINGS_CONTROL_HEIGHT,
                                     command=self._connect_sdr)
         connect.pack(side="left", padx=8)
+        self.sdr_connect_button = connect       # FIX (2026-11-10): see _show_sdr_fields
         current = gv.config.get_sdr_software()
-        self.sdr_picker.set(dict(sdr_choices()).get(current, "None"))
+        self.sdr_picker.set(dict(sdr_choices()).get(current, sdr_programs.NONE_CHOICE))
 
         # START IT IF IT IS NOT RUNNING. An SDR already running is the
         # operator's: attached to, and left running when this closes. One
@@ -4186,6 +4309,22 @@ class UbitxCecDesktop(sCTk):
 
         self.sdr_box = box
         line.pack_configure(pady=(1, 8))
+        self._show_sdr_fields()
+
+    def _show_sdr_fields(self):
+        """
+        FIX (2026-11-10): WITH NO SDR CHOSEN ("-none-", the default) Connect
+        and the fields that only describe an SDR -- start it, address, port --
+        are greyed until a program is chosen (Mark). The CW port says so
+        itself (_show_decoder_port).
+        """
+        chosen = gv.config.get_sdr_software() not in ("", "none")
+        state = "normal" if chosen else "disabled"
+        for name in ("sdr_connect_button", "sdr_autostart",
+                     "sdr_host_entry", "sdr_port_entry"):
+            widget = getattr(self, name, None)
+            if widget is not None:
+                widget.configure(state=state)
 
     def _on_sdr_software(self, shown):
         """
@@ -4202,9 +4341,21 @@ class UbitxCecDesktop(sCTk):
                   f"{shown} is looked for in its usual places")
             gv.config.set_sdr_path("")
             self._show_sdr_path()
+        was = gv.config.get_sdr_software()
         gv.config.set_sdr_software(key)
         profile = profile_for(key)
         self._show_decoder_port()       # FIX: the new program's CW port
+        self._show_sdr_fields()         # FIX (2026-11-10)
+        if key == "none":
+            # FIX (2026-11-10): -none- is applied at once, since Connect is
+            # greyed with it: an SDR in use is let go, and you listen through
+            # the rig -- there is nothing else to listen through.
+            if was not in ("", "none"):
+                self._connect_sdr()
+            if self._listen_source != "Rig":
+                self.receiver_picker.set("Rig")
+                self._set_listen_source("Rig")
+            return
         if not profile.default_port:
             return
 
@@ -5680,6 +5831,7 @@ class UbitxCecDesktop(sCTk):
         self.panel_tx.update_view(s)
         self._show_lock()
         self._show_cw()          # FIX (2026-11-06): the keyer, as reported
+        self._show_front_end()   # FIX (2026-11-10): ATT and IFS, as reported
         self._show_callsign()    # FIX (2026-11-06): the rig's callsign
 
         # Latched controls read as lit or unlit.
