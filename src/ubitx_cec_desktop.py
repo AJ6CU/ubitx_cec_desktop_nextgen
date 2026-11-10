@@ -49,6 +49,7 @@ See ARCHITECTURE.md for the reasoning, and TODO.md for what is not done.
 import atexit
 import json
 import os
+import webbrowser                      # FIX (2026-11-10): the Help button
 import signal
 import random
 import serial
@@ -267,6 +268,13 @@ class NullRig:
     """
 
     reader_process_id = None
+    # FIX (2026-11-10): THE LINK'S DATA, not commands, answered as "nothing
+    # yet". __getattr__ below hands back a do-nothing function for any name,
+    # so `"sc" in getattr(connection, "seen_reports", ())` met a function and
+    # raised -- with no rig plugged in the window never opened (Mark).
+    # Anything the window READS from the link, rather than calls, goes here.
+    seen_reports = frozenset()
+    bytes_seen = 0
 
     def __getattr__(self, name):
         return lambda *args, **kwargs: None
@@ -2026,24 +2034,67 @@ class UbitxCecDesktop(sCTk):
             # Losing the position is a small cost; refusing to close is not.
             pass
 
-    def _toggle_on_top(self):
-        """
-        Keeps the panel above the SDR's window.
+    # FIX (2026-11-10): "KEEP ON TOP" IS A PREFERENCE (Mark), a switch in
+    # Setup's Station group, saved and ON by default -- its button on Operate
+    # is now Help. Why it exists at all: a short window over a large one
+    # disappears behind it the moment you click the SDR's waterfall.
+    PREFERENCES_KEY = "Preferences"
 
-        A short window sitting over a large one disappears behind it the
-        moment you click the waterfall -- which is most of what you do. On
-        top is almost certainly what you want here, but it is a preference
-        rather than a given, so it is a switch.
-        """
-        wanted = not bool(self.attributes("-topmost"))
-        self.attributes("-topmost", wanted)
-        self.on_top_button.configure(text="on top" if wanted else "not on top")
-        # THE LIBRARY'S ENGAGED LOOK, not a colour chosen here. This painted
-        # itself with #1A4375 -- which is now exactly the theme's engaged
-        # colour, arrived at separately, which is the argument for letting the
-        # theme own it: a latched control should look like every other latched
-        # control, and follow the theme when that changes.
-        self.on_top_button.set_pressed(wanted)
+    def _keep_on_top_saved(self):
+        try:
+            return bool(gv.config.config_data.get(self.PREFERENCES_KEY, {})
+                        .get("keep_on_top", True))
+        except AttributeError:
+            return True
+
+    def _set_keep_on_top(self, wanted, save=True):
+        """On top of other windows, or not; saved unless only applying it."""
+        wanted = bool(wanted)
+        try:
+            self.attributes("-topmost", wanted)
+        except Exception:
+            pass
+        if not save:
+            return
+        try:
+            gv.config.config_data.setdefault(self.PREFERENCES_KEY, {})["keep_on_top"] = wanted
+            gv.config.saveConfig()
+        except AttributeError:
+            pass
+
+    # FIX (2026-11-10): HELP, a page shipped beside the program and opened in
+    # the browser -- no internet needed (Mark). help/index.html.
+    HELP_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "help", "index.html")
+
+    def _open_help(self, section=""):
+        if not os.path.exists(self.HELP_FILE):
+            print(f"[help] not found: {self.HELP_FILE}")
+            return
+        url = "file://" + os.path.abspath(self.HELP_FILE).replace(os.sep, "/")
+        if not url.startswith("file:///"):
+            url = url.replace("file://", "file:///", 1)    # Windows: C:/...
+        # FIX (2026-11-10): THE BROWSER CAN COME IN FRONT (Mark: help opened
+        # behind the app, and with Keep on top nothing could bring it forward).
+        # Keep on top is let go while you read, and put back the next time you
+        # click into the app -- the preference itself is not changed.
+        self._set_keep_on_top(False, save=False)
+        self._help_open = True
+        self._help_opened_at = time.monotonic()
+        if not getattr(self, "_help_focus_bound", False):
+            self.bind("<FocusIn>", self._back_from_help, add="+")
+            self._help_focus_bound = True
+        webbrowser.open(url + (f"#{section}" if section else ""))
+
+    HELP_REFOCUS_S = 1.5
+
+    def _back_from_help(self, _event=None):
+        """Back in the app after reading help: Keep on top as you set it."""
+        # Focus moving about inside the app while the browser is still
+        # starting is not coming back: only after HELP_REFOCUS_S.
+        if (getattr(self, "_help_open", False)
+                and time.monotonic() - getattr(self, "_help_opened_at", 0) > self.HELP_REFOCUS_S):
+            self._help_open = False
+            self._set_keep_on_top(self._keep_on_top_saved(), save=False)
 
     # -- convenience ------------------------------------------------------
     # NAMED radio, NOT state.
@@ -2374,10 +2425,13 @@ class UbitxCecDesktop(sCTk):
         # only when something changes. Real status comes with the connection
         # dialog.
         sCTkLabelTertiary(actions, text="rig ok").pack(side="right", padx=8)
-        self.on_top_button = sCTkButtonTertiary(
-            actions, text="not on top", width=96, height=22,
-            command=self._toggle_on_top)
-        self.on_top_button.pack(side="right", padx=8)
+        # FIX (2026-11-10): HELP where "on top" was -- that is now a
+        # preference, Keep on top in Setup's Station group.
+        self.help_button = sCTkButtonTertiary(
+            actions, text="Help", width=96, height=22,
+            command=self._open_help)
+        self.help_button.pack(side="right", padx=8)
+        self._set_keep_on_top(self._keep_on_top_saved(), save=False)
 
         # Pop-ups left pinned last time, back where they were.
         self.after(800, self._restore_pinned_aids)
@@ -3883,6 +3937,7 @@ class UbitxCecDesktop(sCTk):
             ("Station", (
                 ("Callsign", "entry", self.model.callsign),
                 ("Appearance", "choice", ["Dark", "Light", "Follow system"]),
+                ("Keep on top", "keep_on_top", None),     # FIX (2026-11-10)
             )),
         )
 
@@ -3936,6 +3991,17 @@ class UbitxCecDesktop(sCTk):
                         self._callsign_shown = None
                 elif kind == "choice":
                     sCTkComboBox(line, values=value, width=150, height=SETTINGS_CONTROL_HEIGHT).pack(side="left")
+                elif kind == "keep_on_top":
+                    # FIX (2026-11-10): was the "on top" button on Operate.
+                    self.keep_on_top_switch = sCTkSwitch(
+                        line, text="",
+                        command=lambda _v=None: self._set_keep_on_top(
+                            self.keep_on_top_switch.get()))
+                    self.keep_on_top_switch.pack(side="left")
+                    if self._keep_on_top_saved():
+                        self.keep_on_top_switch.select()
+                    else:
+                        self.keep_on_top_switch.deselect()
                 elif kind == "switch":
                     sCTkSwitch(line, text="").pack(side="left")
                 else:

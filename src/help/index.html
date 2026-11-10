@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>uBITX CEC Desktop Help</title>
+<style>
+  :root {
+    --bg: #f7f8fa; --panel: #ffffff; --text: #1d232b; --muted: #5b6573;
+    --line: #dde2e8; --accent: #1a4375; --accent-soft: #e6eef8;
+    --warn-bg: #fff6e0; --warn-line: #e3b341; --code-bg: #eef1f5;
+    --ph-bg: repeating-linear-gradient(45deg,#eef1f5,#eef1f5 10px,#e6eaf0 10px,#e6eaf0 20px);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12161c; --panel: #1a2029; --text: #e3e8ef; --muted: #9aa5b4;
+      --line: #2c3542; --accent: #7fb0ec; --accent-soft: #1d2b3d;
+      --warn-bg: #2d2513; --warn-line: #a8862e; --code-bg: #222a35;
+      --ph-bg: repeating-linear-gradient(45deg,#1f2630,#1f2630 10px,#242c37 10px,#242c37 20px);
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+  .wrap { display: grid; grid-template-columns: 250px minmax(0, 1fr); max-width: 1180px; margin: 0 auto; }
+  nav { position: sticky; top: 0; align-self: start; height: 100vh; overflow-y: auto;
+        padding: 24px 16px 40px 20px; border-right: 1px solid var(--line); font-size: 14px; }
+  nav .title { font-weight: 700; font-size: 16px; margin-bottom: 14px; }
+  nav ol { list-style: none; padding: 0; margin: 0; }
+  nav li { margin: 2px 0; }
+  nav li li { padding-left: 14px; }
+  nav a { color: var(--text); text-decoration: none; display: block; padding: 3px 8px; border-radius: 6px; }
+  nav a:hover { background: var(--accent-soft); color: var(--accent); }
+  main { padding: 28px 40px 80px; min-width: 0; }
+  h1 { font-size: 30px; margin: 0 0 6px; }
+  h2 { font-size: 24px; margin: 48px 0 10px; padding-top: 12px; border-top: 1px solid var(--line); }
+  h3 { font-size: 19px; margin: 30px 0 8px; }
+  h4 { font-size: 16px; margin: 22px 0 6px; }
+  p, li { max-width: 74ch; }
+  a { color: var(--accent); }
+  .lead { color: var(--muted); font-size: 17px; margin-top: 0; }
+  code, kbd { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.9em;
+              background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+  pre { background: var(--code-bg); padding: 12px 14px; border-radius: 8px; overflow-x: auto; }
+  pre code { background: none; padding: 0; }
+  .ui { font-weight: 600; }
+  table { border-collapse: collapse; width: 100%; max-width: 820px; margin: 10px 0 18px; font-size: 15px; }
+  th, td { border: 1px solid var(--line); padding: 7px 10px; text-align: left; vertical-align: top; }
+  th { background: var(--accent-soft); }
+  .note, .todo { border-left: 4px solid var(--accent); background: var(--accent-soft);
+                 padding: 10px 14px; border-radius: 0 8px 8px 0; margin: 14px 0; max-width: 78ch; }
+  .todo { border-color: var(--warn-line); background: var(--warn-bg); }
+  .todo b:first-child, .note b:first-child { display: block; margin-bottom: 2px; }
+  figure { margin: 16px 0 22px; max-width: 900px; }
+  figure img { max-width: 100%; border: 1px solid var(--line); border-radius: 8px; display: block; }
+  figure .ph { display: none; background: var(--ph-bg); border: 2px dashed var(--line); border-radius: 8px;
+               padding: 36px 18px; text-align: center; color: var(--muted); font-size: 14px; }
+  figure.missing img { display: none; }
+  figure.missing .ph { display: block; }
+  figcaption { color: var(--muted); font-size: 14px; margin-top: 6px; }
+  @media (max-width: 820px) {
+    .wrap { grid-template-columns: 1fr; }
+    nav { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--line); }
+    main { padding: 20px 16px 60px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+<nav>
+  <div class="title">uBITX CEC Desktop</div>
+  <ol>
+    <li><a href="#getting-started">1. Getting started</a>
+      <ol>
+        <li><a href="#what-you-need">What you need</a></li>
+        <li><a href="#firmware">Installing KD8CEC 1.2</a></li>
+        <li><a href="#usb-ttl">The USB-to-TTL adapter</a></li>
+        <li><a href="#first-start">First start</a></li>
+        <li><a href="#sdr-setup">Setting up an SDR</a></li>
+      </ol></li>
+    <li><a href="#operate">2. Operate</a></li>
+    <li><a href="#rx">3. RX</a></li>
+    <li><a href="#channels">4. Channels</a></li>
+    <li><a href="#cw">5. CW</a></li>
+    <li><a href="#setup">6. Setup</a></li>
+    <li><a href="#trouble">7. When things go wrong</a></li>
+  </ol>
+</nav>
+<main>
+
+<h1>uBITX CEC Desktop</h1>
+<p class="lead">A desktop front panel for a uBITX running KD8CEC's firmware, with an SDR alongside as the receiver and waterfall.</p>
+
+<p>The app talks to the radio the way KD8CEC's Nextion display does, so everything the radio reports (frequencies, mode, RIT, split, lock, the keyer settings) shows here, and everything you change here goes to the radio. If an SDR program is running, the app keeps it tuned to the radio, so you can listen and watch the band through the SDR while the uBITX transmits.</p>
+
+<div class="note"><b>The radio leads.</b> The app shows what the radio <em>reports</em>, not what was asked of it. If a change doesn't show, the radio didn't take it, and the app won't pretend it did.</div>
+
+<!-- ============================================================== -->
+<h2 id="getting-started">1. Getting started</h2>
+
+<h3 id="what-you-need">What you need</h3>
+<ul>
+  <li><b>A uBITX</b> (any version) running <b>KD8CEC firmware 1.2, the Nextion build</b>. See <a href="#firmware">Installing KD8CEC 1.2</a>.</li>
+  <li><b>A USB-to-TTL serial adapter</b>, wired to the radio where a Nextion display would plug in. See <a href="#usb-ttl">The USB-to-TTL adapter</a>.</li>
+  <li><b>A computer</b> running macOS, Windows or Linux.</li>
+  <li><b>Optional: an SDR</b> (an RTL-SDR, for example) with one of these programs: SDRoxide Brown, SDRoxide, SDR++, Gqrx or SDRangel. Without one the app still runs the radio; you listen through the radio's own speaker.</li>
+</ul>
+
+<h3 id="firmware">Installing KD8CEC 1.2</h3>
+
+<p>KD8CEC's firmware 1.2 (it reports itself as <code>+v1.200</code>) replaces the uBITX's original Raduino software. It must be the build for a <b>Nextion display</b>: that's the protocol the app speaks. The source and ready-built files are in KD8CEC's repository, <code>github.com/phdlee/ubitx</code>, and his notes are on <code>hamskey.com</code>.</p>
+
+<div class="todo"><b>Before you flash: back up.</b> Your radio's calibration (master cal and BFO) lives in its EEPROM. If you already run KD8CEC firmware, open <span class="ui">Setup → Backup and restore…</span> and copy <span class="ui">From the radio → Config file</span> first, or write the values down.</div>
+
+<h4>Option A: a ready-built file</h4>
+<ol>
+  <li>From the <b>Releases</b> page of <code>phdlee/ubitx</code>, download the 1.20 release, and pick the <b>Nextion</b> hex file for your uBITX version.</li>
+  <li>Upload it to the Raduino's Arduino Nano over its own USB port. On Windows, KD8CEC's <b>uBITX Manager</b> does this. On a Mac or Linux, <code>avrdude</code> does (it comes with the Arduino IDE).</li>
+</ol>
+
+<div class="todo"><b>To fill in:</b> the exact hex file name for each uBITX version, the uBITX Manager steps, and the <code>avrdude</code> command line for the Nano (board, programmer and port), with screenshots.</div>
+
+<h4>Option B: build it yourself</h4>
+<ol>
+  <li>Install the Arduino IDE, and open <code>ubitx_20/ubitx_20.ino</code> from KD8CEC's source.</li>
+  <li>In <code>ubitx.h</code>, make sure <code>#define UBITX_DISPLAY_NEXTION</code> is the one display line not commented out, and set <code>UBITX_BOARD_VERSION</code> for your radio (5 for a uBITX V5).</li>
+  <li>Choose the board <b>Arduino Nano</b> (processor ATmega328P; try "Old Bootloader" if the upload fails), choose its port, and upload.</li>
+</ol>
+
+<div class="todo"><b>To fill in:</b> screenshots of <code>ubitx.h</code> with the right lines, and the Arduino IDE's board settings.</div>
+
+<h4>After flashing</h4>
+<p>Power the radio off and on. Your calibration survives a firmware update; if it was lost, use <span class="ui">Backup and restore…</span> with <span class="ui">Config file → To the radio</span>. When the app connects, <span class="ui">Setup → About…</span> shows the firmware version the radio reported.</p>
+
+<h3 id="usb-ttl">The USB-to-TTL adapter</h3>
+
+<p>The app connects where a Nextion display would: a USB-to-TTL serial adapter plugged into the computer, with its wires on the Raduino's Nextion serial lines. It is not the Nano's own USB port; that one is for flashing firmware.</p>
+
+<figure class="missing">
+  <img src="images/usb-ttl-adapter.jpg" alt="The USB-to-TTL adapter" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <div class="ph">Photo to come: the USB-to-TTL adapter, with its pins labelled.</div>
+  <figcaption>The USB-to-TTL adapter.</figcaption>
+</figure>
+
+<figure class="missing">
+  <img src="images/usb-ttl-wiring.jpg" alt="Wiring the adapter to the uBITX" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <div class="ph">Photo to come: where each wire goes on the uBITX.</div>
+  <figcaption>Wiring the adapter to the uBITX.</figcaption>
+</figure>
+
+<div class="todo"><b>To fill in: wiring, with photos.</b> From KD8CEC's source, the Nextion serial lines are the Nano's <b>D9 (the radio sends)</b> and <b>D8 (the radio receives)</b>. So: adapter <b>RX</b> to D9, adapter <b>TX</b> to D8, adapter <b>GND</b> to ground. Do <b>not</b> connect the adapter's VCC. Confirm against the radio and add the connector's location on each uBITX version.</div>
+
+<div class="note"><b>A second adapter for watching the line?</b> A monitoring adapter on the same wires, with its TX connected, can make the radio send the same reports over and over, without end. Connect only its GND and RX. See <a href="#trouble">When things go wrong</a>.</div>
+
+<h3 id="first-start">First start</h3>
+<ol>
+  <li>Plug in the adapter and switch the radio on.</li>
+  <li>Start the app. With no radio chosen yet, it opens on <span class="ui">Setup</span>.</li>
+  <li>In the <span class="ui">Radio</span> group, choose the adapter under <span class="ui">Port</span>. Ports are labelled by their chip (FTDI, CH340…). If yours isn't listed, tick <span class="ui">show all</span>, or press <span class="ui">Refresh</span> after plugging it in.</li>
+  <li>Leave <span class="ui">Speed</span> as it is unless your firmware was built for another, and press <span class="ui">Connect</span>.</li>
+</ol>
+
+<figure class="missing">
+  <img src="images/setup-radio.png" alt="Setup, Radio group" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <div class="ph">Screenshot to come: Setup, the Radio group with a port chosen.</div>
+  <figcaption>Choosing the radio's port.</figcaption>
+</figure>
+
+<p><b>What connecting does.</b> The app restarts the radio, because the radio sends all of its values as it starts up, and that's how the app learns them. It then sets the radio's tuning step to its finest, so a 10 Hz step isn't rounded away. The radio always starts on <b>VFO A</b>.</p>
+
+<p>If some values don't arrive, the app restarts the radio once or twice more to ask again. A radio that takes a few seconds to boot is waited for; one that never answers is reported as "not answering: is it switched on?".</p>
+
+<h3 id="sdr-setup">Setting up an SDR</h3>
+
+<p>An SDR is optional. With one, the SDR program is the receiver: you hear the band through it and see its waterfall, while the uBITX does the transmitting. The app keeps the SDR on the radio's frequency, mode, filter, RIT and, with SDRoxide Brown, VFO A/B and split.</p>
+
+<h4>In the app</h4>
+<ol>
+  <li><span class="ui">Setup → SDR → Software</span>: choose your program. <span class="ui">-none-</span> is the default, and with it Connect and the address fields stay greyed.</li>
+  <li><span class="ui">Address</span> and <span class="ui">Port</span> fill in with the program's usual ones; change them only if you changed them in the program.</li>
+  <li>Tick <span class="ui">Start it</span> if the app should start the program for you. The app closes a program it started when it quits, and leaves alone one that was already running.</li>
+  <li>Press <span class="ui">Connect</span>. The line under the group lists what the program lets the app control.</li>
+</ol>
+
+<figure class="missing">
+  <img src="images/setup-sdr.png" alt="Setup, SDR group" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <div class="ph">Screenshot to come: Setup, the SDR group with SDRoxide Brown chosen.</div>
+  <figcaption>Choosing the SDR program.</figcaption>
+</figure>
+
+<p>If the program isn't where the app expects it, set its location in <span class="ui">SDR settings…</span>; "custom location set" then shows beside Connect.</p>
+
+<h4>In the SDR program</h4>
+<table>
+  <tr><th>Program</th><th>How the app talks to it</th><th>What to turn on</th></tr>
+  <tr><td><b>SDRoxide Brown</b> (recommended)</td><td>Hamlib (rigctl), port 4532</td><td>Settings ▸ Servers: the Hamlib server. For CW decoding in the app, also <b>Decoded CW over UDP</b> (port 9998). Brown gives the most: VFO A/B, split, RIT, NB/NR/notch, APF, squelch, AGC, RF gain, the span.</td></tr>
+  <tr><td><b>SDRoxide</b> (1.6.11 or later)</td><td>Hamlib (rigctl), port 4532</td><td>Settings ▸ Servers: the Hamlib server; Decoded CW over UDP on port 9999.</td></tr>
+  <tr><td><b>SDR++</b></td><td>Hamlib (rigctl), port 4532</td><td>The <b>Rigctl Server</b> module, started. SDR++ gives no signal reading, so the S-meter stays empty.</td></tr>
+  <tr><td><b>Gqrx</b></td><td>Remote control, port 7356</td><td>Tools ▸ Remote control.</td></tr>
+  <tr><td><b>SDRangel</b></td><td>REST API, port 8091</td><td>A device set with the RTL-SDR; the <b>WDSP receiver</b> as its <i>first</i> channel; a <b>Channel Power</b> channel for the S-meter; the <b>Morse Decoder</b> feature for CW. Save the setup in SDRangel.</td></tr>
+</table>
+
+<div class="note"><b>SDRoxide and SDRoxide Brown on a Mac</b> install under the same name, so only one of them can sit in Applications under it. Point <span class="ui">SDR settings…</span> at the copy you mean.</div>
+
+<div class="todo"><b>To fill in:</b> screenshots of each program's server setting, and a step-by-step SDRangel setup.</div>
+
+<!-- ============================================================== -->
+<h2 id="operate">2. Operate</h2>
+
+<p>The front panel. Receive is on the <b>left</b>, transmit on the <b>right</b>, each marked by its blue <b>RX</b> or <b>TX</b> badge and the VFO it's on.</p>
+
+<figure class="missing">
+  <img src="images/operate.png" alt="The Operate tab" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <div class="ph">Screenshot to come: the Operate tab, connected to the radio and an SDR.</div>
+  <figcaption>The Operate tab.</figcaption>
+</figure>
+
+<h3>Receive and transmit</h3>
+<ul>
+  <li><b>RX panel (left).</b> The frequency you're listening on. Tune with the knob, or click a digit to choose the step and scroll over it. <span class="ui">RIT</span> turns receive incremental tuning on; the note beside it shows the offset and the frequency you'll transmit on. <span class="ui">Lock</span> is the radio's lock: everything that would change the radio or the SDR is greyed while it's on.</li>
+  <li><b>TX panel (right).</b> The frequency you'll transmit on, with <span class="ui">off air</span> / <span class="ui">on air</span>. It shows a different VFO only in split. <span class="ui">TX off</span> is KD8CEC's practice mode: the radio keys everything but the transmit relay, so nothing goes out. Use it to practise CW.</li>
+</ul>
+
+<div class="note"><b>Which VFO is which in split.</b> The panel tells you: whatever VFO sits in the RX panel is the one you receive on, even if it's VFO B. The firmware's usual arrangement is receive on A, transmit on B, but A/B swaps them.</div>
+
+<h3>Meters</h3>
+<p><span class="ui">SIG</span> is the signal strength, in S-units and dBm. With an SDR it's the SDR's reading. Listening through the radio, it's the radio's S-meter sensor, which only means something once its levels are set (<span class="ui">Setup → EEPROM settings…</span>). <span class="ui">SWR</span> and <span class="ui">PWR</span> wait for a sensor board.</p>
+
+<h3>Listening aids</h3>
+<p><span class="ui">AGC</span>, <span class="ui">NR</span>, <span class="ui">Notch</span>, <span class="ui">SQL</span>, <span class="ui">NB</span>, <span class="ui">CW</span> (the peak filter) and <span class="ui">DEC</span> (the CW decoder) are the SDR's. Click a lamp to switch it; click the arrow beside it for its settings. A pop-up closes on Escape or a click elsewhere. <b>Pin</b> it to keep it open; pinned pop-ups come back where you left them. A lamp is greyed when the SDR can't do it, and says why. Notch is greyed in CW, where it would remove the signal.</p>
+<p>With <span class="ui">DEC</span> on, in CW, decoded text runs along the bottom of the tab.</p>
+
+<h3>Filter, band, mode and span</h3>
+<ul>
+  <li><span class="ui">wide</span> / <span class="ui">narrow</span> step the SDR's filter; <span class="ui">reset</span> returns to the default for the mode (Setup's SDR settings). The width is shown beside them.</li>
+  <li>The <b>band</b> box steps through the ham bands; off any band it shows "—".</li>
+  <li><span class="ui">LSB</span> <span class="ui">USB</span> <span class="ui">CWL</span> <span class="ui">CWU</span> set the radio's mode; the SDR follows.</li>
+  <li><span class="ui">Spectrum Span</span> sets how wide a slice the SDR samples, where it allows (SDRoxide Brown, SDRangel).</li>
+</ul>
+
+<h3>RF gain and volume</h3>
+<p><span class="ui">RF gain</span> is the SDR's front-end gain. <span class="ui">Volume</span> is the SDR's audio; double-click it to mute and unmute. Listening through the radio, volume is the radio's own knob, so this one is greyed.</p>
+
+<h3>VFOs and split</h3>
+<table>
+  <tr><th>Button</th><th>What it does</th></tr>
+  <tr><td><span class="ui">Split</span></td><td>Transmit on the other VFO.</td></tr>
+  <tr><td><span class="ui">A/B</span></td><td>Select the other VFO.</td></tr>
+  <tr><td><span class="ui">A ⇄ B</span></td><td>Exchange the two VFOs' contents: frequency, mode and any RIT.</td></tr>
+  <tr><td><span class="ui">A → B</span></td><td>Copy A onto B.</td></tr>
+  <tr><td><span class="ui">up 1</span> … <span class="ui">dn 2</span></td><td>Split offsets, in kHz, as a DX station calls them: transmit that far from where you're <i>receiving</i>. Pressing up 5 twice leaves you 5 up, not 10.</td></tr>
+  <tr><td><span class="ui">Log QSO</span></td><td>Log a contact (Setup's Logbook says where).</td></tr>
+</table>
+
+<h4>RIT and VFOs</h4>
+<ul>
+  <li>RIT off drops the offset, and RIT on always starts at +0.</li>
+  <li>Each VFO keeps its own RIT. Switch away and back, and it returns.</li>
+  <li>In split, RIT works on the receive VFO; the app keeps it there itself, because the firmware ignores split on transmit while its own RIT is on. Turning split off hands the RIT back to the radio.</li>
+  <li>In split, each VFO transmits on its receive frequency, RIT offset included.</li>
+</ul>
+
+<h3>Status</h3>
+<p><span class="ui">Help</span> opens this page. <span class="ui">rig ok</span> is the radio's connection. The SDR button says <span class="ui">sdr ok</span>, or, in an alert colour, <span class="ui">sdr — reconnect</span> (press it to try again) or <span class="ui">no sdr — choose one</span>.</p>
+
+<!-- ============================================================== -->
+<h2 id="rx">3. RX</h2>
+
+<figure class="missing">
+  <img src="images/rx.png" alt="The RX tab" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <div class="ph">Screenshot to come: the RX tab, listening through the rig, ATT and IFS shown.</div>
+  <figcaption>The RX tab.</figcaption>
+</figure>
+
+<p><span class="ui">Listen through</span> chooses where the audio and the signal reading come from: <span class="ui">Rig</span> (the radio's speaker and S-meter sensor) or <span class="ui">SDR</span>. Listening through the rig, an SDR that has its own mute is muted.</p>
+
+<h3>ATT and IFS</h3>
+<p>These belong to the radio's own receiver, so they work only while you listen through the rig.</p>
+<ul>
+  <li><span class="ui">ATT</span> reduces strong signals by shifting the radio's first IF: 0 (off) to 250, in steps of 5. Higher is quieter. Switching it on from 0 starts at your last level (or 50).</li>
+  <li><span class="ui">IFS</span> (IF shift) moves the passband, from −20000 to +20000 Hz in steps of 50. Moving the slider turns IFS on.</li>
+</ul>
+<p>A slider is sent to the radio once you stop dragging; the display then shows what the radio reports back.</p>
+
+<!-- ============================================================== -->
+<h2 id="channels">4. Channels</h2>
+
+<figure class="missing">
+  <img src="images/channels.png" alt="The Channels tab" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <div class="ph">Screenshot to come: the Channels tab with a channel set, mid-scan.</div>
+  <figcaption>The Channels tab.</figcaption>
+</figure>
+
+<p>Two kinds of channel list, shown the same way:</p>
+<ul>
+  <li><b><span class="ui">Radio (20 slots)</span></b> is the radio's own memories, read the first time you open the tab. Change them here, then <span class="ui">Write to radio</span>; <span class="ui">Read from radio</span> reads them again.</li>
+  <li><b>Channel sets</b> are the app's, as many as you like, saved as you edit. The app starts you with three: <b>Time signals</b> (WWV and CHU), <b>CW calling</b> (the QRP CW frequencies) and <b>FT8</b>.</li>
+</ul>
+
+<h3>Working with channels</h3>
+<ul>
+  <li><span class="ui">Tune to</span> puts the radio on the chosen channel; the SDR follows.</li>
+  <li><span class="ui">Add VFO</span> adds where you are now; <span class="ui">Store VFO here</span> overwrites the chosen channel with it; <span class="ui">Clear</span> empties it; <span class="ui">Copy to…</span> copies channels to another set.</li>
+  <li>The <span class="ui">⋯</span> menu: <span class="ui">New set…</span>, <span class="ui">Duplicate…</span>, <span class="ui">Rename…</span>, <span class="ui">Delete set…</span>, and, for the radio's memories, <span class="ui">Save as a set…</span>.</li>
+</ul>
+
+<h3>Scanning</h3>
+<p><span class="ui">▶ Scan</span> steps through the set, <span class="ui">seconds on each</span>. With <span class="ui">hold on S</span>[n] ticked, a channel whose signal reaches that S-level is held while it lasts and left 3 seconds after it drops. <span class="ui">⏭ Skip</span> moves on now, held or not. Without a signal reading (SDR++), the scan goes by time only.</p>
+
+<div class="note"><b>Undoing a session's edits.</b> Channel-set edits save at once, with no undo. Before a session's first change the app keeps the file as it was, as <code>channels.json.bak</code> in <code>~/.ubitx_cec_desktop/</code>. To go back: quit the app, copy <code>channels.json.bak</code> over <code>channels.json</code>, and start again.</div>
+
+<!-- ============================================================== -->
+<h2 id="cw">5. CW</h2>
+
+<figure class="missing">
+  <img src="images/cw.png" alt="The CW tab" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <div class="ph">Screenshot to come: the CW tab with the radio's values.</div>
+  <figcaption>The CW tab.</figcaption>
+</figure>
+
+<p>The radio's keyer settings, as the radio reports them ("--" until it has).</p>
+<table>
+  <tr><th>Setting</th><th>Takes effect</th></tr>
+  <tr><td><span class="ui">Keyer</span>: Straight, Iambic A or Iambic B</td><td>At once</td></tr>
+  <tr><td><span class="ui">Speed (wpm)</span>, 5–60</td><td>At once</td></tr>
+  <tr><td><span class="ui">Tone (Hz)</span>, the sidetone and CW offset</td><td>After the radio restarts</td></tr>
+  <tr><td><span class="ui">Delay to TX (ms)</span>, key down to the first element</td><td>After the radio restarts</td></tr>
+  <tr><td><span class="ui">Delay to RX (ms)</span>, the last element back to receive</td><td>After the radio restarts</td></tr>
+</table>
+<p>Type a value and press Return, or click elsewhere. It goes to the radio's memory. A value waiting for a restart says so, and a <span class="ui">Restart rig</span> button appears; the app never restarts the radio on its own. Values are kept as the radio stores them, so 45 wpm may read back as 44.</p>
+
+<!-- ============================================================== -->
+<h2 id="setup">6. Setup</h2>
+
+<figure class="missing">
+  <img src="images/setup.png" alt="The Setup tab" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <div class="ph">Screenshot to come: the whole Setup tab.</div>
+  <figcaption>The Setup tab.</figcaption>
+</figure>
+
+<h3>Station</h3>
+<ul>
+  <li><span class="ui">Callsign</span> is the radio's, from its memory. Change it here and it's written to the radio, shown at start-up after a restart.</li>
+  <li><span class="ui">Appearance</span>: dark, light or following the system. <i>Not yet working.</i></li>
+  <li><span class="ui">Keep on top</span> keeps the app's window above other windows, on by default. Without it, clicking the SDR's waterfall brings the SDR's large window to the front and the app disappears behind it.</li>
+</ul>
+
+<h3>Radio</h3>
+<p>The adapter's port and speed, and <span class="ui">Connect</span>. See <a href="#first-start">First start</a>.</p>
+
+<h3>SDR</h3>
+<p>The program, whether to start it, its address and port, and the <span class="ui">CW port</span> where it sends decoded CW. See <a href="#sdr-setup">Setting up an SDR</a>.</p>
+
+<h3>Logbook</h3>
+<p>Whether QSOs are logged, the logbook file, its format and its backup.</p>
+
+<h3>Other settings</h3>
+<table>
+  <tr><th>Button</th><th>What it's for</th></tr>
+  <tr><td><span class="ui">EEPROM settings…</span></td><td>Settings kept in the radio's memory: show the callsign at start-up, the S-meter reports switch, and the eight <b>S-meter levels</b> for the radio's S-meter sensor. Levels all at 0 read every signal as about S9; set them if you listen through the radio's sensor.</td></tr>
+  <tr><td><span class="ui">Machine settings…</span></td><td>How the app paces commands to the radio (the command headroom), and, under Advanced, the link's timings, with a reset. Leave these alone unless the radio misses commands.</td></tr>
+  <tr><td><span class="ui">Backup and restore…</span></td><td>The radio's calibration and CW settings side by side with your config file and the radio's factory copy: <span class="ui">From the radio → Config file</span>, <span class="ui">Config file → To the radio</span> and <span class="ui">Factory → To the radio</span>. It lists the changes and asks before writing. Most take effect after a restart, and the dialog offers one. The factory copy itself is never written.</td></tr>
+  <tr><td><span class="ui">SDR settings…</span></td><td>The SDR program's location, and the default filter widths for each mode.</td></tr>
+  <tr><td><span class="ui">About…</span></td><td>Versions, including the firmware the radio reported, and where the settings are kept.</td></tr>
+</table>
+
+<p>Everything the app keeps is in one folder, <code>~/.ubitx_cec_desktop/</code>: settings, channel sets, window position, pinned pop-ups, and your own SDR program and control descriptions.</p>
+
+<!-- ============================================================== -->
+<h2 id="trouble">7. When things go wrong</h2>
+
+<h4>"The port opened but the radio is not answering"</h4>
+<p>Is the radio on, and are the adapter's TX and RX the right way round (adapter RX to the radio's send line)? The app waits up to 10 seconds for a radio that's still starting.</p>
+
+<h4>The console fills with the same report, over and over</h4>
+<p>Something is feeding the radio's serial input. A monitoring USB-to-TTL adapter on the same lines does it. Unplug it, or connect only its GND and RX; power-cycling the adapter clears it.</p>
+
+<h4>The SDR doesn't follow</h4>
+<p>Check the SDR button on Operate. If it says reconnect, check the program's server setting (see <a href="#sdr-setup">Setting up an SDR</a>) and press it.</p>
+
+<h4>Seeing what the app is doing</h4>
+<p>Start the app from a terminal with <code>UBITX_SDR_TRACE=1</code> set, and the console shows every command sent to the SDR and every change it reports. That's the first thing to send with a problem report.</p>
+
+<p style="margin-top:48px;color:var(--muted);font-size:14px">uBITX CEC Desktop. KD8CEC firmware by Ian Lee, KD8CEC.</p>
+</main>
+</div>
+<script>
+  // A screenshot that is there replaces its placeholder; one that is not
+  // leaves it. (onerror/onload above do the same for each image.)
+  document.querySelectorAll('figure img').forEach(function (img) {
+    if (img.complete && img.naturalWidth > 0) img.parentNode.classList.remove('missing');
+  });
+</script>
+</body>
+</html>

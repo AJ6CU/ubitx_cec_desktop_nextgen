@@ -235,7 +235,13 @@ def _read_raw(path, where):
         return {}
     try:
         with open(path, "r", encoding="utf-8") as handle:
-            data = json.load(handle)
+            text = handle.read()
+        # FIX (2026-11-10): AN EMPTY FILE IS AN EMPTY FILE -- nothing set,
+        # not an error (Mark: a 0-byte ~/.ubitx_cec_desktop/sdr_programs.json
+        # was reported as unreadable at every start).
+        if not text.strip():
+            return {}
+        data = json.loads(text)
     except Exception as err:
         print(f"[sdr] {where} ({path}) could not be read: {err}")
         return {}
@@ -332,7 +338,10 @@ def set_user_setting(key, name, value):
     if os.path.exists(USER_FILE):
         try:
             with open(USER_FILE, "r", encoding="utf-8") as handle:
-                data = json.load(handle)
+                text = handle.read()
+            # FIX (2026-11-10): empty is nothing written yet -- written over,
+            # not refused as unreadable (it held nothing to lose).
+            data = json.loads(text) if text.strip() else {}
         except Exception as err:
             print(f"[sdr] your programs file ({USER_FILE}) could not be read, so it "
                   f"was not changed: {err}")

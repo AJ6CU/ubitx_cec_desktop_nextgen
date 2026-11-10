@@ -501,6 +501,15 @@ class RigctlSDR:
                 # extended form, which ends with RPRT, so an SDR without the
                 # line costs no wait.
                 self._span_list = _spectrum_spans(client.query("+\\dump_caps", lines=20))
+                # FIX (2026-11-10): SAID, once -- a query is not a command, so
+                # the trace never showed it (Mark could not see it was asked).
+                if self._span_list:
+                    print("[sdr] spans from \\dump_caps: "
+                          + ", ".join(f"{s // 1000:g} kHz" if s < 1_000_000
+                                      else f"{s / 1e6:g} MHz" for s in self._span_list))
+                else:
+                    print("[sdr] no spans listed in \\dump_caps -- the span slider "
+                          "steps by powers of two from the SDR's span")
 
         # FIX (2026-11-06): discover VFO A/B -- see VFO_AB.
         self.active_vfo = None

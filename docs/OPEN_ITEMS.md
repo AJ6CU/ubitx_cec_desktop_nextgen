@@ -1,4 +1,4 @@
-# Open items — ubitx_cec_desktop (2026-11-06)
+# Open items — ubitx_cec_desktop (2026-11-10)
 
 The short list. Detail for each is in TODO.md.
 
@@ -6,7 +6,7 @@ The short list. Detail for each is in TODO.md.
 
 - **Power/SWR meter:** waits for the future Pico board's sensor (the switch and factors are in Machine settings, greyed).
 - **S-meter calibration:** set the SDR's S9 point from a known signal, and the radio S-meter sensor's eight levels from the SDR's reading (today the levels are typed in EEPROM settings).
-- **RX tab:** ATT and IFS aren't wired.
+- **RX tab ATT/IFS and the SDR "-none-" choice:** built 2026-11-10 (att_ifs_none.zip), to try at the station.
 - **Setup, Log QSO:** check what's still not read or saved -- the Appearance choice on Station is still a placeholder.
 - **Startup recovery:** a slow-booting rig is no longer called silent, and missing values are fetched by restarting it (confirmed 2026-11-06). Still to watch: the "skipped bytes" at startup -- the hex lines will show if reports run together.
 - **The SDR connection can stall the window** for half a second when the SDR stops answering. A thread would fix it.
@@ -50,8 +50,8 @@ The short list. Detail for each is in TODO.md.
 ## Hardware
 
 - Rewire the USB-TTL monitor adapter: GND and RX only.
-- **Brown #469 follow-ups:** PR #641 (the spans in `\dump_caps`) opened 2026-11-10, app side built and checked; waiting on review. Next: PR 2, the waterfall refit (option A, interface only).
+- **Brown #469 follow-ups:** PR #641 (the spans in `\dump_caps`) approved by the maintainer, his two small points done (amended a75c9098); waiting on the merge. App side built and checked. Next (tomorrow): PR 2, the waterfall refit (option A, interface only).
 - **Frequency calibration:** a WWV routine in the app (master cal from a zero-beat); later, measuring the TX carrier through Brown's TCI IQ.
 - **RIT and split testing: DONE 2026-11-10.** A-F pass from the app and from Brown, split now synced both ways with Brown. Decided: in split a VFO transmits on its receive frequency, RIT offset included.
 - **TX offset:** key-down lands ~950 Hz above the dial in USB -- tone or calibration? Check master cal.
-- **Test upkeep:** the lock test's stand-in lacks `toggle_rit_for_operator` (8/10).
+- **Test upkeep:** the lock test's stand-in lacks `toggle_rit_for_operator` (8/10); one stale case in test_cw_values.py (the restart offer).

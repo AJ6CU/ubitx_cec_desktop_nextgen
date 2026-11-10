@@ -395,7 +395,23 @@ rig and SDR++. Still to do, roughly in order of value:
     a rig set to 437 Hz should not read as 425.
   * **"Copy VFO A to B on split" is a SETTING, not the rig's** -- it belongs
     with the configuration, not on this tab's rig controls.
-* **The RX tab** -- ATT (`vf_`) and IFS (`ci_`, `vi_`), the same way.
+* **The RX tab** -- ATT (`vf_`) and IFS (`ci_`, `vi_`). BUILT 2026-11-10
+  (att_ifs_none.zip), NOT YET TRIED AT THE STATION. A switch and a slider
+  each, KD8CEC menu limits (ATT 0-250 in 5s, 0 = off; IFS -20000..20000 Hz
+  in 50s); live only listening through the rig, rig connected, not locked --
+  else greyed with a line saying why. The rig leads: the model changes on
+  its reports (the firmware applies any command with setFrequency and
+  reports what changed). Switch sent at once, slider once it rests (200 ms),
+  shown value held 1.5 s. ATT on from 0 goes to the last level or 50; moving
+  the IFS slider turns IFS on. FIXED: Set_IFS_Level sent the fourth byte as
+  0 -- a negative shift would have arrived as about +16 MHz; now signed 32
+  bits. uBITX_Link.set_att / set_ifs (value, then the toggle a settle later).
+  ALSO (Mark): the SDR choice "-none-" (sdr_programs.NONE_CHOICE), first and
+  the default; with it Connect, Start it, address and port are greyed
+  (_show_sdr_fields), and choosing it applies at once -- an SDR in use let
+  go, listening switched to the rig. test_att_ifs.py 8/8 (0/8 on the old
+  files). NOTE: test_cw_values.py has one stale case (the restart offer),
+  failing on the files before this change too -- the test, not the app.
 * ~~Lock, mute and TX-stop are handled as toggles.~~ DONE 2026-11-06: all
   three report their STATE, checked on the rig -- lock 1/0, TX off 1/0,
   speaker 1 in SDR mode (muted) and 0 in speaker mode. The handlers read it
@@ -1379,6 +1395,14 @@ Five PRs prepared 2026-09-28/29 (sdroxide_prs_bundle.zip, with instructions):
    makes the slider offer exactly those; without it, the old powers of two.
    test_span.py 13/13. Works at the station with the PR build. When #641 is
    merged and released: remove MAX_SPAN_HZ and the trim-on-refusal.
+   REVIEWED 2026-11-10 by F4NRM: "Looks good", two non-blocking points, both
+   done and the commit amended (a75c9098, force-pushed): the comment on
+   dump_caps cites Hamlib's source for the label (tests/dumpcaps.c
+   `fprintf(fout, "Spectrum spans: %s\n", prntbuf)`, permalink at Hamlib
+   9199f8a2; src/sprintflst.c "%.0f " each) -- and corrects "ascending":
+   Hamlib only requires the list to end with 0, the rigs list narrowest
+   first; TODO.md's line carries "[#641](...) · rigctl: list the spans...".
+   Reply posted (REPLY.md). Waiting on the merge.
    PR 2 NEXT: the waterfall refit -- OPTION A (Mark, 2026-11-10): interface
    only, no wire change -- brown's window refits to the whole new span when
    the decimation changes and that window did not ask for it (rigctl,
