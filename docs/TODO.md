@@ -312,7 +312,7 @@ rig and SDR++. Still to do, roughly in order of value:
   (so the scanner's hold-on-signal threshold moves with it too). The
   operator finds S9 with whatever source they trust: S9 reading S7 wants
   9/7, ~129 %. test smscale/test_s_meter_scale.py 5/5 (2/5 on the old
-  files). The rig's eight levels from the SDR's reading -- DROPPED (Mark,
+  files). CONFIRMED at the station 2026-11-10. The rig's eight levels from the SDR's reading -- DROPPED (Mark,
   2026-11-10): the two are not connected; the eight levels serve only the
   rig's own S-meter sensor, which is not used while the SDR is enabled. Not done: a live A7
   reading to calibrate against (the firmware's ADC command loops until the
@@ -325,6 +325,7 @@ rig and SDR++. Still to do, roughly in order of value:
   setting live; on Linux it depends on the desktop (GNOME-style settings
   are read; where nothing can be read, CustomTkinter shows Light -- choose
   Dark there). test appear/test_appearance.py 4/4 (0/4 on the old file).
+  CONFIRMED at the station 2026-11-10.
 * **Machine and general settings dialogs (Mark, 2026-11-06).** The S-meter
   calibration (sMeterLevels) and many other machine and general settings
   need dialogs to set them -- they are in the original Main branch, to be
@@ -412,7 +413,7 @@ rig and SDR++. Still to do, roughly in order of value:
     with the configuration, not on this tab's rig controls.
 * **The RX tab** -- ATT (`vf_`) and IFS (`ci_`, `vi_`). BUILT 2026-11-10
   (att_ifs_none.zip). ATT AND IFS CONFIRMED at the station 2026-11-10 (Mark);
-  "-none-" not yet reported. A switch and a slider
+  "-none-" CONFIRMED 2026-11-10 too. A switch and a slider
   each, KD8CEC menu limits (ATT 0-250 in 5s, 0 = off; IFS -20000..20000 Hz
   in 50s); live only listening through the rig, rig connected, not locked --
   else greyed with a line saying why. The rig leads: the model changes on
@@ -447,7 +448,7 @@ rig and SDR++. Still to do, roughly in order of value:
   the upload steps, ubitx.h and IDE screenshots, each SDR program's server
   setting, an SDRangel guide. KEEP ON TOP moved to Setup > Station as a
   switch, saved under "Preferences" and ON by default. test_help.py 3/3.
-* **LOG QSO WROTE NOTHING -- FIXED 2026-11-11 (log_qso.zip), to check.**
+* **LOG QSO WROTE NOTHING -- FIXED 2026-11-11 (log_qso.zip), CONFIRMED at the station 2026-11-10.**
   The new window's dialog was a mock-up: Log only closed it (Mark:
   ~/uBITX_Logbook.adi never changed). New logbook.py -- the old app's
   QSOLogger without its hidden tk.Tk() and message boxes: ADIF or CSV, the
@@ -1484,6 +1485,13 @@ Five PRs prepared 2026-09-28/29 (sdroxide_prs_bundle.zip, with instructions):
    35a6c197) -- no build from main needed for the span. #491 (APF) is NOT in
    that tag; it comes in the next pre-release.
    Upstream SDRoxide: offer #479's change there too, later.
+   PORTING TO UPSTREAM (2026-11-10): drafts ready -- the heads-up to Brown's
+   maintainer (sdroxide/brown/brown_ask_backport.md, worded as an FYI so he
+   need not refuse anything) and the upstream issue (sdroxide/
+   issue_port_from_brown.md: #463, #479, #641, #666, #491; upstream v1.7.0
+   already has our v1.6.11 four, VFO/split/RIT and the clamped-width
+   compare). ON HOLD (Mark): post nothing until Brown merges #666, in case
+   he is sensitive about it. Order then: Brown first, upstream after.
    *NEXT, once it works on the station:* ask brown to make the DEVICE RATE
    readable over rigctl -- #479 already carries it in RigState
    (`device_rate_hz`); it just is not exposed. With it the app computes the
@@ -1699,8 +1707,8 @@ Five PRs prepared 2026-09-28/29 (sdroxide_prs_bundle.zip, with instructions):
    RIT has been given the SDR. RX/TX shown as blue badges, VFO in capitals.
    Tests: test_rit_vfo 21/21, test_exchange 8/8, test_vfo_sync 18/18.
    The D5 "fix only if seen" item is DONE. The lock test's stand-in fixed 2026-11-10 (10/10).
-   Noted: TX lands ~950 Hz above the dial in USB -- check whether it is the
-   audio tone or calibration (master cal).
+   ~~TX lands ~950 Hz above the dial in USB~~ -- CLOSED 2026-11-10: the
+   radio's calibration (Mark), not the app.
    FREQUENCY CALIBRATION (Mark, 2026-11-10). FIRST CHOICE: a routine in the
    app on WWV -- the rig's own receive on 10 MHz in CW through the rig's
    speaker, tuned until the carrier sits at the CW tone (or matched to a
@@ -1920,7 +1928,8 @@ untested, so the gate is 8.1.0. Lower it only after checking an 8.0.0.
   window showed LSB; back to USB read 3000 / 0. *Done:* `rest_sdr.
   PASSBAND_FIXED_IN = (8, 1, 0)`; `_stale_passband` is true only for a WDSPRx
   on an older SDRangel. On 8.1.0: separate PATCHes, the read-back check, and
-  following SDRangel's own filter knobs again. *To check at the station:*
+  following SDRangel's own filter knobs again. CONFIRMED at the station on
+  8.1.0, 2026-11-10. *Was to check:*
   USB/LSB/CW switches from the rig, and dragging the filter in SDRangel's
   WDSP window moves the rig's mode/width.
 - ~~SSB DEMODULATOR'S dnrScheme IGNORED over REST~~ FIXED in 8.1.0: PATCH
@@ -1942,6 +1951,85 @@ untested, so the gate is 8.1.0. Lower it only after checking an 8.0.0.
   not re-checked on 8.1.0 (optional).
 - *Station setup after the 8.1.0 checks:* remove the temporary SSB
   demodulator; keep WDSPRx as channel 0 and one Channel Power; save.
+
+### The app's own processor use (2026-11-11, low priority)
+
+On the Pi 5 the app (python3) uses about 10 % of one core, with Brown
+connected: polling Brown and reading the rig, plus Tk redraws (S-meter,
+dials, frequency readouts). Fine today, but worth trimming before field
+laptops: the S-meter redraws on every signal reading even when it barely
+moved -- skip redraws for changes below a step, and slow the signal poll
+while nothing changes. Measure first (cProfile, or `top` with each piece
+switched off) rather than guessing.
+
+### Field-laptop floor (2026-11-11)
+
+Brown on a ThinkPad X1 Carbon 2nd gen (20A7: i7-4600U, 2 cores / 4
+threads, Intel HD 4400, 8 GB, Windows 11): NOT ENOUGH. Audio stutters
+with Brown's dropped-sample warnings. The GPU ran 90 %+ drawing the
+waterfall (OpenGL no better than the default); 10 fps and a smaller
+window brought it to 30 %, but Brown alone then used 70-90 % of the
+processor and still dropped samples, even at a 250 kHz sample rate.
+Nothing else was busy.
+RASPBERRY PI 5 (16 GB, Trixie, Brown built from source): clicks at
+first, `top` 367 % of 400. Settled with 10 fps, 1.024 Msps and
+(tried) Vulkan: about 275 % in USB, over 300 % in CW (Brown's CW
+decoding -- the skimmer, SKIM, runs in CW sub-bands), and no clicks
+heard (2026-11-11). The sample rate barely moved the load on either
+machine: it is mostly Brown's display and decoders. For the help page: a minimum of about a 4-core
+processor from the last 6-8 years with 8 GB, and on slower machines a
+lower screen update rate (10-15 fps), a smaller Brown window, SKIM off,
+and on a Pi WGPU_BACKEND=vulkan if the monitor does not flicker
+(export it in ~/.profile so the app's autostart gets it too).
+FOR THE HELP PAGE, RASPBERRY PI (2026-11-11) -- BROWN'S SETTINGS ON A
+PI 5 (Mark): Vulkan (`export WGPU_BACKEND=vulkan` in ~/.profile), Screen
+update rate 10 fps, sample rate no more than 1.024 Msps (lower not
+tried). CW loads it more than SSB, probably Brown's CW decoding; keep the
+SKIM chip off if it clicks in CW.
+The Pi 5 is the minimum Pi
+-- a Pi 4's processor and graphics are much slower, and the Pi 5 already
+needed its display turned down. Memory is not the limit: Brown, the app
+and the desktop used about 1.25 GB of 16, so a 4 GB Pi 5 runs it the
+same (2 GB probably, with less margin). BUILDING Brown needs more memory
+than running it: on a 4 GB Pi build with `-j 2`, enlarge the swap if the
+build is killed (out of memory / signal 9), or build on a bigger Pi 5
+and copy target/release/sdroxide across. Also for that page: rustup's
+pinned toolchain, the udev rule, `--probe`, the locale (en_US.UTF-8, not
+plain en_US), IPv6 trouble making cargo fail at once (`curl -4` vs `-6`),
+Brown's QRG off, and no audio out on the Pi 5 itself (a USB sound
+adapter, or HDMI with speakers). Windows testing continues on the
+desktop.
+
+### Brown's QRG chip (2026-11-11)
+
+In CW, Brown's main readout can show the dial (QRG off) or the frequency
+being copied, dial + CW pitch (QRG on, a chip in Brown's CW operating panel,
+saved per install). With QRG on, the Pi's Brown read 700 Hz above the app
+in CW and matched in USB; turning QRG off made them agree, as on the Mac.
+The app sends the rig's frequency unchanged either way. Worth a line in the
+help page's SDRoxide section: keep QRG off so the two readouts agree.
+
+### Packaging (2026-11-10)
+
+**A wheel -- DONE, CONFIRMED on the Mac.** packaging/build_wheel.py copies
+src/ (no test_*.py), the shipped JSON and help/ into build/wheel/
+ubitx_cec_app/ with packaging/launcher.py as __main__.py, writes a
+pyproject (version from globalvars.APPVERSION), and pip-builds
+dist/ubitx_cec_desktop-<ver>-py3-none-any.whl. Command `ubitx-cec-desktop`,
+or `python -m ubitx_cec_app`. The package is ubitx_cec_app, since a package
+named ubitx_cec_desktop would shadow the main program; the launcher puts its
+folder on sys.path so the flat imports work unchanged. Depends on
+customtkinter, pyserial, psutil, and sCTk from GitHub (a URL dependency --
+not on PyPI; PyPI refuses such wheels, so sCTk goes to PyPI first if this
+ever does). TK IS NOT PIP-INSTALLABLE: Homebrew's Python 3.15 had none
+(`brew install python-tk@3.15` fixed it); the launcher now says so plainly
+instead of a traceback. APPVERSION still "1.0", APPDATE "June 15, 2026".
+
+**Install scripts for all three platforms -- LATER (Mark).** Check for and
+install Tk (Homebrew python-tk@3.x; apt python3-tk; python.org builds have
+it), git (for sCTk), a venv, then the wheel. Revisit the Tk check then.
+Beyond that: a standalone bundle (PyInstaller/Briefcase, signed on the Mac)
+so users need no Python at all.
 
 ### Much later
 

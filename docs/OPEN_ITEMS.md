@@ -5,17 +5,13 @@ The short list. Detail for each is in TODO.md.
 ## The app
 
 - **Power/SWR meter:** waits for the future Pico board's sensor (the switch and factors are in Machine settings, greyed).
-- **S-meter scale (s_meter_scale.zip):** a 0-200 % factor in Setup > SDR settings (100 = as before), to check at the station.
-- **SDR "-none-" choice:** built, to check at the station.
 - **Help page:** built (help_page.zip): getting started, firmware, the four tabs and Setup. Needs your screenshots and photos (help/SHOTLIST.md), the USB-TTL wiring, and the "To fill in" parts. "Keep on top" is now in Setup > Station.
-- **Log QSO:** now writes the logbook and is greyed while logging is off (log_qso.zip), to check at the station.
-- **Appearance (appearance.zip):** Dark / Light / Follow system in Setup > Station, Follow system by default -- to check: switch each, and the Mac's own dark/light switch with Follow system.
 - **Startup flood (2026-11-10):** an unrecoverable start-up, looping on "Tuning Preset 1". Mark to catch the console next time. If it is the rig flooding (as with the USB-TTL adapter): restart the rig once when the repeat warning fires, a second time at most, then say to power-cycle or unplug the adapter.
 - **Startup:** watch the "skipped bytes" at startup -- the hex lines will show if reports run together.
 - **The SDR connection can stall the window** for half a second when the SDR stops answering. A thread would fix it.
 - **SDRoxide vs. SDRoxide Brown on the Mac:** they have the same app name, so the app can start or attach to the wrong one. Pick one of the three options in TODO.
 - **Frequency calibration:** a WWV routine in the app (master cal from a zero-beat); later, measuring the TX carrier through Brown's TCI IQ.
-- **TX offset:** key-down lands ~950 Hz above the dial in USB -- tone or calibration? Check master cal.
+- **Install scripts for Mac, Linux and Windows (later):** the wheel works (packaging/build_wheel.py, CONFIRMED 2026-11-10 once Tk was installed). The scripts should check for Tk and install it where they can (Homebrew `python-tk@3.x`, apt `python3-tk`), git for sCTk, and a venv. Revisit the launcher's Tk message then.
 - **Low priority:**
   - `socket://` doesn't take an IPv6 address;
   - there's no way to give a command line for rigctld;
@@ -29,17 +25,16 @@ The short list. Detail for each is in TODO.md.
 
 ## Waiting on others
 
-- **Brown #666 (the waterfall refit):** waiting on review. It also carries #641's two review fixes, which missed that merge.
+- **Brown #666 (the waterfall refit):** F4NRM's review (2026-11-11) answered: the DEC chip's asks are now a list (two quick clicks keep the zoom), a refused ask expires after 2 s, the sim goes through the real calls, TODO carries #666. 34 tests pass and checked on the Mac at the station. Amend, force-push and post brown_666_reply.md; then waiting on re-review.
 - **Brown #641 in a release:** then drop the 20 MHz span guess in the app.
 - **brown SUB over rigctl:** a second receiver for split listening. Ask in an issue first.
-- **Upstream SDRoxide:** port APF and the span.
+- **Upstream SDRoxide:** port #463, #479, #641, #666, #491. ON HOLD until Brown merges #666: then post the heads-up to Brown (sdroxide/brown/brown_ask_backport.md), then the upstream issue (sdroxide/issue_port_from_brown.md), trimmed to what he is happy with.
 - **SDRangel:** report the frozen `channelPowerDB` in the WDSP receiver's report (34.89 dB whatever the signal, 8.1.0).
 
 ## Needs an antenna
 
 - **CW pitch:** check it's heard at the right pitch through SDRangel.
 - **WDSP receiver:** go through its checks on the station.
-- **SDRangel 8.1.0 (sdrangel_version.zip):** check the console says "SDRangel 8.1.0"; USB/LSB/CW from the rig; dragging the filter in SDRangel's WDSP window moves the rig; optional: the SSB demodulator's NR scheme knob turns (only when it is the only demodulator -- the app prefers WDSP). Then remove the temporary SSB demodulator and save.
 
 ## Library and Designer
 
