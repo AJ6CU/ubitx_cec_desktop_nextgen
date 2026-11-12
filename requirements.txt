@@ -1,0 +1,10 @@
+# What uBITX CEC Desktop needs -- ONE LIST, used by:
+#   * development:  pip install -r requirements.txt   (and PyCharm reads it)
+#   * the wheel:    packaging/build_wheel.py copies these into the wheel's
+#                   dependencies, so the two cannot drift apart.
+# Tk is not here: it comes with Python, not from pip (see packaging/README.md).
+
+scustomtkinter>=0.2.1
+customtkinter>=6.0
+pyserial
+psutil

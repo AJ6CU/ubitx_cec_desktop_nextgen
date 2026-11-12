@@ -4,7 +4,9 @@
 python3 packaging/build_wheel.py
 ```
 
-This writes `dist/ubitx_cec_desktop-<version>-py3-none-any.whl`. The version comes from `APPVERSION` in `src/globalvars.py`, which is the only place to change it. `src/` itself is not touched.
+This writes `dist/ubitx_cec_desktop-<version>-py3-none-any.whl`. The version comes from `APPVERSION` in `src/globalvars.py`, and the dependencies from `requirements.txt` at the top of the repository: each is kept in one place only. `src/` itself is not touched.
+
+To run from source instead, install the same list into a virtual environment with `pip install -r requirements.txt`.
 
 ## Installing it
 

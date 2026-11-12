@@ -651,7 +651,8 @@ class RolePanel(sCTkFrame):
     """
 
     def __init__(self, master, role, app, **kw):
-        super().__init__(master, border_width=1, corner_radius=6, **kw)
+        # FIX (2026-11-11): 2 / 8, not 1 / 6 -- see the settings table.
+        super().__init__(master, border_width=2, corner_radius=8, **kw)
         self._role = role
         self._app = app
 
@@ -2237,7 +2238,8 @@ class UbitxCecDesktop(sCTk):
         # rest of the time. One line, filling from the left and then scrolling left;
         # the decoder sends it in chunks about every three seconds. See
         # SDR_Link._set_decoding.
-        self.decode_strip = sCTkFrame(page, border_width=1, corner_radius=6)
+        # FIX (2026-11-11): 2 / 8, not 1 / 6 -- see the settings table.
+        self.decode_strip = sCTkFrame(page, border_width=2, corner_radius=8)
         sCTkLabelTertiary(self.decode_strip, text="DEC").pack(side="left", padx=(8, 6), pady=3)
         self.decode_label = sCTkLabelPrimary(self.decode_strip, text=" ",
                                              anchor="w")
@@ -5273,7 +5275,7 @@ class UbitxCecDesktop(sCTk):
         """
         win = sCTkToplevel(self)
         win.title("Radio settings — compare and copy")
-        self._over_app(win, 700, 440)
+        self._over_app(win, 700, 500)   # FIX (2026-11-11): taller, for the note's own line
         win.transient(self)
 
         body = sCTkFrame(win, fg_color="transparent", border_width=0)
@@ -5296,9 +5298,15 @@ class UbitxCecDesktop(sCTk):
                                   command=lambda _v: repaint())
         way.set(TO_FILE)
         way.pack(side="left")
-        sCTkLabelTertiary(direction, text="   differences are marked").pack(side="left", padx=8)
+        # FIX (2026-11-11): on its own line, under the choice -- beside it the
+        # row was wider than the 700-point window and the note was cut off
+        # ("ifferences are mark", Mark).
+        sCTkLabelTertiary(body, text="Differences are marked.").pack(anchor="w", pady=(0, 8))
 
-        table = sCTkFrame(body, border_width=1, corner_radius=6)
+        # FIX (2026-11-11): 2 / 8, not 1 / 6 -- at a 1-point border and
+        # radius 6, CustomTkinter's drawn corners left a gap where each arc
+        # meets the straight side (Mark); 2 / 8 closes it.
+        table = sCTkFrame(body, border_width=2, corner_radius=8)
         table.pack(fill="both", expand=True)
         head = sCTkFrame(table, fg_color="transparent", border_width=0)
         head.pack(fill="x", padx=8, pady=(6, 2))
@@ -5306,7 +5314,10 @@ class UbitxCecDesktop(sCTk):
                             ("In the radio", 130), ("Config file", 130)):
             sCTkLabelTertiary(head, text=text, width=width, anchor="w").pack(side="left")
         rows_frame = sCTkFrame(table, fg_color="transparent", border_width=0)
-        rows_frame.pack(fill="x")
+        # FIX (2026-11-11): padx -- packed edge to edge, the rows' own
+        # background covered the table's 1-point border down both sides,
+        # leaving only the rounded top and bottom (Mark).
+        rows_frame.pack(fill="x", padx=4)
 
         # The ticks, kept across repaints -- rows are rebuilt as values arrive.
         ticks = [tk.BooleanVar(value=False) for _ in self.BACKUP_ROWS]

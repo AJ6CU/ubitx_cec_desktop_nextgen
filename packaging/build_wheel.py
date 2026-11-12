@@ -18,8 +18,10 @@ Install and run:
 WHAT IT DOES. src/ is left exactly as it is. Its program files, the shipped
 JSON and help/ are copied into build/wheel/ubitx_cec_app/ with a launcher as
 __main__.py (see launcher.py), and a pyproject.toml is written beside them
-with the version from globalvars.APPVERSION -- one place to change it. The
-src/ test_*.py files are left out.
+with the version from globalvars.APPVERSION -- one place to change it --
+and the dependencies from requirements.txt at the top of the repository,
+the same list development installs from. The src/ test_*.py files are left
+out.
 
 The package is ubitx_cec_app, not ubitx_cec_desktop: the main program is
 ubitx_cec_desktop.py, and a package of the same name would shadow it.
@@ -68,14 +70,7 @@ classifiers = [
     "Operating System :: OS Independent",
     "Topic :: Communications :: Ham Radio",
 ]
-dependencies = [
-    # From PyPI since 2026-11-12 (0.2.1) -- no git needed to install the
-    # app any more, which was the Windows install's stumbling block.
-    "scustomtkinter>=0.2.1",
-    "customtkinter>=6.0",
-    "pyserial",
-    "psutil",
-]
+dependencies = {dependencies}
 
 [project.scripts]
 ubitx-cec-desktop = "{package}.__main__:main"
@@ -87,6 +82,31 @@ include-package-data = false
 [tool.setuptools.package-data]
 {package} = {data}
 """
+
+
+REQUIREMENTS = os.path.join(ROOT, "requirements.txt")
+
+
+def dependencies():
+    """
+    The wheel's dependencies: requirements.txt at the top of the repository,
+    the one list development uses too. Comments and blank lines are skipped.
+    pip-only lines (-r, -e, --index-url ...) are refused rather than copied,
+    since a wheel cannot carry them.
+    """
+    found = []
+    with open(REQUIREMENTS, encoding="utf-8") as f:
+        for raw in f:
+            line = raw.split("#", 1)[0].strip()
+            if not line:
+                continue
+            if line.startswith("-"):
+                raise SystemExit(f"requirements.txt: {line!r} is a pip option, not a "
+                                 f"dependency -- a wheel cannot carry it")
+            found.append(line)
+    if not found:
+        raise SystemExit("requirements.txt lists no dependencies")
+    return found
 
 
 def ignore(folder, names):
@@ -114,9 +134,10 @@ def main():
             f.write("# uBITX CEC Desktop\n\nRun with `ubitx-cec-desktop`.\n")
     with open(os.path.join(STAGE, "pyproject.toml"), "w", encoding="utf-8") as f:
         f.write(PYPROJECT.format(version=ver, package=PACKAGE,
+                                 dependencies="[" + ", ".join(f'"{d}"' for d in dependencies()) + "]",
                                  data="[" + ", ".join(f'"{d}"' for d in DATA) + "]"))
     os.makedirs(DIST, exist_ok=True)
-    print(f"building ubitx-cec-desktop {ver} ...")
+    print(f"building ubitx-cec-desktop {ver} ... needs: {', '.join(dependencies())}")
     subprocess.check_call([sys.executable, "-m", "pip", "wheel", "--no-deps",
                            "-w", DIST, STAGE] + sys.argv[1:])
     print(f"done -- {DIST}")
