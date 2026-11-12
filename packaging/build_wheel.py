@@ -69,11 +69,10 @@ classifiers = [
     "Topic :: Communications :: Ham Radio",
 ]
 dependencies = [
-    # Not on PyPI: installed from its GitHub repository (needs git). A wheel
-    # with a URL dependency cannot go to PyPI itself; publish sCTk there
-    # first, then make this "scustomtkinter>=0.1.6.2".
-    "scustomtkinter @ git+https://github.com/aj6cu/sCustomTkinter/",
-    "customtkinter",
+    # From PyPI since 2026-11-12 (0.2.1) -- no git needed to install the
+    # app any more, which was the Windows install's stumbling block.
+    "scustomtkinter>=0.2.1",
+    "customtkinter>=6.0",
     "pyserial",
     "psutil",
 ]
