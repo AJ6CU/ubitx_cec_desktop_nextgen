@@ -65,7 +65,10 @@ say "Installing the program and what it needs from PyPI -- a minute or two the f
 # Made here, on this Mac, so macOS does not treat it as downloaded. It starts
 # the program and writes its messages to ~/Library/Logs/uBITX CEC Desktop.log.
 rm -rf "$BUNDLE"
-mkdir -p "$BUNDLE/Contents/MacOS"
+mkdir -p "$BUNDLE/Contents/MacOS" "$BUNDLE/Contents/Resources"
+# The program's own icon, from the installed package.
+PKG="$("$VENV/bin/python" -c 'import os, ubitx_cec_app; print(os.path.dirname(ubitx_cec_app.__file__))')"
+cp "$PKG/icons/icon.icns" "$BUNDLE/Contents/Resources/AppIcon.icns" 2>/dev/null
 cat > "$BUNDLE/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -74,6 +77,7 @@ cat > "$BUNDLE/Contents/Info.plist" <<PLIST
   <key>CFBundleDisplayName</key><string>$APP</string>
   <key>CFBundleIdentifier</key><string>net.aj6cu.ubitx-cec-desktop</string>
   <key>CFBundleExecutable</key><string>start</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>NSHighResolutionCapable</key><true/>
 </dict></plist>
@@ -83,6 +87,7 @@ cat > "$BUNDLE/Contents/MacOS/start" <<START
 exec "$VENV/bin/python" -m ubitx_cec_app >> "\$HOME/Library/Logs/$APP.log" 2>&1
 START
 chmod +x "$BUNDLE/Contents/MacOS/start"
+touch "$BUNDLE"     # so Finder shows the new icon rather than a cached one
 
 say "DONE. $APP is installed.
   Start it from Applications (in your home folder), Launchpad or Spotlight.

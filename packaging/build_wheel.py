@@ -39,7 +39,7 @@ STAGE = os.path.join(ROOT, "build", "wheel")
 PACKAGE = "ubitx_cec_app"
 DIST = os.path.join(ROOT, "dist")
 
-DATA = ("*.json", "help/*", "help/images/*")
+DATA = ("*.json", "help/*", "help/images/*", "icons/*")
 SKIP = ("test_*.py",)
 
 

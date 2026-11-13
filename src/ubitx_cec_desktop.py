@@ -1010,6 +1010,7 @@ class UbitxCecDesktop(sCTk):
     def __init__(self):
         super().__init__()
         self.title("uBITX CEC Desktop")
+        self._set_window_icon()   # FIX (2026-11-13)
         # FIX (2026-11-13): HIDDEN UNTIL IT HAS ITS SIZE (Mark: "on startup a
         # lot of resizing going on -- a much larger window, then replaced by
         # the smaller"). Shown by _fit_to_content, once sized. CustomTkinter
@@ -1349,6 +1350,31 @@ class UbitxCecDesktop(sCTk):
         box = getattr(self, "radio_box", None)
         if box is not None:
             self._group_note(box, self.rig_note)
+
+    # -- the application's icon ---------------------------------------------
+    def _set_window_icon(self):
+        """
+        FIX (2026-11-13): THE APPLICATION'S ICON on its window, the Dock and
+        the taskbar -- the tuning knob from the first version (src/icons/,
+        transparent set). Without it: Python's rocket in the Dock, and on
+        Windows CustomTkinter's own icon, which it puts on any window whose
+        iconbitmap() was not called.
+
+        iconphoto(True, ...) gives it to every window this application opens;
+        several sizes, so each place takes the nearest. On Windows also the
+        .ico through iconbitmap(), which is what stops CustomTkinter putting
+        its own back 200 ms later. A missing file costs the icon, nothing more.
+        """
+        import sys
+        folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icons")
+        try:
+            if sys.platform == "win32":
+                self.iconbitmap(os.path.join(folder, "icon.ico"))
+            self._icon_images = [tk.PhotoImage(master=self, file=os.path.join(folder, f"icon_{n}.png"))
+                                 for n in (256, 64, 32)]
+            self.iconphoto(True, *self._icon_images)
+        except Exception as err:
+            print(f"[app] no window icon: {err}")
 
     # -- window position and size -------------------------------------------
     def _remembered_position(self):

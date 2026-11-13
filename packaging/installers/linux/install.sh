@@ -74,6 +74,7 @@ say "Installing the program and what it needs from PyPI -- a minute or two the f
 
 # -- how to start it ---------------------------------------------------------
 mkdir -p "$BIN" "$(dirname "$MENU")"
+PKG="$("$VENV/bin/python" -c 'import os, ubitx_cec_app; print(os.path.dirname(ubitx_cec_app.__file__))')"
 ln -sf "$VENV/bin/ubitx-cec-desktop" "$BIN/ubitx-cec-desktop"
 cat > "$MENU" <<DESKTOP
 [Desktop Entry]
@@ -81,6 +82,7 @@ Type=Application
 Name=$APP
 Comment=Control a uBITX (KD8CEC firmware) alongside an SDR
 Exec="$VENV/bin/ubitx-cec-desktop"
+Icon=$PKG/icons/icon_256.png
 Terminal=false
 Categories=Network;HamRadio;
 DESKTOP

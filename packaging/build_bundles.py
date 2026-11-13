@@ -34,17 +34,20 @@ uBITX CEC Desktop {version} for Windows
 =======================================
 
 1. Install Python from https://www.python.org/downloads/windows/ if you do not
-   have it (3.10 or newer). In its installer tick "Add python.exe to PATH".
+   have it (3.10 or newer). In its installer keep "tcl/tk and IDLE" ticked.
 2. Unzip this folder anywhere (it is not needed after installing).
-3. Double-click "Install uBITX CEC Desktop.bat".
-   If Windows warns about a file from the internet, choose "Run" (or "More
-   info" then "Run anyway").
+3. Double-click "Install uBITX CEC Desktop.py". Python runs it, in a window
+   that shows its progress. If Windows asks which program should open it,
+   choose Python. It does not need "Run as administrator".
 4. Start the program from the Start menu or the Desktop shortcut.
 
+The installer is a Python file rather than a .bat because Windows 11's Smart
+App Control blocks unsigned .bat files.
+
 To upgrade: run the installer from a newer version's folder.
-To remove: "Uninstall uBITX CEC Desktop.bat". Your settings and logbook in
+To remove: "Uninstall uBITX CEC Desktop.py". Your settings and logbook in
 %USERPROFILE%\\.ubitx_cec_desktop are kept.
-If the program does not start: "Start with messages.bat" in
+If the program does not start: "Start with messages.py" in
 %LOCALAPPDATA%\\uBITX CEC Desktop shows what went wrong.
 """,
     "macOS": """\
@@ -54,11 +57,16 @@ uBITX CEC Desktop {version} for macOS
 1. Install Python from https://www.python.org/downloads/macos/ if you do not
    have it (3.10 or newer; python.org's installer includes Tk).
 2. Double-click "Install uBITX CEC Desktop.command".
-   These scripts are not signed, so macOS may refuse to open them. Then open
-   Terminal, type  zsh  and a space, drag the .command file into the Terminal
-   window, and press Return.
+   The first time, macOS refuses ("Not Opened -- Apple could not verify..."),
+   because the script is not signed. Click Done, then:
+     System Settings > Privacy & Security, scroll down to Security, click
+     "Open Anyway" next to "Install uBITX CEC Desktop.command", confirm,
+     and double-click the installer again.
+   (Or: open Terminal, type  zsh  and a space, drag the .command file into the
+   window, and press Return.)
 3. Start the program from Applications (in your home folder), Launchpad or
-   Spotlight: "uBITX CEC Desktop".
+   Spotlight: "uBITX CEC Desktop". It opens without any warning: the
+   installer makes it on your Mac.
 
 To upgrade: run the installer from a newer version's folder.
 To remove: "Uninstall uBITX CEC Desktop.command". Your settings and logbook
@@ -83,8 +91,7 @@ are kept.
 }
 
 FILES = {
-    "Windows": ["Install uBITX CEC Desktop.bat", "install.ps1",
-                "Uninstall uBITX CEC Desktop.bat", "uninstall.ps1"],
+    "Windows": ["Install uBITX CEC Desktop.py", "Uninstall uBITX CEC Desktop.py"],
     "macOS": ["Install uBITX CEC Desktop.command",
               "Uninstall uBITX CEC Desktop.command"],
     "Linux": ["install.sh", "uninstall.sh"],
