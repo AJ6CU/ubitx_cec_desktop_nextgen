@@ -34,8 +34,8 @@ def get_image(filename, master=None):
 
 config = None
 
-APPVERSION = "1.0.6"
-APPDATE = "June 15, 2026"
+APPVERSION = "1.0.7"
+APPDATE = "November 13, 2026"
 
 RADIOTIMEOUT=5          # give the operator 5 seconds to remember to turn on the radio.
 

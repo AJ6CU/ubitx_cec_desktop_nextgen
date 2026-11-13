@@ -4,7 +4,7 @@
 #                   dependencies, so the two cannot drift apart.
 # Tk is not here: it comes with Python, not from pip (see packaging/README.md).
 
-scustomtkinter>=0.2.1
+scustomtkinter>=0.2.2
 customtkinter>=6.0
 pyserial
 psutil

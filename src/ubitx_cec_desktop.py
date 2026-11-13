@@ -1013,9 +1013,20 @@ class UbitxCecDesktop(sCTk):
         self._set_window_icon()   # FIX (2026-11-13)
         # FIX (2026-11-13): HIDDEN UNTIL IT HAS ITS SIZE (Mark: "on startup a
         # lot of resizing going on -- a much larger window, then replaced by
-        # the smaller"). Shown by _fit_to_content, once sized. CustomTkinter
-        # keeps a window withdrawn before it is first shown hidden.
-        self.withdraw()
+        # the smaller"). Shown by _show, once sized. CustomTkinter keeps a
+        # window withdrawn before it is first shown hidden.
+        #
+        # ON macOS TRANSPARENT INSTEAD: showing a withdrawn window plays
+        # macOS's "appear" animation, which looked like the window dropping
+        # slightly and coming back (Mark; Tk's own log showed no move at
+        # all). A window on screen but fully transparent has nothing to
+        # animate when it turns opaque.
+        import sys
+        self._hide_by_alpha = sys.platform == "darwin"
+        if self._hide_by_alpha:
+            self.attributes("-alpha", 0.0)
+        else:
+            self.withdraw()
         # FIX (2026-11-13): ONLY THE POSITION IS RESTORED; the size is the one
         # the content needs, set once it is built (_fit_to_content). See there.
         position = self._remembered_position()
@@ -1431,10 +1442,18 @@ class UbitxCecDesktop(sCTk):
         try:
             self.update_idletasks()
             self._apply_fitted_size()
-        finally:
-            # Shown whatever happened above: a window that never appears is
-            # worse than one at the wrong size.
-            self.deiconify()
+        except Exception as err:
+            # Shown whatever happened: a window that never appears is worse
+            # than one at the wrong size.
+            print(f"[app] could not size the window: {err}")
+            self._show()
+            return
+        # FIX (2026-11-13): SHOWN ONCE THE SIZE HAS SETTLED, not straight away
+        # (Mark, X1 Carbon at 200 %: "a flash as it starts up") -- the window
+        # appeared, then rescaled when the display's scale arrived. It is
+        # shown by _refit_while_settling, once the size has held for three
+        # checks (300 ms), or after 1.5 s whatever it is doing.
+        self._shown = False
         # FIX (2026-11-13): AND AGAIN WHILE THE LAYOUT SETTLES. On the X1
         # Carbon (Windows, display scaling above 100 %) the window came up the
         # right height but too narrow: CustomTkinter applies the display's
@@ -1504,6 +1523,21 @@ class UbitxCecDesktop(sCTk):
         except Exception:
             pass
 
+    def _set_scaling(self, *args, **kwargs):
+        """
+        FIX (2026-11-13): AFTER EVERY SCALING CHANGE, not only at start-up --
+        Windows' display scale changed while the app runs, the window moved to
+        another display, or the cap below. CustomTkinter has locked the size
+        (see _release_size_lock) and the tab strip's minimum height is still
+        the old scale's (1x: 245 px; at 0.5 the window stayed 0.76 as tall).
+        """
+        super()._set_scaling(*args, **kwargs)
+        self._release_size_lock()
+        notebook = getattr(self, "notebook", None)
+        if notebook is not None:
+            self.after_idle(lambda: notebook.grid_rowconfigure(
+                0, minsize=notebook.required_length()) if notebook.winfo_exists() else None)
+
     def _release_size_lock(self):
         """
         FIX (2026-11-13): CUSTOMTKINTER LOCKS THE WINDOW'S SIZE WHEN THE SCALING
@@ -1558,18 +1592,37 @@ class UbitxCecDesktop(sCTk):
             ctk.set_widget_scaling(factor)
             self._release_size_lock()
 
-    def _refit_while_settling(self, checks_left):
-        if checks_left <= 0 or not self.winfo_exists():
+    def _refit_while_settling(self, checks_left, steady=0):
+        if not self.winfo_exists():
+            return
+        shown = getattr(self, "_shown", True)
+        if checks_left <= 0:
+            if not shown:
+                self._show()
             return
         fitted = getattr(self, "_fitted_size", None)
-        current = (self.winfo_width(), self.winfo_height())
-        if fitted is None or (current != fitted and current != (1, 1)):
-            return      # resized by hand (or not ours to size): leave it
+        if shown:
+            current = (self.winfo_width(), self.winfo_height())
+            if fitted is None or (current != fitted and current != (1, 1)):
+                return      # resized by hand (or not ours to size): leave it
         screen_w, screen_h = self._screen_size()
         wanted = (min(self.winfo_reqwidth(), screen_w), min(self.winfo_reqheight(), screen_h))
         if wanted != fitted:
             self._apply_fitted_size()
-        self.after(100, lambda: self._refit_while_settling(checks_left - 1))
+            steady = 0
+        else:
+            steady += 1
+        # Hidden until the size has held for 300 ms, or for 1.5 s at most.
+        if not shown and (steady >= 3 or checks_left <= 5):
+            self._show()
+        self.after(100, lambda: self._refit_while_settling(checks_left - 1, steady))
+
+    def _show(self):
+        self._shown = True
+        if getattr(self, "_hide_by_alpha", False):
+            self.attributes("-alpha", 1.0)
+        else:
+            self.deiconify()
 
     def _on_close(self):
         """The window's close button."""
@@ -1700,13 +1753,17 @@ class UbitxCecDesktop(sCTk):
             self._sdr_muted_before = None
             self._sdr_quiet_for_rig()
 
-        self.audio_note.configure(
-            text="Listening through the SDR quiets the rig's speaker. "
-                 "Double-click the volume knob to mute. "
-                 f"{self.sdr.audio_description()} Listening through the rig, "
-                 "the level is its front-panel knob.")
+        self.audio_note.configure(text=self._audio_note_text(self.sdr.audio_description()))
 
         self._sdr_audio_changed()
+
+    @staticmethod
+    def _audio_note_text(description):
+        """The RX page's audio note, around the SDR's own sentence about volume."""
+        return ("Listening through the SDR quiets the rig's speaker. "
+                "Double-click the volume knob to mute. "
+                f"{description} Listening through the rig, "
+                "the level is its front-panel knob.")
 
     # The listening aids: each one's key, and the text on its lamp.
     AIDS_LAMPS = (("agc", "AGC"), ("nr", "NR"), ("notch", "Notch"),
@@ -2811,6 +2868,27 @@ class UbitxCecDesktop(sCTk):
         self.audio_note = sCTkLabelTertiary(
             wrap, text="", wraplength=640, justify="left")
         self.audio_note.pack(anchor="w", pady=(4, 8))
+        # FIX (2026-11-13): THREE LINES' HEIGHT FROM THE START. Empty until the
+        # SDR connects, then two lines (three for an SDR whose volume is the
+        # computer's) -- so the RX page, the tallest, grew 14 px a second after
+        # the window had appeared, and the window grew with it: the "bounce"
+        # Mark saw on the Mac whenever the app started the SDR itself (found
+        # with a diagnostic that named the widget). Reserved, the page is the
+        # same height connected or not.
+        #
+        # MEASURED, not computed from the font: the label pads its text, so
+        # the room is what it takes to show the LONGEST text it can be given
+        # (an SDR whose volume is the computer's), with this platform's fonts.
+        try:
+            self.audio_note.configure(text=self._audio_note_text(
+                "SDR++ cannot set its own level, so the volume is the computer's "
+                "output volume -- every application follows it."))
+            self.audio_note.update_idletasks()
+            scale = self.audio_note._get_widget_scaling() or 1.0
+            self.audio_note.configure(
+                text="", height=int(self.audio_note.winfo_reqheight() / scale) + 2)
+        except Exception as err:
+            print(f"[app] audio note height not reserved: {err}")
 
         # FIX (2026-11-10): ATT AND IFS WORK (Mark) -- the rig's own front end,
         # so live only while listening through the rig, with a rig to send to
