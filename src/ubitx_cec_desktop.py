@@ -74,6 +74,7 @@ from app_paths import config_path, shown as shown_path
 from sdr_programs import profile_for, choices as sdr_choices, MUTE
 from ubitx_link import uBITX_Link, MCU_COMMAND_HEADROOM, MCU_COMMAND_HEADROOM_MAX
 import ubitx_link            # FIX (2026-11-06): its adjustable timings
+from resize_freeze import ResizeFreeze   # FIX (2026-11-12): live resizing
 TIMING_KEY = "Link Timing"   # where they are saved in the settings file
 
 from scustomtkinter import (
@@ -1128,7 +1129,13 @@ class UbitxCecDesktop(sCTk):
                                      show_page_border=True)
         # Vertical margins kept small: the window's height is better left to
         # the SDR's window beside it.
-        self.notebook.pack(expand=True, fill="both", padx=10, pady=4)
+        # FIX (2026-11-12): the options in one place, so that ResizeFreeze can
+        # pack it back exactly as it was. See resize_freeze.py: on a slow
+        # machine (the X1 Carbon) resizing was not live -- every widget
+        # redrew at every step of the drag. Armed once the window is up.
+        notebook_pack = dict(expand=True, fill="both", padx=10, pady=4)
+        self.notebook.pack(**notebook_pack)
+        self._resize_freeze = ResizeFreeze(self, self.notebook, notebook_pack)
 
         self._build_operate(self.notebook.add("Operate"))
         self._build_rx(self.notebook.add("RX"))
@@ -1148,6 +1155,10 @@ class UbitxCecDesktop(sCTk):
         # Idle rather than immediate: the window should be up before a
         # connection attempt that can take a moment when the SDR is not there.
         self.after_idle(self._start_sdr)
+
+        # FIX (2026-11-12): after the first layout and the remembered size, so
+        # neither is held back. See resize_freeze.py.
+        self.after(1000, self._resize_freeze.arm)
 
         # NOTHING TO TALK TO: start on Setup, which is where it is fixed.
         # Better than a working-looking panel wired to nothing -- and better
@@ -2024,6 +2035,11 @@ class UbitxCecDesktop(sCTk):
         """
         if event.widget is not self:
             return          # a child resizing, not the window
+        # FIX (2026-11-12): hold the content still while the size is changing.
+        # Bound before the notebook exists, hence getattr.
+        freeze = getattr(self, "_resize_freeze", None)
+        if freeze is not None:
+            freeze.on_configure(event)
         if self._geometry_timer is not None:
             try:
                 self.after_cancel(self._geometry_timer)
