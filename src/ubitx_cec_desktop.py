@@ -1450,11 +1450,45 @@ class UbitxCecDesktop(sCTk):
     # _cap_scaling_to_screen.
     SCALING_FLOOR = 0.75
 
+    def _screen_size(self):
+        """
+        The room the window has: (width, height) in real pixels.
+
+        FIX (2026-11-13): ON WINDOWS, ASKED OF WINDOWS, not Tk. Tk measures the
+        screen once, when it starts -- and CustomTkinter turns on Windows'
+        high-DPI mode only after that. So on the X1 Carbon at 200 % Tk said the
+        screen was 1280 px wide (2560 / 2) while everything was drawn in real
+        pixels, and the window was held to half the screen, its content cut
+        off. Windows is asked for the WORK AREA of the monitor the window is
+        on: the screen less the taskbar. Elsewhere, Tk's figures, which are
+        right there.
+        """
+        import sys
+        if sys.platform == "win32":
+            try:
+                import ctypes
+                from ctypes import wintypes
+
+                class MONITORINFO(ctypes.Structure):
+                    _fields_ = [("cbSize", wintypes.DWORD), ("rcMonitor", wintypes.RECT),
+                                ("rcWork", wintypes.RECT), ("dwFlags", wintypes.DWORD)]
+                user32 = ctypes.windll.user32
+                monitor = user32.MonitorFromWindow(wintypes.HWND(self.winfo_id()), 2)
+                info = MONITORINFO()
+                info.cbSize = ctypes.sizeof(MONITORINFO)
+                if monitor and user32.GetMonitorInfoW(monitor, ctypes.byref(info)):
+                    work = info.rcWork
+                    return work.right - work.left, work.bottom - work.top
+            except Exception as err:
+                print(f"[app] could not ask Windows for the screen size: {err}")
+        return self.winfo_screenwidth(), self.winfo_screenheight()
+
     def _apply_fitted_size(self):
         self._cap_scaling_to_screen()
         self._release_size_lock()
-        width = min(self.winfo_reqwidth(), self.winfo_screenwidth())
-        height = min(self.winfo_reqheight(), self.winfo_screenheight())
+        screen_w, screen_h = self._screen_size()
+        width = min(self.winfo_reqwidth(), screen_w)
+        height = min(self.winfo_reqheight(), screen_h)
         tk.Tk.wm_geometry(self, f"{width}x{height}")
         tk.Tk.wm_minsize(self, width, height)
         self._fitted_size = (width, height)
@@ -1481,7 +1515,7 @@ class UbitxCecDesktop(sCTk):
         200 %, too narrow. Tk's own maximum, the screen, is put back here
         whenever this application sizes the window.
         """
-        tk.Tk.wm_maxsize(self, self.winfo_screenwidth(), self.winfo_screenheight())
+        tk.Tk.wm_maxsize(self, *self._screen_size())
 
     def _cap_scaling_to_screen(self):
         """
@@ -1509,8 +1543,9 @@ class UbitxCecDesktop(sCTk):
         for _ in range(5):
             self.notebook.grid_rowconfigure(0, minsize=self.notebook.required_length())
             self.update_idletasks()
-            room_w = self.winfo_screenwidth() * self.SCREEN_SHARE[0]
-            room_h = self.winfo_screenheight() * self.SCREEN_SHARE[1]
+            screen_w, screen_h = self._screen_size()
+            room_w = screen_w * self.SCREEN_SHARE[0]
+            room_h = screen_h * self.SCREEN_SHARE[1]
             over = max(self.winfo_reqwidth() / room_w, self.winfo_reqheight() / room_h)
             if over <= 1.0:
                 return
@@ -1518,7 +1553,7 @@ class UbitxCecDesktop(sCTk):
             if factor >= ScalingTracker.widget_scaling:
                 return
             print(f"[app] {self.winfo_reqwidth()}x{self.winfo_reqheight()} does not fit the "
-                  f"{self.winfo_screenwidth()}x{self.winfo_screenheight()} screen -- "
+                  f"{screen_w}x{screen_h} screen -- "
                   f"scaling {factor:.2f} of the display's")
             ctk.set_widget_scaling(factor)
             self._release_size_lock()
@@ -1530,8 +1565,8 @@ class UbitxCecDesktop(sCTk):
         current = (self.winfo_width(), self.winfo_height())
         if fitted is None or (current != fitted and current != (1, 1)):
             return      # resized by hand (or not ours to size): leave it
-        wanted = (min(self.winfo_reqwidth(), self.winfo_screenwidth()),
-                  min(self.winfo_reqheight(), self.winfo_screenheight()))
+        screen_w, screen_h = self._screen_size()
+        wanted = (min(self.winfo_reqwidth(), screen_w), min(self.winfo_reqheight(), screen_h))
         if wanted != fitted:
             self._apply_fitted_size()
         self.after(100, lambda: self._refit_while_settling(checks_left - 1))
@@ -6177,8 +6212,10 @@ class UbitxCecDesktop(sCTk):
         self.update_idletasks()
         x = self.winfo_rootx() + (self.winfo_width() - width) // 2
         y = self.winfo_rooty() + (self.winfo_height() - height) // 3
-        x = max(0, min(x, self.winfo_screenwidth() - width))
-        y = max(0, min(y, self.winfo_screenheight() - height))
+        # FIX (2026-11-13): the real screen size -- see _screen_size.
+        screen_w, screen_h = self._screen_size()
+        x = max(0, min(x, screen_w - width))
+        y = max(0, min(y, screen_h - height))
         win.geometry(f"{width}x{height}+{x}+{y}")
 
     def _log_qso(self):
