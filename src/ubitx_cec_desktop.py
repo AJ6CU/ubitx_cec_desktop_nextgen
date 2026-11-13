@@ -1196,7 +1196,9 @@ class UbitxCecDesktop(sCTk):
 
         # FIX (2026-11-12): after the first layout and the remembered size, so
         # neither is held back. See resize_freeze.py.
-        self.after(1000, self._resize_freeze.arm)
+        # FIX (2026-11-13): 2.5 s, not 1 s -- after _fit_to_content has stopped
+        # refitting (2 s), so the two never act on the same resize.
+        self.after(2500, self._resize_freeze.arm)
 
         # NOTHING TO TALK TO: start on Setup, which is where it is fixed.
         # Better than a working-looking panel wired to nothing -- and better
@@ -1428,14 +1430,111 @@ class UbitxCecDesktop(sCTk):
             return
         try:
             self.update_idletasks()
-            width = min(self.winfo_reqwidth(), self.winfo_screenwidth())
-            height = min(self.winfo_reqheight(), self.winfo_screenheight())
-            tk.Tk.wm_geometry(self, f"{width}x{height}")
-            tk.Tk.wm_minsize(self, width, height)
+            self._apply_fitted_size()
         finally:
             # Shown whatever happened above: a window that never appears is
             # worse than one at the wrong size.
             self.deiconify()
+        # FIX (2026-11-13): AND AGAIN WHILE THE LAYOUT SETTLES. On the X1
+        # Carbon (Windows, display scaling above 100 %) the window came up the
+        # right height but too narrow: CustomTkinter applies the display's
+        # scaling a moment AFTER the window is made, every widget grows, and
+        # the size fitted before that was too small. For two seconds the size
+        # is checked again every 100 ms -- unless the operator has resized it.
+        self._refit_while_settling(20)
+
+    # How much of the screen the window may take: the taskbar or the Dock and
+    # menu bar take some of the height.
+    SCREEN_SHARE = (0.98, 0.90)
+    # The least of the display's scale the window may be shrunk to -- see
+    # _cap_scaling_to_screen.
+    SCALING_FLOOR = 0.75
+
+    def _apply_fitted_size(self):
+        self._cap_scaling_to_screen()
+        self._release_size_lock()
+        width = min(self.winfo_reqwidth(), self.winfo_screenwidth())
+        height = min(self.winfo_reqheight(), self.winfo_screenheight())
+        tk.Tk.wm_geometry(self, f"{width}x{height}")
+        tk.Tk.wm_minsize(self, width, height)
+        self._fitted_size = (width, height)
+        # FIX (2026-11-13): AND TELL CUSTOMTKINTER. It keeps its own record of
+        # the window's size and puts the window back to it whenever the scaling
+        # changes -- here 600 px wide, its default, since this application sets
+        # the size with Tk's own calls. On the X1 Carbon the display's scale
+        # arrived just after start-up and the window snapped to that: too
+        # narrow. Its record is in unscaled units.
+        try:
+            self._current_width = self._reverse_window_scaling(width)
+            self._current_height = self._reverse_window_scaling(height)
+        except Exception:
+            pass
+
+    def _release_size_lock(self):
+        """
+        FIX (2026-11-13): CUSTOMTKINTER LOCKS THE WINDOW'S SIZE WHEN THE SCALING
+        CHANGES -- it sets the maximum size to the size the window had, meaning
+        to put its own maximum back a second later, and puts nothing back when
+        the application never set one, as this one does not. So after Windows'
+        display scale arrived (or the scaling below changed it), the window
+        could never be made wider than it first was: the X1 Carbon's window at
+        200 %, too narrow. Tk's own maximum, the screen, is put back here
+        whenever this application sizes the window.
+        """
+        tk.Tk.wm_maxsize(self, self.winfo_screenwidth(), self.winfo_screenheight())
+
+    def _cap_scaling_to_screen(self):
+        """
+        FIX (2026-11-13): NEVER WIDER THAN THE SCREEN (Mark, X1 Carbon at
+        Windows' recommended 200 %). CustomTkinter scales every widget, and
+        sCustomTkinter's drawn ones with it, by the display's scale: at 200 %
+        the window wanted about 2820 px of a 2560 px screen. Where it would not
+        fit, the scaling is reduced just enough that it does (CustomTkinter's
+        set_widget_scaling multiplies the display's own) -- everything smaller
+        together, fonts included, nothing cut off. Where it fits, nothing
+        changes. Checked again while the layout settles, as the display scale
+        can arrive after the window is made.
+
+        Also re-measures the tab strip's minimum height, which depends on the
+        scale (see where the notebook is built).
+        """
+        from customtkinter.windows.widgets.scaling import ScalingTracker
+        # Fonts round, and anything that does not follow the scaling (the
+        # dials, for now) does not shrink, so it may take a few passes. THE
+        # FLOOR, 75 % of the display's scale: measured on a 1280 px screen, most
+        # of the width did not shrink (1410 -> 1270 px for a scale of 0.68), so
+        # without a floor the text got small to save little. A window a little
+        # wider than the screen is the lesser evil; when the dials scale too,
+        # the floor will rarely be reached.
+        for _ in range(5):
+            self.notebook.grid_rowconfigure(0, minsize=self.notebook.required_length())
+            self.update_idletasks()
+            room_w = self.winfo_screenwidth() * self.SCREEN_SHARE[0]
+            room_h = self.winfo_screenheight() * self.SCREEN_SHARE[1]
+            over = max(self.winfo_reqwidth() / room_w, self.winfo_reqheight() / room_h)
+            if over <= 1.0:
+                return
+            factor = max(ScalingTracker.widget_scaling / over * 0.99, self.SCALING_FLOOR)
+            if factor >= ScalingTracker.widget_scaling:
+                return
+            print(f"[app] {self.winfo_reqwidth()}x{self.winfo_reqheight()} does not fit the "
+                  f"{self.winfo_screenwidth()}x{self.winfo_screenheight()} screen -- "
+                  f"scaling {factor:.2f} of the display's")
+            ctk.set_widget_scaling(factor)
+            self._release_size_lock()
+
+    def _refit_while_settling(self, checks_left):
+        if checks_left <= 0 or not self.winfo_exists():
+            return
+        fitted = getattr(self, "_fitted_size", None)
+        current = (self.winfo_width(), self.winfo_height())
+        if fitted is None or (current != fitted and current != (1, 1)):
+            return      # resized by hand (or not ours to size): leave it
+        wanted = (min(self.winfo_reqwidth(), self.winfo_screenwidth()),
+                  min(self.winfo_reqheight(), self.winfo_screenheight()))
+        if wanted != fitted:
+            self._apply_fitted_size()
+        self.after(100, lambda: self._refit_while_settling(checks_left - 1))
 
     def _on_close(self):
         """The window's close button."""
@@ -6305,6 +6404,20 @@ class UbitxCecDesktop(sCTk):
 
 
 if __name__ == "__main__":
+    # FIX (2026-11-13): ITS OWN PLACE ON THE WINDOWS TASKBAR (Mark, on the X1:
+    # no icon there). To Windows this program is pythonw.exe, so the taskbar
+    # grouped it under Python and showed Python's (or a blank) icon, not the
+    # window's. An explicit AppUserModelID, set before the first window,
+    # makes it a program of its own, shown with its own icon. Windows only;
+    # a failure costs the icon, nothing more.
+    import sys
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+                "AJ6CU.uBITXCECDesktop")
+        except Exception as err:
+            print(f"[app] taskbar identity not set: {err}")
     # ctk.set_appearance_mode("dark")
     radio = UbitxCecDesktop()
 

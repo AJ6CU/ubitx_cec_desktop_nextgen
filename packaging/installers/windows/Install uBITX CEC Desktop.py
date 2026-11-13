@@ -80,8 +80,16 @@ def main():
 
     # -- the wheel -------------------------------------------------------------
     wheels = glob.glob(os.path.join(HERE, "ubitx_cec_desktop-*.whl"))
-    if len(wheels) != 1:
-        fail(f"expected one ubitx_cec_desktop-*.whl next to this file, found {len(wheels)}.")
+    if not wheels:
+        # Opened from inside the zip: Explorer shows a zip like a folder, but
+        # double-clicking a file in it runs that one file from a temporary
+        # folder, without the wheel beside it (Mark, on the X1).
+        fail("the program file (ubitx_cec_desktop-....whl) is not beside this installer.\n"
+             "If you opened it from inside the downloaded zip: close this window,\n"
+             "right-click the zip > Extract All..., open the extracted folder and\n"
+             "double-click the installer there.")
+    if len(wheels) > 1:
+        fail(f"found {len(wheels)} ubitx_cec_desktop-*.whl files beside this installer; keep one.")
     wheel = wheels[0]
     say(f"  from {os.path.basename(wheel)}")
 

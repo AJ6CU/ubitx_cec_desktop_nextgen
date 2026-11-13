@@ -35,8 +35,10 @@ uBITX CEC Desktop {version} for Windows
 
 1. Install Python from https://www.python.org/downloads/windows/ if you do not
    have it (3.10 or newer). In its installer keep "tcl/tk and IDLE" ticked.
-2. Unzip this folder anywhere (it is not needed after installing).
-3. Double-click "Install uBITX CEC Desktop.py". Python runs it, in a window
+2. Right-click the downloaded zip > Extract All... (double-clicking the
+   installer inside the zip without extracting it does not work). The
+   extracted folder is not needed after installing.
+3. In the extracted folder, double-click "Install uBITX CEC Desktop.py". Python runs it, in a window
    that shows its progress. If Windows asks which program should open it,
    choose Python. It does not need "Run as administrator".
 4. Start the program from the Start menu or the Desktop shortcut.
