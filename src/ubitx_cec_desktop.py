@@ -253,6 +253,10 @@ LATCHING_DIALS = False
 # In the application's folder, ~/.ubitx_cec_desktop/ -- see app_paths.
 GEOMETRY_FILE = config_path("geometry.json")
 
+# FIX (2026-11-13): THE SCREEN-FIT SCALING, remembered per screen size and
+# display scale -- see UbitxCecDesktop._apply_remembered_fit_scale.
+FIT_SCALE_FILE = config_path("screen_fit.json")
+
 # Which listening-aid pop-ups were left PINNED, and where -- see AidPopup.
 PINNED_AIDS_FILE = config_path("pinned_aids.json")
 
@@ -1009,6 +1013,7 @@ class UbitxCecDesktop(sCTk):
 
     def __init__(self):
         super().__init__()
+        self._apply_remembered_fit_scale()      # FIX (2026-11-13), before building
         self.title("uBITX CEC Desktop")
         self._set_window_icon()   # FIX (2026-11-13)
         # FIX (2026-11-13): HIDDEN UNTIL IT HAS ITS SIZE (Mark: "on startup a
@@ -1460,7 +1465,8 @@ class UbitxCecDesktop(sCTk):
         # scaling a moment AFTER the window is made, every widget grows, and
         # the size fitted before that was too small. For two seconds the size
         # is checked again every 100 ms -- unless the operator has resized it.
-        self._refit_while_settling(20)
+        self._settle_started = time.monotonic()
+        self._refit_while_settling()
 
     # How much of the screen the window may take: the taskbar or the Dock and
     # menu bar take some of the height.
@@ -1591,34 +1597,91 @@ class UbitxCecDesktop(sCTk):
                   f"scaling {factor:.2f} of the display's")
             ctk.set_widget_scaling(factor)
             self._release_size_lock()
+            self._remember_fit_scale(factor)
 
-    def _refit_while_settling(self, checks_left, steady=0):
+    # -- the screen-fit scaling, remembered ------------------------------------
+    def _fit_scale_key(self):
+        """This screen and display scale, as a key: '2560x1344@2'."""
+        from customtkinter.windows.widgets.scaling import ScalingTracker
+        width, height = self._screen_size()
+        display = ScalingTracker.window_dpi_scaling_dict.get(self, 1.0)
+        return f"{width}x{height}@{display:g}"
+
+    def _apply_remembered_fit_scale(self):
+        """
+        FIX (2026-11-13): BUILT AT THE RIGHT SCALE FROM THE START. On the X1
+        Carbon at 200 % the window was built full size, found too wide for
+        the screen, and then rescaled to 0.92 -- every widget drawn twice, 1.2 s
+        of the 6.5 s before it appeared. The scaling the cap settled on is
+        remembered for this screen and display scale (FIT_SCALE_FILE) and set
+        before anything is built. The cap still checks the result, so a
+        changed layout or screen only costs the old delay once.
+        """
+        try:
+            with open(FIT_SCALE_FILE) as handle:
+                factor = float(json.load(handle).get(self._fit_scale_key(), 1.0))
+        except Exception:
+            return
+        if self.SCALING_FLOOR <= factor < 1.0:
+            ctk.set_widget_scaling(factor)
+            self._release_size_lock()
+
+    def _remember_fit_scale(self, factor):
+        try:
+            with open(FIT_SCALE_FILE) as handle:
+                data = json.load(handle)
+        except Exception:
+            data = {}
+        data[self._fit_scale_key()] = round(float(factor), 3)
+        try:
+            with open(FIT_SCALE_FILE, "w") as handle:
+                json.dump(data, handle, indent=1)
+        except OSError as err:
+            print(f"[app] could not remember the screen-fit scaling: {err}")
+
+    # FIX (2026-11-13): BY THE CLOCK, NOT BY COUNTING CHECKS. Twenty checks
+    # 100 ms apart were meant to be two seconds; on the X1 Carbon, busy
+    # starting up, they took five -- and the last one, three seconds after the
+    # window appeared, resized it by 5 px (the notebook re-measuring its strip
+    # after the screen-fit scaling) and the whole window redrew: the "refresh"
+    # Mark saw "a few seconds later" (found with diag_bounce.py).
+    SETTLE_HIDDEN_S = 1.5       # hidden at most this long, settled or not
+    SETTLE_SHOWN_S = 1.0        # still refitted this long after appearing
+    SETTLE_IGNORE_PX = 8        # once visible, smaller changes are left alone
+
+    def _refit_while_settling(self, steady=0):
         if not self.winfo_exists():
             return
+        now = time.monotonic()
         shown = getattr(self, "_shown", True)
-        if checks_left <= 0:
-            if not shown:
-                self._show()
-            return
         fitted = getattr(self, "_fitted_size", None)
         if shown:
+            if now > getattr(self, "_shown_at", 0) + self.SETTLE_SHOWN_S:
+                return
             current = (self.winfo_width(), self.winfo_height())
             if fitted is None or (current != fitted and current != (1, 1)):
                 return      # resized by hand (or not ours to size): leave it
         screen_w, screen_h = self._screen_size()
         wanted = (min(self.winfo_reqwidth(), screen_w), min(self.winfo_reqheight(), screen_h))
-        if wanted != fitted:
+        # A few pixels are not worth redrawing a visible window for -- on a
+        # slow machine that is a visible refresh; the page just gets the room.
+        small = (fitted is not None
+                 and abs(wanted[0] - fitted[0]) <= self.SETTLE_IGNORE_PX
+                 and abs(wanted[1] - fitted[1]) <= self.SETTLE_IGNORE_PX)
+        if wanted != fitted and not (shown and small):
             self._apply_fitted_size()
             steady = 0
         else:
             steady += 1
-        # Hidden until the size has held for 300 ms, or for 1.5 s at most.
-        if not shown and (steady >= 3 or checks_left <= 5):
+        # Hidden until the size has held for 300 ms, or SETTLE_HIDDEN_S at most.
+        if not shown and (steady >= 3
+                          or now > getattr(self, "_settle_started", now) + self.SETTLE_HIDDEN_S):
             self._show()
-        self.after(100, lambda: self._refit_while_settling(checks_left - 1, steady))
+        self.after(100, lambda: self._refit_while_settling(steady))
 
     def _show(self):
         self._shown = True
+        self._shown_at = time.monotonic()
         if getattr(self, "_hide_by_alpha", False):
             self.attributes("-alpha", 1.0)
         else:
