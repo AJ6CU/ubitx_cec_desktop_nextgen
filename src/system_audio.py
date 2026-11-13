@@ -25,12 +25,21 @@ import sys
 # key is pressed only when that changes -- otherwise mute() twice unmuted.
 _windows_muted = False
 
+# FIX (2026-11-13): NO CONSOLE WINDOWS ON WINDOWS (Mark, X1 Carbon). Started
+# from the Start menu the app has no console of its own (pythonw), and Windows
+# then gives every console program it starts a black window of its own: the
+# PowerShell behind mute and volume flashed one each time. CREATE_NO_WINDOW
+# runs it without one; its output was thrown away already. Empty elsewhere.
+_NO_WINDOW = ({"creationflags": subprocess.CREATE_NO_WINDOW}
+              if sys.platform == "win32" else {})
+
 
 def _run(command):
     """Runs a command quietly. True if it ran without error."""
     try:
         subprocess.run(command, shell=True, check=True,
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                       **_NO_WINDOW)
         return True
     except Exception:
         return False

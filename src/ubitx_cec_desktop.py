@@ -86,7 +86,7 @@ from scustomtkinter import (
     sCTkOptionMenuPrimary, sCTkMessagebox,
     sCTkCheckBox, sCTkFrequencyDisplay, sCTkSlider,
     sCTkProgressBar, sCTkTableview, sCTkScrollableFrame,
-    sCTkFrameLabeledSecondary,
+    sCTkFrameLabeledSecondary, sCTkTabview,
 )
 # From its module, as the Designer's builder file imports it -- whether or not
 # the package's top level exports it.
@@ -988,12 +988,38 @@ class RolePanel(sCTkFrame):
 # ---------------------------------------------------------------------------
 # The application
 # ---------------------------------------------------------------------------
+# FIX (2026-11-13): SHORT TAB NAMES, in one place (Mark, on the X1 Carbon). The
+# tabs run down the left edge, and with Windows' larger fonts the five full
+# names were longer than the window is tall: Setup was off the bottom, and you
+# had to know to scroll the strip. The names are also how the code selects a
+# tab, so every use goes through these.
+TAB_OPERATE = "Operate"
+TAB_RX = "RX"
+TAB_CHANNELS = "Channels"
+TAB_CW = "CW"
+TAB_SETUP = "Setup"
+
+# FIX (2026-11-13): SETUP IN SUB-TABS, across the top (Mark). See _build_setup.
+SETUP_RADIO = "Station & Radio"
+SETUP_SDR = "SDR"
+SETUP_MORE = "Logbook & more"
+
+
 class UbitxCecDesktop(sCTk):
 
     def __init__(self):
         super().__init__()
         self.title("uBITX CEC Desktop")
-        self.geometry(self._remembered_geometry())
+        # FIX (2026-11-13): HIDDEN UNTIL IT HAS ITS SIZE (Mark: "on startup a
+        # lot of resizing going on -- a much larger window, then replaced by
+        # the smaller"). Shown by _fit_to_content, once sized. CustomTkinter
+        # keeps a window withdrawn before it is first shown hidden.
+        self.withdraw()
+        # FIX (2026-11-13): ONLY THE POSITION IS RESTORED; the size is the one
+        # the content needs, set once it is built (_fit_to_content). See there.
+        position = self._remembered_position()
+        if position:
+            self.geometry(position)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
         # THE APPLICATION MENU'S QUIT, on macOS. Tk handles that menu itself
@@ -1122,7 +1148,10 @@ class UbitxCecDesktop(sCTk):
         # state() repaints, so it is called only when the value changes.
         self._offset_state = None
 
-        self.notebook = sCTkNotebook(self, side="left", tab_width=30,
+        # FIX (2026-11-13): tab_pad 8, not the theme's 18 -- that much at each
+        # end of every label made a two-letter tab ("Op", "RX") as long as a
+        # word, and the strip longer than the window (Mark, Mac and X1).
+        self.notebook = sCTkNotebook(self, side="left", tab_width=30, tab_pad=8,
                                      command=self._on_tab,
                                      tab_style="rounded",
                                      text_orientation="auto",
@@ -1137,11 +1166,15 @@ class UbitxCecDesktop(sCTk):
         self.notebook.pack(**notebook_pack)
         self._resize_freeze = ResizeFreeze(self, self.notebook, notebook_pack)
 
-        self._build_operate(self.notebook.add("Operate"))
-        self._build_rx(self.notebook.add("RX"))
-        self._build_channels(self.notebook.add("Channels"))
-        self._build_cw(self.notebook.add("CW"))
-        self._build_setup(self.notebook.add("Setup"))
+        self._build_operate(self.notebook.add(TAB_OPERATE))
+        self._build_rx(self.notebook.add(TAB_RX))
+        self._build_channels(self.notebook.add(TAB_CHANNELS))
+        self._build_cw(self.notebook.add(TAB_CW))
+        self._build_setup(self.notebook.add(TAB_SETUP))
+        # FIX (2026-11-13): EVERY TAB REACHABLE WITHOUT SCROLLING. The strip's
+        # row asks for the tabs' whole length, so the notebook -- and the
+        # window fitted to it -- is never shorter than that.
+        self.notebook.grid_rowconfigure(0, minsize=self.notebook.required_length())
 
         # Initial values go in AFTER every tab exists, for the reason above.
         self._ready = True
@@ -1156,6 +1189,10 @@ class UbitxCecDesktop(sCTk):
         # connection attempt that can take a moment when the SDR is not there.
         self.after_idle(self._start_sdr)
 
+        # FIX (2026-11-13): the window to the size its content needs, once that
+        # content is built. See _fit_to_content.
+        self.after_idle(self._fit_to_content)
+
         # FIX (2026-11-12): after the first layout and the remembered size, so
         # neither is held back. See resize_freeze.py.
         self.after(1000, self._resize_freeze.arm)
@@ -1165,7 +1202,7 @@ class UbitxCecDesktop(sCTk):
         # than the traceback a missing port used to cause before any window
         # existed.
         if self.rig_state != "connected":
-            self.after_idle(lambda: self.notebook.set("Setup"))
+            self.after_idle(lambda: self._show_setup(SETUP_RADIO))
 
     # -- the rig's connection ----------------------------------------------
     def _open_rig(self):
@@ -1291,7 +1328,7 @@ class UbitxCecDesktop(sCTk):
                          "is it switched on?")
         print(f"[rig] {self.rig_note}")
         self._show_rig_status()
-        self.notebook.set("Setup")
+        self._show_setup(SETUP_RADIO)
 
     def _rig_answered_late(self):
         """
@@ -1313,29 +1350,66 @@ class UbitxCecDesktop(sCTk):
         if box is not None:
             self._group_note(box, self.rig_note)
 
-    # -- window position ---------------------------------------------------
-    def _remembered_geometry(self):
-        """Where it was last time, or a sensible default."""
+    # -- window position and size -------------------------------------------
+    def _remembered_position(self):
+        """
+        Where the window was last time, as "+x+y" -- or None on a first start,
+        when the window manager places it (where it belongs depends on where
+        the SDR's window sits on each screen).
+
+        FIX (2026-11-13): the position only. The file still holds the whole
+        geometry (and older files hold nothing else); the size in it is not
+        used -- see _fit_to_content.
+        """
         try:
             with open(GEOMETRY_FILE) as handle:
-                return json.load(handle)["geometry"]
+                geometry = json.load(handle)["geometry"]
         except Exception:
-            # A first start -- nothing remembered yet. Size only: where the
-            # window belongs depends on where the SDR's window sits on each
-            # screen, so the window manager places it.
-            #
-            # macOS: 1470x364 at +0+33, MEASURED -- the size the finished layout was
-            # set to by hand on a 13" MacBook Air (1470 points wide), read
-            # back from the geometry file. Two ten-digit readouts at 56pt
-            # plus their dials do not fit in much less width, and the first
-            # symptom of trying is a dial squeezed to nothing rather than
-            # anything that says "too narrow".
-            #
-            # Elsewhere: the earlier estimate, until someone measures one.
-            # Fonts and window borders differ enough that the Mac figure may
-            # clip there.
-            import sys
-            return "1470x364+0+33" if sys.platform == "darwin" else "1440x520"
+            return None
+        import re
+        match = re.search(r"([+-]-?\d+[+-]-?\d+)$", str(geometry))
+        return match.group(1) if match else None
+
+    def _fit_to_content(self):
+        """
+        Sizes the window to what its content needs, then shows it.
+
+        FIX (2026-11-13): THE WINDOW STARTS AT THE SIZE ITS CONTENT NEEDS
+        (Mark, on the X1 Carbon: "start up in minimized height and width, for
+        all content -- that is what is needed"). Before, it came up at the size
+        remembered from last time, or a guessed 1440x520 (1470x364 on a Mac,
+        measured by hand), and getting it right meant dragging an edge -- slow
+        to redraw on a slow machine, and the border hard to catch on Windows 11.
+
+        HOW. Once, while the window is still hidden: the size its widgets ask
+        for, set as the window's size, then the window shown. Measured under X
+        (Linux fonts): 1410x370, against the 1440x520 the old default gave.
+
+        ONCE, NOT FOLLOWED. A first version let the window follow its content
+        (`wm geometry ""`), and opening Channels -- which fills the memory
+        table, asking for more height -- grew the window (Mark). Set once, a
+        page that later wants more scrolls or shrinks inside the window, as a
+        page is meant to. A resize by hand holds for this run; the next start
+        fits again.
+
+        THE MINIMUM SIZE is that size too, so the window cannot be dragged
+        smaller than its content -- whose first symptom is a dial squeezed to
+        nothing rather than anything that says "too narrow". Tk's own calls,
+        not CustomTkinter's: the requested sizes are real pixels already, and
+        CustomTkinter's geometry()/minsize() would scale them a second time.
+        """
+        if not self.winfo_exists():
+            return
+        try:
+            self.update_idletasks()
+            width = min(self.winfo_reqwidth(), self.winfo_screenwidth())
+            height = min(self.winfo_reqheight(), self.winfo_screenheight())
+            tk.Tk.wm_geometry(self, f"{width}x{height}")
+            tk.Tk.wm_minsize(self, width, height)
+        finally:
+            # Shown whatever happened above: a window that never appears is
+            # worse than one at the wrong size.
+            self.deiconify()
 
     def _on_close(self):
         """The window's close button."""
@@ -2756,7 +2830,10 @@ class UbitxCecDesktop(sCTk):
         # "nsw", not "nsew": as wide as its columns, with the scrollbar
         # beside them. Stretched across the window, the scrollbar sat at the
         # far edge with a wide empty band between it and the notes.
-        self.channel_table.grid(row=2, column=0, sticky="nsw", padx=10, pady=2)
+        # FIX (2026-11-13): space under the table. It stretches to the page,
+        # so its last row is cut wherever the page ends -- and a half row
+        # against the buttons looked crowded (Mark, on the Mac).
+        self.channel_table.grid(row=2, column=0, sticky="nsw", padx=10, pady=(2, 12))
         self.channel_table.bind_selection_callback(
             lambda row, values: self._select_channel(row))
         self.channel_table.bind_activate_callback(
@@ -2782,7 +2859,7 @@ class UbitxCecDesktop(sCTk):
         # FIX: the tab showing, so the channel table is filled only when it
         # can be seen -- see _refresh_channels. Operate is where the window
         # opens; _on_tab keeps it current.
-        self._current_tab = "Operate"
+        self._current_tab = TAB_OPERATE
 
         actions = sCTkFrame(page, fg_color="transparent", border_width=0)
         actions.grid(row=3, column=0, sticky="ew", padx=10, pady=(6, 10))
@@ -3031,7 +3108,7 @@ class UbitxCecDesktop(sCTk):
         # (UBITX_RIG_TIMING). Hidden, it is left as it is; opening the
         # Channels tab fills it, and later changes reach it on the next
         # refresh -- only the rows that changed, as below.
-        if getattr(self, "_current_tab", "Channels") != "Channels":
+        if getattr(self, "_current_tab", TAB_CHANNELS) != TAB_CHANNELS:
             return
 
         rows = [[str(e["number"]), e["label"],
@@ -3529,7 +3606,7 @@ class UbitxCecDesktop(sCTk):
         # the constructor and ahead of the rig's reader. Opening the tab
         # comes back here and sets it.
         if (menu_kind != self._menu_kind_shown
-                and getattr(self, "_current_tab", "Channels") == "Channels"):
+                and getattr(self, "_current_tab", TAB_CHANNELS) == TAB_CHANNELS):
             if in_set:
                 items = ["New set…", "Duplicate…", "Rename…", "Delete set…"]
             else:
@@ -3584,7 +3661,7 @@ class UbitxCecDesktop(sCTk):
         # 2.2 s at startup on a table nobody was looking at. Opening the
         # Channels tab comes back here with the tab current, and applies it.
         if (editable != self._shown_editable
-                and getattr(self, "_current_tab", "Channels") == "Channels"):
+                and getattr(self, "_current_tab", TAB_CHANNELS) == TAB_CHANNELS):
             self.channel_table.configure(editable_columns=editable)
             self._shown_editable = editable
 
@@ -3714,6 +3791,16 @@ class UbitxCecDesktop(sCTk):
         # see uBITX_Link.tune_to, which knows how long to wait between them.
         self.connection.tune_to(entry["freq"], entry["mode"])
 
+    def _show_setup(self, sub_tab=None):
+        """
+        FIX (2026-11-13): Setup, and on it the sub-tab that holds what needs
+        attention -- the radio's settings when the radio is not answering.
+        """
+        self.notebook.set(TAB_SETUP)
+        self._current_tab = TAB_SETUP
+        if sub_tab:
+            self.setup_tabs.set(sub_tab)
+
     def _on_tab(self, name):
         """
         A tab was clicked.
@@ -3723,10 +3810,10 @@ class UbitxCecDesktop(sCTk):
         for something you may not look at.
         """
         self._current_tab = name
-        if name == "Channels" and self.model.channels_state == "unread":
+        if name == TAB_CHANNELS and self.model.channels_state == "unread":
             self.connection.read_channels()
         # FIX: the table is filled now it can be seen -- see _refresh_channels.
-        if name == "Channels":
+        if name == TAB_CHANNELS:
             self._refresh_channels()
 
     def _build_cw(self, page):
@@ -4011,12 +4098,20 @@ class UbitxCecDesktop(sCTk):
         values that can stop the radio working, and both deserve a deliberate
         act rather than a field on a page you are scrolling past.
         """
-        # SCROLLS. The window is sized for Operate -- around 360 points tall
-        # -- and these groups are taller than that once they hold real
-        # controls. Scrolling means a group can grow, or the window shrink,
-        # without anything being cut off out of sight.
-        wrap = sCTkScrollableFrame(page, fg_color="transparent", border_width=0)
-        wrap.pack(fill="both", expand=True, padx=10, pady=(2, 2))
+        # FIX (2026-11-13): SUB-TABS ACROSS THE TOP, not one scrolling page
+        # (Mark, on the X1 Carbon). The window is sized for Operate -- around
+        # 360 points tall -- and Setup's groups, all on one page, were taller:
+        # it scrolled, or the window had to be stretched for Setup and shrunk
+        # again for Operate, which on a slow machine was a fight. A few groups
+        # to a sub-tab, each as short as Operate, and the window stays one size.
+        # height/width=10: the tabview's own default (250) would otherwise set
+        # its height; this way its tallest sub-tab does.
+        self.setup_tabs = sCTkTabview(page, height=50, width=10)
+        self.setup_tabs.pack(fill="both", expand=True, padx=10, pady=(0, 2))
+        radio_tab = self.setup_tabs.add(SETUP_RADIO)
+        sdr_tab = self.setup_tabs.add(SETUP_SDR)
+        more_tab = self.setup_tabs.add(SETUP_MORE)
+        self.setup_tabs.set(SETUP_RADIO)
 
         groups = (
             ("Station", (
@@ -4026,25 +4121,26 @@ class UbitxCecDesktop(sCTk):
             )),
         )
 
-        # THREE ACROSS, not two: the window is wide and short -- sized for
-        # Operate -- so width is what there is spare and height is what there
-        # is not.
-        columns = sCTkFrame(wrap, fg_color="transparent", border_width=0)
+        # Station and Radio side by side on the first sub-tab: the window is
+        # wide and short, so width is what there is spare.
+        columns = sCTkFrame(radio_tab, fg_color="transparent", border_width=0)
         columns.pack(fill="both", expand=True)
-        columns.grid_columnconfigure((0, 1, 2), weight=1, uniform="setup")
+        columns.grid_columnconfigure((0, 1), weight=1, uniform="setup")
 
         # Radio and SDR are real controls -- they are how the operator says
-        # where the equipment is, and nothing else can say it. Station and
-        # Logbook are still the settings they will become.
-        # Station, Radio, SDR across the top; Logbook beneath.
+        # where the equipment is, and nothing else can say it.
         self._build_radio_settings(self._settings_box(columns, 0, 1, "Radio", 2))
-        self._build_sdr_settings(self._settings_box(columns, 0, 2, "SDR", 4))
+        # The SDR group on a sub-tab of its own: it is the tallest.
+        sdr_column = sCTkFrame(sdr_tab, fg_color="transparent", border_width=0)
+        sdr_column.pack(fill="both", expand=True)
+        sdr_column.grid_columnconfigure(0, weight=1)
+        self._build_sdr_settings(self._settings_box(sdr_column, 0, 0, "SDR", 4))
         # FIX: THE BOTTOM ROW IN HALVES, not thirds -- Logbook and Other
         # Settings each need about a column and a half: Logbook two fields to
         # a line, Other Settings three buttons. Two lines each, instead of the
         # four Logbook took in one column, which set the height of the whole
         # row and made Setup much taller than Operate.
-        bottom = sCTkFrame(wrap, fg_color="transparent", border_width=0)
+        bottom = sCTkFrame(more_tab, fg_color="transparent", border_width=0)
         bottom.pack(fill="both", expand=True)
         bottom.grid_columnconfigure((0, 1), weight=1, uniform="setup_bottom")
         self._build_logbook_settings(self._settings_box(bottom, 0, 0, "Logbook", 2))

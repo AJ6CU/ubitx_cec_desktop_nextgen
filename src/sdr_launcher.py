@@ -29,6 +29,16 @@ import time
 import subprocess
 import sys
 
+# FIX (2026-11-13): NO CONSOLE WINDOWS ON WINDOWS (Mark, X1 Carbon). Started
+# from the Start menu the app has no console of its own (pythonw), and Windows
+# then gives every console program it starts a black window of its own: Brown
+# (built as a console program) came up with one beside its real window, and
+# taskkill/tasklist/PowerShell flashed one each time they ran. CREATE_NO_WINDOW
+# starts them without one. Their output was thrown away already (DEVNULL), so
+# nothing is lost; a GUI program ignores the flag. Empty elsewhere.
+_NO_WINDOW = ({"creationflags": subprocess.CREATE_NO_WINDOW}
+              if sys.platform == "win32" else {})
+
 # WHERE THE PROGRAMS LIVE IS IN sdr_programs.json NOW, beside everything else
 # that is true of a program rather than of this station -- its port, its mode
 # names, what it cannot do. This module takes a Profile and starts what it
@@ -77,7 +87,7 @@ def _running_without_psutil(names):
     try:
         if _system() == "win32":
             output = subprocess.check_output(["tasklist"], text=True,
-                                             stderr=subprocess.DEVNULL)
+                                             stderr=subprocess.DEVNULL, **_NO_WINDOW)
         else:
             output = subprocess.check_output(["ps", "-A", "-o", "comm"], text=True,
                                              stderr=subprocess.DEVNULL)
@@ -182,7 +192,8 @@ class Started:
                 return True
             if system == "win32" and self.pid:
                 done = subprocess.run(["taskkill", "/PID", str(self.pid)],
-                                      capture_output=True, text=True, timeout=10)
+                                      capture_output=True, text=True, timeout=10,
+                                      **_NO_WINDOW)
                 if done.returncode != 0:
                     print(f"[sdr] asking {self.profile.name} to close failed: "
                           f"{(done.stdout or done.stderr or '').strip()}")
@@ -281,7 +292,7 @@ def start(profile, override=""):
         return None, f"could not find the program (looked in {where})"
     try:
         popen = subprocess.Popen(command, stdout=subprocess.DEVNULL,
-                                 stderr=subprocess.DEVNULL)
+                                 stderr=subprocess.DEVNULL, **_NO_WINDOW)
     except Exception as err:
         return None, f"could not start {command[0]}: {err}"
     return Started(profile, popen=popen), f"started {os.path.basename(command[0])}"
