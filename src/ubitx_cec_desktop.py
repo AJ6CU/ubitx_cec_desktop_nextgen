@@ -1476,8 +1476,13 @@ class UbitxCecDesktop(sCTk):
     SCALING_FLOOR = 0.75
 
     def _screen_size(self):
+        """The room the window has: (width, height). See _work_area."""
+        left, top, right, bottom = self._work_area()
+        return right - left, bottom - top
+
+    def _work_area(self):
         """
-        The room the window has: (width, height) in real pixels.
+        Where the window can be: (left, top, right, bottom) in real pixels.
 
         FIX (2026-11-13): ON WINDOWS, ASKED OF WINDOWS, not Tk. Tk measures the
         screen once, when it starts -- and CustomTkinter turns on Windows'
@@ -1503,10 +1508,57 @@ class UbitxCecDesktop(sCTk):
                 info.cbSize = ctypes.sizeof(MONITORINFO)
                 if monitor and user32.GetMonitorInfoW(monitor, ctypes.byref(info)):
                     work = info.rcWork
-                    return work.right - work.left, work.bottom - work.top
+                    return work.left, work.top, work.right, work.bottom
             except Exception as err:
                 print(f"[app] could not ask Windows for the screen size: {err}")
-        return self.winfo_screenwidth(), self.winfo_screenheight()
+        return 0, 0, self.winfo_screenwidth(), self.winfo_screenheight()
+
+    # Allowance for the window's frame and title bar, which Tk's size leaves
+    # out: Windows 11's border is a few pixels a side at 100 %, twice that at
+    # 200 %, and the title bar about 30 px a scale.
+    FRAME_ALLOWANCE = (16, 40)
+
+    def _keep_on_screen(self, width, height):
+        """
+        Moves the window back onto the screen if the remembered position would
+        leave part of it off.
+
+        FIX (2026-11-14): THE RIGHT EDGE WAS OFF THE SCREEN AT 200 % (Mark, X1
+        Carbon: the TX knob cut off, the close button gone). Only the position
+        is remembered; the size is fitted each start. A position saved with
+        the window narrower -- at 150 %, or before the knobs scaled -- put the
+        wider window's right edge past the screen's. The position is kept as
+        far as it can be, and moved only as much as needed. Without a
+        remembered position the window manager places the window, and keeps it
+        on the screen itself.
+        """
+        import re
+        # FIX (2026-11-14): once shown, where the window is now -- see
+        # _refit_for_display_change.
+        if getattr(self, "_shown", False):
+            current = re.search(r"([+-]-?\d+[+-]-?\d+)$", tk.Tk.wm_geometry(self))
+            position = current.group(1) if current else None
+        else:
+            position = self._remembered_position()
+        if not position:
+            return
+        match = re.match(r"^([+-]-?\d+)([+-]-?\d+)$", position)
+        if not match:
+            return
+        if match.group(1)[0] == "-" or match.group(2)[0] == "-":
+            return              # measured from the right or bottom: not ours
+        # "+-8+0" is 8 px left of the screen's edge, as Windows puts a window
+        # snapped against it.
+        x, y = int(match.group(1)[1:]), int(match.group(2)[1:])
+        left, top, right, bottom = self._work_area()
+        scale = self._get_window_scaling() if hasattr(self, "_get_window_scaling") else 1
+        frame_w = int(self.FRAME_ALLOWANCE[0] * scale)
+        frame_h = int(self.FRAME_ALLOWANCE[1] * scale)
+        new_x = max(left, min(x, right - width - frame_w))
+        new_y = max(top, min(y, bottom - height - frame_h))
+        if (new_x, new_y) != (x, y):
+            print(f"[app] moved the window onto the screen: +{x}+{y} -> +{new_x}+{new_y}")
+            tk.Tk.wm_geometry(self, f"+{new_x}+{new_y}")
 
     def _apply_fitted_size(self):
         self._cap_scaling_to_screen()
@@ -1516,6 +1568,7 @@ class UbitxCecDesktop(sCTk):
         height = min(self.winfo_reqheight(), screen_h)
         tk.Tk.wm_geometry(self, f"{width}x{height}")
         tk.Tk.wm_minsize(self, width, height)
+        self._keep_on_screen(width, height)
         self._fitted_size = (width, height)
         # FIX (2026-11-13): AND TELL CUSTOMTKINTER. It keeps its own record of
         # the window's size and puts the window back to it whenever the scaling
@@ -1543,6 +1596,75 @@ class UbitxCecDesktop(sCTk):
         if notebook is not None:
             self.after_idle(lambda: notebook.grid_rowconfigure(
                 0, minsize=notebook.required_length()) if notebook.winfo_exists() else None)
+        # FIX (2026-11-14): Windows' display scale changed while the app runs.
+        # See _refit_for_display_change.
+        display = self._display_scale()
+        previous = getattr(self, "_display_seen", None)
+        self._display_seen = display
+        if (previous is not None and display != previous
+                and getattr(self, "_shown", False)
+                and not getattr(self, "_refit_pending", False)):
+            # Not now, and not on a timer: CustomTkinter is still telling the
+            # other widgets about the new scale, one by one, and something
+            # among them lets Tk's events run as it goes -- a refit scheduled
+            # here ran half way through, against the old layout. It is done
+            # once CustomTkinter has finished (unblock_update_dimensions_event).
+            self._refit_pending = True
+
+    def unblock_update_dimensions_event(self):
+        """
+        CustomTkinter calls this when it has told every widget about a new
+        display scale -- the moment to fit the window to the new layout.
+        """
+        super().unblock_update_dimensions_event()
+        if getattr(self, "_refit_pending", False):
+            self.after_idle(self._refit_for_display_change)
+
+    def _display_scale(self):
+        from customtkinter.windows.widgets.scaling import ScalingTracker
+        return ScalingTracker.window_dpi_scaling_dict.get(self, 1.0)
+
+    def _refit_for_display_change(self):
+        """
+        Fits the window again when Windows' display scale changes under it.
+
+        FIX (2026-11-14): THE WINDOW RAN OFF THE SCREEN WHEN THE SCALE WAS
+        RAISED WHILE THE APP RAN (Mark, X1 Carbon: started at 150 %, switched
+        to 200 % -- the TX knob and the close button past the right edge;
+        started at 200 % it fitted). At start-up the window is fitted to the
+        screen (_apply_fitted_size: the screen-fit scaling, the size, the
+        position). On a change while running, only CustomTkinter acted: it
+        scaled the window's old size up by the new scale, with no check that
+        the result fits -- at 200 % the content needs more than the X1's 2560
+        px, which is what the screen-fit scaling is for.
+
+        The reverse showed too, more quietly: started at 200 % and switched to
+        150 %, the window kept 200 %'s screen-fit scaling (0.9 or so) and came
+        out a little narrower than one started at 150 % (Mark).
+
+        So the fit is done again: the screen-fit scaling remembered for the
+        new display scale (none for one where the window fits), then the same
+        sizing as at start-up, which checks it and keeps the window on the
+        screen. The window redraws once more; it has just redrawn for the new
+        scale anyway.
+        """
+        self._refit_pending = False
+        if not self.winfo_exists():
+            return
+        from customtkinter.windows.widgets.scaling import ScalingTracker
+        factor = 1.0
+        try:
+            with open(FIT_SCALE_FILE) as handle:
+                factor = float(json.load(handle).get(self._fit_scale_key(), 1.0))
+        except Exception:
+            pass
+        if not self.SCALING_FLOOR <= factor <= 1.0:
+            factor = 1.0
+        print(f"[app] the display scale is now {self._display_scale():g} -- fitting the window again")
+        if abs(ScalingTracker.widget_scaling - factor) > 0.001:
+            ctk.set_widget_scaling(factor)
+        self.update_idletasks()
+        self._apply_fitted_size()
 
     def _release_size_lock(self):
         """
@@ -1682,6 +1804,8 @@ class UbitxCecDesktop(sCTk):
     def _show(self):
         self._shown = True
         self._shown_at = time.monotonic()
+        # The display scale the window was fitted at -- see _set_scaling.
+        self._display_seen = self._display_scale()
         if getattr(self, "_hide_by_alpha", False):
             self.attributes("-alpha", 1.0)
         else:

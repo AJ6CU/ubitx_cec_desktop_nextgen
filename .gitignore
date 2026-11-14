@@ -2,6 +2,7 @@
 *.pyc
 *.pyc
 *.pyc
+*.orig
 src/__pycache__/ubitx_link.cpython-313.pyc
 *.pyc
 build/
