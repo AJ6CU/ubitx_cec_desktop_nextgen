@@ -65,6 +65,10 @@ say "Installing the program and what it needs from PyPI -- a minute or two the f
 # Made here, on this Mac, so macOS does not treat it as downloaded. It starts
 # the program and writes its messages to ~/Library/Logs/uBITX CEC Desktop.log.
 rm -rf "$BUNDLE"
+# The architecture the environment's Python runs as here -- the one pip
+# fetched the packages for (see the FIX at the start script below).
+ARCH="$("$VENV/bin/python" -c 'import platform; print(platform.machine())')"
+[[ "$ARCH" == "arm64" || "$ARCH" == "x86_64" ]] || ARCH="$(uname -m)"
 mkdir -p "$BUNDLE/Contents/MacOS" "$BUNDLE/Contents/Resources"
 # The program's own icon, from the installed package.
 PKG="$("$VENV/bin/python" -c 'import os, ubitx_cec_app; print(os.path.dirname(ubitx_cec_app.__file__))')"
@@ -80,11 +84,21 @@ cat > "$BUNDLE/Contents/Info.plist" <<PLIST
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>NSHighResolutionCapable</key><true/>
+  <key>LSArchitecturePriority</key><array><string>$ARCH</string></array>
 </dict></plist>
 PLIST
+# FIX (2026-11-14): RUN PYTHON AS THE ARCHITECTURE IT WAS INSTALLED FOR.
+# Mark's MacBook (Apple silicon): the app opened and closed at once, the log
+# saying Pillow's library "is an incompatible architecture (have 'arm64',
+# need 'x86_64')". python.org's Python is universal -- it runs as Apple
+# silicon or as Intel (Rosetta), whichever its starter is -- and pip fetched
+# the Apple-silicon packages while installing, but the app's start script
+# was being run as Intel, so Python came up as Intel and could not load
+# them. Now the start script asks for the architecture the packages were
+# installed for, and the app says so to macOS (LSArchitecturePriority).
 cat > "$BUNDLE/Contents/MacOS/start" <<START
 #!/bin/zsh
-exec "$VENV/bin/python" -m ubitx_cec_app >> "\$HOME/Library/Logs/$APP.log" 2>&1
+exec /usr/bin/arch -$ARCH "$VENV/bin/python" -m ubitx_cec_app >> "\$HOME/Library/Logs/$APP.log" 2>&1
 START
 chmod +x "$BUNDLE/Contents/MacOS/start"
 touch "$BUNDLE"     # so Finder shows the new icon rather than a cached one

@@ -1972,20 +1972,275 @@ window brought it to 30 %, but Brown alone then used 70-90 % of the
 processor and still dropped samples, even at a 250 kHz sample rate.
 Nothing else was busy.
 RASPBERRY PI 5 (16 GB, Trixie, Brown built from source): clicks at
-first, `top` 367 % of 400. Settled with 10 fps, 1.024 Msps and
-(tried) Vulkan: about 275 % in USB, over 300 % in CW (Brown's CW
-decoding -- the skimmer, SKIM, runs in CW sub-bands), and no clicks
-heard (2026-11-11). The sample rate barely moved the load on either
-machine: it is mostly Brown's display and decoders. For the help page: a minimum of about a 4-core
-processor from the last 6-8 years with 8 GB, and on slower machines a
-lower screen update rate (10-15 fps), a smaller Brown window, SKIM off,
-and on a Pi WGPU_BACKEND=vulkan if the monitor does not flicker
-(export it in ~/.profile so the app's autostart gets it too).
-FOR THE HELP PAGE, RASPBERRY PI (2026-11-11) -- BROWN'S SETTINGS ON A
-PI 5 (Mark): Vulkan (`export WGPU_BACKEND=vulkan` in ~/.profile), Screen
-update rate 10 fps, sample rate no more than 1.024 Msps (lower not
-tried). CW loads it more than SSB, probably Brown's CW decoding; keep the
-SKIM chip off if it clicks in CW.
+first, `top` 367 % of 400; 10 fps and 1.024 Msps stopped the clicks.
+BROWN'S LOAD EXPLAINED (2026-11-12, Mark, measured with `top -H`): it was
+the CW SKIMMER'S NEURAL DECODER (DeepCW), not the display or the DSP.
+Its two `rten-0`/`rten-1` threads (the pool takes half the cores) sat
+near 100 % each, in every mode, whenever the CW skimmer was on with its
+Neural engine. Brown alone, 10 fps, 1.024 Msps, USB, 20 m, with brown
+#714 (below):
+  all skimmers off ................ ~25 %   (upstream v1.7.1: ~30 %)
+  + PSK and RTTY skimmers ......... ~43 %
+  + CW skimmer on Timing .......... ~57 %
+  CW skimmer on Neural instead .... ~250 %  (CW mode: ~310 %, spikes 370)
+Frame rate and graphics barely matter once that is off: 60 fps added
+about 35 % (2.048 Msps), Vulkan vs OpenGL ES no difference.
+BROWN #714 (madmedicnl, merged 2026-11-12) is upstream's #784: each
+RTL-SDR USB transfer is copied into cacheable memory before conversion
+(the Pi 5's USB buffers are uncached). Measured here before it merged:
+USB 295 -> 250 %, CW 350 -> 310 %, with the neural skimmer on. Our own
+port of it was not needed -- dropped.
+FOR THE HELP PAGE (Pi 5 and older laptops): in Brown's SKIM chip (Display
+box, FIT / CTR / SKIM / FFT), set the CW skimmer to TIMING, not Neural,
+or turn the skimmers off. Then the defaults are fine: with skimmers off,
+1.024 Msps 10 fps ~25 %, 2.048 Msps 10 fps ~35 %, 2.048 Msps 60 fps ~51 %
+(2026-11-12); with ALL skimmers on, CW on Timing, at 2.048 Msps 60 fps:
+~75 %. RECOMMENDED PI 5 SETTINGS: anything, as long as the CW skimmer is
+not on Neural.
+UPSTREAM v1.7.1 THE SAME (2026-11-12): same skimmer/DeepCW code (one line
+differs) and Neural is the default in both. Upstream at 2.048 Msps, 60 fps,
+all skimmers on, Neural: 28 % with the view on the phone part of 20 m,
+100-245 % nearer CW, ~300 % tuned to 14.030. THE SKIMMERS DECODE ONLY WHAT
+IS ON SCREEN (`SetSkimmerView`), whatever the mode: the neural cost follows
+how many CW signals are in the visible span. Brown's 250 % "in USB" was a
+view that still showed the CW segment. FOR THE HELP PAGE: on a Pi, use
+Timing; with Neural, it is light only while no CW segment is on screen.
+Neural "stations" (CW slots, default 32) down to 8 at 14.030: ~300 % ->
+200-260 %; the same 8 stations on TIMING: ~60 %. Timing is the Pi setting.
+Brown the same: Neural, 8 stations: 65-70 % at 14.200 (voice), 250-300 %
+back at 14.030, and 70-80 % there on Timing.
+IDEA (Mark, 2026-11-12): an option to run each skimmer only in its own
+mode -- hunt in SSB, switch to CW (PSK...) to pounce. In the Brown note
+as suggestion 3. PR WRITTEN (2026-11-12): sdroxide/brown/brown-skim-only-in-mode.patch
++ brown_pr_skim_only_in_mode.md -- ONLY IN ITS MODE chip, wire 302, 11
+languages, manual, 6 type tests + an engine test. Mark: build and test on the
+Mac, try it on the Pi. HOLD: F4NRM (2026-11-12) is doing ideas 1+2 himself
+(Timing default on <=4 cores for a fresh config, Neural tooltip, 1 DeepCW
+thread on <=4 cores; no wire change) and asked for idea 3 as a separate PR.
+Test his PR on the Pi and X1 and report on the issue (reply:
+sdroxide/brown/brown_performance_reply.md); then rebase ours onto main and
+open it. A smaller
+Brown window saves a couple of %. Vulkan (`export WGPU_BACKEND=vulkan` in
+~/.profile) is optional. Brown is then as light as SDR++ and Gqrx on a Pi.
+X1 CARBON RE-TESTED (2026-11-12, Mark): with the CW skimmer on TIMING and
+all skimmers on, on the CW part of 20 m, Brown took 30-35 % of the machine
+in Task Manager (was 70-90 %; Windows counts the whole machine, so about
+1.2-1.4 of its 4 threads), and NO dropped samples, at 2.048 Msps too. So the
+neural decoder was most of its trouble: the X1 is a workable field laptop
+with the CW skimmer on Timing, a smaller Brown window and a low frame rate
+(the GPU was the other limit). All skimmers off, same place (14.032):
+~25 %, so the Timing skimmers cost only 5-10 % there; 2.048 Msps made no
+real difference. Windows' own background work (Defender, Update, OneDrive)
+takes 20-30 % now and then: for the help page, pause updates and OneDrive
+and exclude Brown's folder from Defender while operating. GPU (smaller
+Brown window): ~25 % at 10 fps, but ~70 % already at 30 fps and 65 % at
+60 -- the Intel HD 4400 jumps to a high state rather than following the
+frame rate. Starting another program while Brown runs at the higher
+frame rates drops samples, so the X1 has little margin. X1 SETTING: 10 fps,
+and keep other programs closed; check the app alongside it.
+X1 WITH THE APP (2026-11-12): Brown rose from 30-35 % to 60-70 % with the
+app connected -- to check whether it is the rigctl polling (app's SDR set to
+none: does Brown fall back?) and whether Brown repaints on every rigctl
+query past its fps cap. ALSO: resizing the APP's window is not live on the
+X1 -- nothing moves while dragging, then it jumps (Brown's window resizes
+live, so not the Windows "show contents while dragging" setting). Likely
+CustomTkinter/sCTk redrawing every widget on each <Configure> on a slow CPU.
+Brown closed: still lags, so it is the app's redraw cost. FIX WRITTEN
+(2026-11-12, resize_freeze.zip): resize_freeze.py holds the notebook at its
+old size (Tk's placer) while the window's size changes, and packs it back
+150 ms after the drag stops -- one layout instead of one per step. Armed 1 s
+after start. Tested here with real CTk 6 + sCTk under Xvfb (7/7, the control
+shows the redraws without it) and in the real app. Mark: apply on the Mac,
+rebuild the wheel, try it on the X1.
+
+X1 ON 1.0.4 (2026-11-13): window icon and Start menu show the knob; the
+TASKBAR did not (pythonw's identity) -> app-taskbar-id.patch (explicit
+AppUserModelID "AJ6CU.uBITXCECDesktop" before the first window). Window came
+up too narrow under display scaling (X1 at 200 %: CTk scales widgets after
+the window is made) -> app-refit-settling.patch (refit every 100 ms for 2 s
+unless resized by hand; ResizeFreeze armed at 2.5 s). "Extract All" message
+for an installer run from inside the zip -> windows-installer-fix.zip. All
+for 1.0.5. SCALING (scaling.zip / app-scaling.patch, after refit + taskbar):
+the real cause of the narrow window was CustomTkinter -- on a scaling change
+it (a) puts the window back to ITS record of the size (600 px default; the app
+sizes it with Tk's own calls) and (b) locks the maximum size to the old size,
+releasing it only if the app set a maximum. Now the app keeps CTk's record in
+step (_current_width/_height) and puts Tk's maximum back each time it sizes
+the window. Plus a cap: where the window would be wider than the screen
+(98 % x 90 %), CTk's widget scaling is reduced to fit, floor 75 % of the
+display's (most of the width does not shrink -- the dials do not follow CTk's
+scaling: 1410 -> 1270 px at 0.68). Tests: late scale grows the window (1410 ->
+1980; was snapping to 600), 1366x768 fits at 0.84, 1280x800 stops at 0.75,
+1920x1080 untouched; fit 9/9, tabs 5/5. X1 ON 1.0.5 (2026-11-13): at 200 % the window was HALF THE SCREEN, content
+cut off; at 150 % right. Cause: Tk measures the screen once, at start, and
+CTk turns on Windows' high-DPI mode only after that -- Tk said 1280 px
+(2560 / 2) while drawing in real pixels, so the cap clamped the window to
+1280 and shrank to the floor. app-screen-size.patch: _screen_size() asks
+Windows for the monitor's WORK AREA (GetMonitorInfoW; taskbar excluded);
+used by the fit, the cap, the size-lock release and dialog placement. For
+1.0.6; untestable here (Windows only).
+X1 ON 1.0.6 AT 200 % (2026-11-13): full width now. Two left: (1) the
+FREQUENCY READOUT CLIPPED ("13.991.") -- sCTkFrequencyDisplay measured its
+canvas once, at creation, and had no _set_scaling; when Windows' scale
+arrived the digits grew in a canvas sized for 100 %. sCTk fix
+(sctk-readout-scaling.patch: _set_scaling -> _resize_to_fit + redraw; test
+examples/validation-tests/test_frequency_display_scaling.py, 4/4, 1/4
+without) -> sCTk 0.2.2, app requirements scustomtkinter>=0.2.2. (2) A FLASH
+at start-up: the window shown, then rescaled -> app-show-settled.patch: shown
+once its size has held 300 ms (1.5 s at most). With the readout fix the
+1280x800 case now fits at 0.88 instead of the 0.75 floor.
+sCTk 0.2.2 SCALING AUDIT (2026-11-13, sctk-0.2.2-scaling.patch): every
+widget made at 1x, scaling doubled (examples/validation-tests/scaling_audit.py).
+THE DIALS SCALE FINE (earlier guess wrong). Fixed: sCTkFrequencyDisplay
+(resize on _set_scaling -- the clipped digits); sCTkNotebook (page inset
+scaled twice -- 10 px at 1x, 40 at 2x; and its canvas asked for Tk's default
+10x7 cm, a DPI-dependent floor). Not faults: frames holding a short CTkLabel
+(CTk label quirk), 3-5 px outline overflow on separator/spinbox/notebook at
+every scale. Tests: readout 4/4 (1/4 without), notebook 2/2 (0/2 without).
+APP 1.0.7 (app-1.0.7.patch, replaces app-show-settled.patch): shown once the
+size settles; on EVERY scaling change (runtime DPI change too) the size lock
+released and the tab strip's minimum re-measured. Whole app now scales
+evenly: 1410x374 -> 705x187 at 0.5. requirements: scustomtkinter>=0.2.2.
+(The dial item below is done -- nothing needed.)
+MAC "BOUNCE" AT START (2026-11-13, found with diag_bounce.py): (1) showing a
+withdrawn window plays macOS's appear animation -> on macOS the window is
+transparent (alpha 0) while sized, then opaque (app-mac-show.patch); (2) when
+the app STARTS the SDR, the RX page's audio note filled in a second after the
+window appeared and wrapped to a second line (30 -> 45 px), the tallest page
+grew and the window with it -> the note reserves the height of its longest
+text, measured at start (app-audio-note.patch; test_audio_note.py: one height
+for every text, was 28/42 before). Both for 1.0.7.
+X1 ON 1.0.7 (2026-11-13): (1) JAGGED DIGITS -- the readout's "Courier" is
+Windows' old BITMAP Courier (installed, so the fallback never ran) -> sCTk
+uses Consolas, else Courier New, on Windows (test_frequency_display_font.py,
+simulated platforms 4/4) -> sCTk 0.2.3. (2) A REFRESH A FEW SECONDS AFTER
+APPEARING -- CTk had the right scale from the start; at 200 % the app is
+2705 px on a 2560 screen, the cap scaled it to 0.92 (1.2 s rebuild, hidden);
+then the notebook re-measured its strip 5 px narrower and the settle loop --
+20 checks meant as 2 s, 5 s on the busy X1 -- resized the visible window.
+app-settle-clock.patch: settle by the clock (hidden <= 1.5 s, refit <= 1 s
+after appearing, changes <= 8 px ignored once visible); and the screen-fit
+scaling remembered per screen and display scale (screen_fit.json), set
+before anything is built -- second start builds at 0.881 directly here.
+DIALS DONE (2026-11-14, sCTk 0.2.4): the knob, ticks, pointer, label gap and
+label text were drawn at 100 % inside a canvas CTk had scaled -- small knobs
+at 150/200 % on Windows (the Mac scales itself, CTk's scale is 1 there).
+sctk_dial.py draws everything through _sx() / _scaled_label_font() (points
+multiplied, so 100 % is unchanged everywhere) and redraws on _set_scaling.
+test_dial_scaling.py 13/13 (3/13 without). App: KNOB_MARGIN 16 (was +10; the
+ticks stick out 6 px a side and were clipped). CONFIRMED on the X1: knobs
+normal at 150 and 200 %.
+WINDOW OFF THE SCREEN (2026-11-14, app 1.0.9): a remembered position is
+moved back onto the screen if the fitted window would not fit there
+(_keep_on_screen, _work_area; test_on_screen.py 4/4, 1/4 without).
+CHANGING WINDOWS' DISPLAY SCALE WHILE THE APP RUNS -- OPEN, LOW PRIORITY
+(Mark, 2026-11-14): START at 150 % or 200 % and the window fits, every time.
+Changed while running, 150 % -> 200 %: the window stayed about its 150 %
+width (~2030 px) with the content drawn at 200 % inside it -- the RX/TX
+readouts, the RIT row and the knob labels cut off. Going 200 % -> 150 %
+fitted, but a little narrower than starting at 150 % (it kept 200 %'s
+screen-fit scaling). Workaround: set the display scale before starting the
+app, or restart it after a change. ATTEMPTED (app-display-change.patch, in
+1.0.9): on a display-scale change after the window is shown, refit -- the
+screen-fit scaling remembered for the new scale (screen_fit.json, else 1),
+then _apply_fitted_size -- scheduled from unblock_update_dimensions_event,
+once CTk has told every widget. Passes here (test_display_change.py 5/5,
+3/5 without; a faked DPI on Xvfb, and a 2560x1344 screen 1.5 -> 2.0 refits
+to 2460 px at 0.87) but NOT on the X1. Not yet known why. Suspects: Windows
+itself resizes a per-monitor-aware window on WM_DPICHANGED (suggested rect),
+after our refit; CTk's _set_scaling geometry/minsize/maxsize lock and its
+1 s _set_scaled_min_max landing after the refit; reqwidth still stale when
+the refit runs on the slower machine. NEXT: run diag_bounce.py-style logging
+on the X1 across a live change (size, reqwidth, widget scaling, when the
+refit runs) before changing more.
+APP ICON (2026-11-13, app-icon.zip): the first version's tuning-knob icon
+(transparent set; the gray one carries an AI-generator sparkle watermark) in
+src/icons/ (icon_16..1024.png, icon.ico, icon.icns); build_wheel DATA gains
+"icons/*". The app sets it on its windows (iconphoto; iconbitmap on Windows,
+which stops CTk putting its own back); the Mac app bundle gets AppIcon.icns,
+the Windows shortcuts the .ico (pylnk3 icon_file), the Linux menu entry the
+256 px PNG. Tested here: wheel contents, Linux Icon= path, Windows shortcuts'
+icon path, the installed app's iconphoto. Windows pop-ups may still show
+CTk's icon (CTkToplevel sets its own) -- check.
+MAC INSTALLER CHECKED (2026-11-13, Mark, 1.0.3 downloaded with a browser):
+Gatekeeper blocks the unsigned .command ("Not Opened"); System Settings >
+Privacy & Security > Open Anyway lets it run; it installs (python.org 3.14),
+and the app it makes in ~/Applications opens with no warning. Steps now in
+the macOS READ ME. ("Cache entry deserialization failed" from pip: harmless.)
+WINDOWS INSTALLER IN PYTHON (2026-11-13, windows-installer-py.zip): Smart App
+Control blocks unsigned .bat/.ps1 files even after Unblock (only "Run as
+administrator" got past), and stops PowerShell's WScript.Shell. The Windows
+pair is now "Install/Uninstall uBITX CEC Desktop.py", run by Python (signed
+by the PSF) on double-click; shortcuts written by pylnk3 (LGPL, installed from
+PyPI into the venv), a .pyw launcher on the Desktop if that fails; "Start with
+messages.py". Tested here (Linux stand-in): install, shortcuts read back,
+uninstall. Old .bat/.ps1 removed from packaging/installers/windows.
+X1 TEST OF THE WINDOWS INSTALLER (2026-11-13): installs and starts from the
+Start menu. Smart App Control blocks the unsigned .bat with no "Run anyway":
+right-click the zip > Properties > Unblock first (now in the Windows READ ME;
+"Run as administrator" also worked). The black window was BROWN's console
+(the app starts Brown; Brown is a console program on Windows) -- idea: start
+it minimized (STARTF_USESHOWWINDOW / SW_SHOWMINNOACTIVE) so its log stays on
+the taskbar. Resize: the frame follows now; one redraw after release; the
+Windows 11 border is thin to catch.
+FIT TO CONTENT (2026-11-13, fit_to_content.zip): the window starts at the size
+its content needs (1410x370 under X), follows its content until resized by
+hand, and cannot be dragged smaller; only the POSITION is restored, so one bad
+resize no longer sticks (Mark: "if you mess it up once, you fight it").
+8/8 in test_fit.py, 3 fail on the old code.
+NO CONSOLE WINDOWS (2026-11-13, no_console.zip): sdr_launcher.py (SDR start,
+tasklist, taskkill) and system_audio.py (mute/volume PowerShell) run with
+CREATE_NO_WINDOW on Windows -- Brown's black window and the flashes gone.
+Simulated-Windows test: all five calls flagged; none without the fix.
+TABS (2026-11-13, tabs.zip + app-spacing.patch + app-fit-once.patch): main
+tabs keep their full names (constants TAB_*; "Op"/"Chan" briefly) -- the real
+cause was the theme's tab_pad 18, now 8 on this notebook (strip 345 -> 245 px
+with full names); the strip's row asks for the tabs' whole length; Setup in three sub-tabs across the top (Station &
+Radio, SDR, Logbook & more; the tallest 244 against Operate's 337), so the
+window is one height for every tab; _show_setup() opens the radio's sub-tab
+when the radio is not answering. 5/5 test_tabs.py. Window hidden until sized,
+then sized ONCE (following content grew it when Channels filled its table);
+12 px under the Channels table. Sub-tab tabview height=50 (10 went negative:
+Tk 9 on macOS refused it). Mark confirmed on the Mac 2026-11-13.
+
+INSTALLERS (2026-11-12, installers.zip -> packaging/installers/ +
+packaging/build_bundles.py): replace the old install_scripts (which were the
+CEC Nextion emulator's: wrong wheel, ~/Documents/CEC, activate, no checks).
+One double-click installer per platform; each finds a Python 3.10+ with Tk,
+makes its own venv (Windows %LOCALAPPDATA%, macOS ~/Library/Application
+Support, Linux ~/.local/share), installs the bundled wheel + PyPI deps,
+re-runs as an upgrade, and adds a Start-menu/Desktop shortcut (Windows,
+pythonw + "Start with messages.bat"), an app in ~/Applications (macOS, log in
+~/Library/Logs), or a menu entry + ~/.local/bin command (Linux; offers apt
+python3-tk/python3-venv and the dialout group). Uninstallers keep
+~/.ubitx_cec_desktop. build_bundles.py makes dist/uBITX-CEC-Desktop-<ver>-
+{Windows.zip,macOS.zip,Linux.tar.gz}. Linux path tested end to end here
+(fresh install, upgrade, app runs with the resize fix, uninstall, no-Tk and
+no-answer paths). Windows and macOS untested: Mark, X1 and Mac. Unsigned:
+macOS may need "zsh <drag file>" in Terminal.
+SDR++ ON THE PI 5 (2026-11-12, Mark): SDR++ (Trixie aarch64 .deb) used
+about 33-37 % of ONE core at 2.4 Msps -- the same range as Brown with its
+CW skimmer off or on Timing (~25-57 %, above) -- and the app about 3 %
+driving it (about 10 % with Brown, which it polls for more). SDR++ needs the rtl-sdr package and the DVB-T
+driver blacklisted (dvb_usb_rtl28xxu); its Rigctl Server module on 4532.
+GQRX ON THE PI 5 (2026-11-12): about 32 % of one core AT 2.4 Msps, the app
+about 5 %; the S-meter follows signals
+-- as light as SDR++, and the app gets more from it (signal for the S-meter
+and scanner, squelch, volume; no split). So Gqrx is the Pi recommendation
+when Brown is too heavy. Setup notes: `sudo apt install gqrx-sdr`; device
+string `rtl=0`, and `rtl=0,direct_samp=2` (Q branch) for HF on an R820T
+dongle; Audio output "default"/PipeWire, NOT the USB card by name (PipeWire
+holds it: aplay -l shows "Subdevices: 0/1", and opening it directly failed
+with "source_impl output 1 is not connected internally" and a Qt
+exception); Tools > Remote control on, port 7356; `gqrx -r` resets its
+settings.
+SDRANGEL ON THE PI 5 (2026-11-12): a dead end without building it. Not in
+Trixie (Debian has it only in testing/unstable); SDRangel's own arm64 .deb
+is built for Ubuntu 26.04 (glibc 2.43, Qt 6.10, FFmpeg 8) and will not
+install on Trixie (glibc 2.41, Qt 6.8, FFmpeg 7.1); its 24.04 builds want
+FFmpeg 6 and are amd64. Only an Ubuntu 25.04 arm64 build would match, and
+none was found. For the help page: on a Pi, SDRangel means building from
+source -- use Gqrx.
 The Pi 5 is the minimum Pi
 -- a Pi 4's processor and graphics are much slower, and the Pi 5 already
 needed its display turned down. Memory is not the limit: Brown, the app
@@ -2024,6 +2279,11 @@ not on PyPI; PyPI refuses such wheels, so sCTk goes to PyPI first if this
 ever does). TK IS NOT PIP-INSTALLABLE: Homebrew's Python 3.15 had none
 (`brew install python-tk@3.15` fixed it); the launcher now says so plainly
 instead of a traceback. APPVERSION still "1.0", APPDATE "June 15, 2026".
+
+**sCustomTkinter from PyPI -- DONE 2026-11-12.** sCTk 0.2.1 is published;
+the app's wheel now depends on `scustomtkinter>=0.2.1` and `customtkinter>=6.0`
+instead of the GitHub URL, so installing it needs no git (the Windows
+install stopped there on 2026-11-11). The app wheel could go to PyPI too.
 
 **Install scripts for all three platforms -- LATER (Mark).** Check for and
 install Tk (Homebrew python-tk@3.x; apt python3-tk; python.org builds have

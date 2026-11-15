@@ -110,7 +110,7 @@
 
 <p>KD8CEC's firmware 1.2 (it reports itself as <code>+v1.200</code>) replaces the uBITX's original Raduino software. It must be the build for a <b>Nextion display</b>: that's the protocol the app speaks. The source and ready-built files are in KD8CEC's repository, <code>github.com/phdlee/ubitx</code>, and his notes are on <code>hamskey.com</code>.</p>
 
-<div class="todo"><b>Before you flash: back up.</b> Your radio's calibration (master cal and BFO) lives in its EEPROM. If you already run KD8CEC firmware, open <span class="ui">Setup → Backup and restore…</span> and copy <span class="ui">From the radio → Config file</span> first, or write the values down.</div>
+<div class="todo"><b>Before you flash: back up.</b> Your radio's calibration (master cal and BFO) lives in its EEPROM. If you already run KD8CEC firmware, open <span class="ui">Setup → Logbook &amp; more → Backup and restore…</span> and copy <span class="ui">From the radio → Config file</span> first, or write the values down.</div>
 
 <h4>Option A: a ready-built file</h4>
 <ol>
@@ -155,14 +155,14 @@
 <h3 id="first-start">First start</h3>
 <ol>
   <li>Plug in the adapter and switch the radio on.</li>
-  <li>Start the app. With no radio chosen yet, it opens on <span class="ui">Setup</span>.</li>
+  <li>Start the app. With no radio chosen yet, it opens on <span class="ui">Setup → Station &amp; Radio</span>.</li>
   <li>In the <span class="ui">Radio</span> group, choose the adapter under <span class="ui">Port</span>. Ports are labelled by their chip (FTDI, CH340…). If yours isn't listed, tick <span class="ui">show all</span>, or press <span class="ui">Refresh</span> after plugging it in.</li>
   <li>Leave <span class="ui">Speed</span> as it is unless your firmware was built for another, and press <span class="ui">Connect</span>.</li>
 </ol>
 
 <figure class="missing">
-  <img src="images/setup-radio.png" alt="Setup, Radio group" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
-  <div class="ph">Screenshot to come: Setup, the Radio group with a port chosen.</div>
+  <img src="images/setup-radio.png" alt="Setup, the Station &amp; Radio sub-tab" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <div class="ph">Screenshot to come: Setup → Station &amp; Radio, with the radio's port chosen.</div>
   <figcaption>Choosing the radio's port.</figcaption>
 </figure>
 
@@ -176,15 +176,15 @@
 
 <h4>In the app</h4>
 <ol>
-  <li><span class="ui">Setup → SDR → Software</span>: choose your program. <span class="ui">-none-</span> is the default, and with it Connect and the address fields stay greyed.</li>
+  <li><span class="ui">Setup → SDR</span>, <span class="ui">Software</span>: choose your program. <span class="ui">-none-</span> is the default, and with it Connect and the address fields stay greyed.</li>
   <li><span class="ui">Address</span> and <span class="ui">Port</span> fill in with the program's usual ones; change them only if you changed them in the program.</li>
   <li>Tick <span class="ui">Start it</span> if the app should start the program for you. The app closes a program it started when it quits, and leaves alone one that was already running.</li>
   <li>Press <span class="ui">Connect</span>. The line under the group lists what the program lets the app control.</li>
 </ol>
 
 <figure class="missing">
-  <img src="images/setup-sdr.png" alt="Setup, SDR group" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
-  <div class="ph">Screenshot to come: Setup, the SDR group with SDRoxide Brown chosen.</div>
+  <img src="images/setup-sdr.png" alt="Setup, the SDR sub-tab" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <div class="ph">Screenshot to come: Setup → SDR, with SDRoxide Brown chosen.</div>
   <figcaption>Choosing the SDR program.</figcaption>
 </figure>
 
@@ -224,7 +224,7 @@
 <div class="note"><b>Which VFO is which in split.</b> The panel tells you: whatever VFO sits in the RX panel is the one you receive on, even if it's VFO B. The firmware's usual arrangement is receive on A, transmit on B, but A/B swaps them.</div>
 
 <h3>Meters</h3>
-<p><span class="ui">SIG</span> is the signal strength, in S-units and dBm. With an SDR it's the SDR's reading. Listening through the radio, it's the radio's S-meter sensor, which only means something once its levels are set (<span class="ui">Setup → EEPROM settings…</span>). <span class="ui">SWR</span> and <span class="ui">PWR</span> wait for a sensor board.</p>
+<p><span class="ui">SIG</span> is the signal strength, in S-units and dBm. With an SDR it's the SDR's reading. Listening through the radio, it's the radio's S-meter sensor, which only means something once its levels are set (<span class="ui">Setup → Logbook &amp; more → EEPROM settings…</span>). <span class="ui">SWR</span> and <span class="ui">PWR</span> wait for a sensor board.</p>
 
 <h3>Listening aids</h3>
 <p><span class="ui">AGC</span>, <span class="ui">NR</span>, <span class="ui">Notch</span>, <span class="ui">SQL</span>, <span class="ui">NB</span>, <span class="ui">CW</span> (the peak filter) and <span class="ui">DEC</span> (the CW decoder) are the SDR's. Click a lamp to switch it; click the arrow beside it for its settings. A pop-up closes on Escape or a click elsewhere. <b>Pin</b> it to keep it open; pinned pop-ups come back where you left them. A lamp is greyed when the SDR can't do it, and says why. Notch is greyed in CW, where it would remove the signal.</p>
@@ -232,7 +232,7 @@
 
 <h3>Filter, band, mode and span</h3>
 <ul>
-  <li><span class="ui">wide</span> / <span class="ui">narrow</span> step the SDR's filter; <span class="ui">reset</span> returns to the default for the mode (Setup's SDR settings). The width is shown beside them.</li>
+  <li><span class="ui">wide</span> / <span class="ui">narrow</span> step the SDR's filter; <span class="ui">reset</span> returns to the default for the mode (<span class="ui">Setup → Logbook &amp; more → SDR settings…</span>). The width is shown beside them.</li>
   <li>The <b>band</b> box steps through the ham bands; off any band it shows "—".</li>
   <li><span class="ui">LSB</span> <span class="ui">USB</span> <span class="ui">CWL</span> <span class="ui">CWU</span> set the radio's mode; the SDR follows.</li>
   <li><span class="ui">Spectrum Span</span> sets how wide a slice the SDR samples, where it allows (SDRoxide Brown, SDRangel).</li>
@@ -249,7 +249,7 @@
   <tr><td><span class="ui">A ⇄ B</span></td><td>Exchange the two VFOs' contents: frequency, mode and any RIT.</td></tr>
   <tr><td><span class="ui">A → B</span></td><td>Copy A onto B.</td></tr>
   <tr><td><span class="ui">up 1</span> … <span class="ui">dn 2</span></td><td>Split offsets, in kHz, as a DX station calls them: transmit that far from where you're <i>receiving</i>. Pressing up 5 twice leaves you 5 up, not 10.</td></tr>
-  <tr><td><span class="ui">Log QSO</span></td><td>Log a contact (Setup's Logbook says where).</td></tr>
+  <tr><td><span class="ui">Log QSO</span></td><td>Log a contact (<span class="ui">Setup → Logbook &amp; more</span> says where).</td></tr>
 </table>
 
 <h4>RIT and VFOs</h4>
@@ -332,29 +332,36 @@
 <!-- ============================================================== -->
 <h2 id="setup">6. Setup</h2>
 
-<figure class="missing">
-  <img src="images/setup.png" alt="The Setup tab" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
-  <div class="ph">Screenshot to come: the whole Setup tab.</div>
-  <figcaption>The Setup tab.</figcaption>
-</figure>
+<p>Setup has three sub-tabs across its top: <span class="ui">Station &amp; Radio</span>, <span class="ui">SDR</span> and <span class="ui">Logbook &amp; more</span>. When the radio isn't answering, the app opens on <span class="ui">Station &amp; Radio</span>.</p>
 
-<h3>Station</h3>
+<h3 id="setup-station-radio">Station &amp; Radio</h3>
+<p>The Station and Radio groups side by side. See <a href="#first-start">First start</a> for the radio's port.</p>
+
+<h4>Station</h4>
 <ul>
   <li><span class="ui">Callsign</span> is the radio's, from its memory. Change it here and it's written to the radio, shown at start-up after a restart.</li>
-  <li><span class="ui">Appearance</span>: dark, light or following the system. <i>Not yet working.</i></li>
+  <li><span class="ui">Appearance</span>: dark, light, or following the system (the default). On Linux, where the desktop's setting can't always be read, choose Dark or Light.</li>
   <li><span class="ui">Keep on top</span> keeps the app's window above other windows, on by default. Without it, clicking the SDR's waterfall brings the SDR's large window to the front and the app disappears behind it.</li>
 </ul>
 
-<h3>Radio</h3>
+<h4>Radio</h4>
 <p>The adapter's port and speed, and <span class="ui">Connect</span>. See <a href="#first-start">First start</a>.</p>
 
-<h3>SDR</h3>
+<h3 id="setup-sdr">SDR</h3>
 <p>The program, whether to start it, its address and port, and the <span class="ui">CW port</span> where it sends decoded CW. See <a href="#sdr-setup">Setting up an SDR</a>.</p>
 
-<h3>Logbook</h3>
+<h3 id="setup-more">Logbook &amp; more</h3>
+
+<figure class="missing">
+  <img src="images/setup-logbook.png" alt="Setup, the Logbook &amp; more sub-tab" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <div class="ph">Screenshot to come: Setup → Logbook &amp; more.</div>
+  <figcaption>The logbook, and the buttons for the rest of the settings.</figcaption>
+</figure>
+
+<h4>Logbook</h4>
 <p>Whether QSOs are logged, the logbook file, its format and its backup.</p>
 
-<h3>Other settings</h3>
+<h4>Other settings</h4>
 <table>
   <tr><th>Button</th><th>What it's for</th></tr>
   <tr><td><span class="ui">EEPROM settings…</span></td><td>Settings kept in the radio's memory: show the callsign at start-up, the S-meter reports switch, and the eight <b>S-meter levels</b> for the radio's S-meter sensor. Levels all at 0 read every signal as about S9; set them if you listen through the radio's sensor.</td></tr>
