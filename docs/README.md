@@ -1,5 +1,7 @@
 ## uBITX CEC Desktop
 
+<img src="images/mainscreen-cw.png" alt="uBITX CEC Desktop, the Operate tab in CW" width="800">
+
 A desktop interface for uBITX radios running KD8CEC firmware, with an SDR
 program alongside it showing the band as a waterfall. The rig and the SDR are
 kept in step both ways: tune the rig and the SDR follows; click a signal in
