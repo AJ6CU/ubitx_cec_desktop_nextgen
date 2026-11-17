@@ -144,32 +144,51 @@
 
 <p>The app connects where a Nextion display would: a USB-to-TTL serial adapter plugged into the computer, with its wires on the Raduino's Nextion serial lines. It is not the Nano's own USB port; that one is for flashing firmware.</p>
 
-<p>The easiest lead is the Nextion display's own four-wire cable: unplug it from the display and plug that end into the adapter. Its colours are the Nextion's standard ones:</p>
-<ul>
-  <li><b>Black</b>: ground. To the adapter's <b>GND</b>.</li>
-  <li><b>Red</b>: the radio's +5 V. To the adapter's <b>VCC</b>, with the adapter's voltage jumper <b>removed</b>, so that nothing is connected to it (see the photo).</li>
-  <li><b>Blue</b>: the line the radio <em>receives</em> on (the Nano's D8). To the adapter's <b>TX</b>.</li>
-  <li><b>Yellow</b>: the line the radio <em>sends</em> on (the Nano's D9). To the adapter's <b>RX</b>.</li>
-</ul>
+<p>Four wires, the same four a Nextion display uses. The easiest lead is the Nextion's own cable: unplug it from the display and plug that end into the adapter. Its colours are the Nextion's standard ones, and the pictures below use them too:</p>
 
+<table>
+  <tr><th>Wire</th><th>What it carries</th><th>Raduino pin, V3–V5</th><th>Raduino pin, V6</th><th>CP2102</th><th>FT232RL</th></tr>
+  <tr><td><b>Black</b></td><td>Ground</td><td>1</td><td>2</td><td>GND</td><td>GND</td></tr>
+  <tr><td><b>Red</b></td><td>The radio's +5 V</td><td>2</td><td>1</td><td>VCCIO</td><td>VCC</td></tr>
+  <tr><td><b>Blue</b></td><td>What the radio <em>receives</em> (the Nano's D8)</td><td>4</td><td>11</td><td>TXD</td><td>TXO</td></tr>
+  <tr><td><b>Yellow</b></td><td>What the radio <em>sends</em> (the Nano's D9)</td><td>6</td><td>5</td><td>RXD</td><td>RXI</td></tr>
+</table>
+
+<p>The adapter's TX goes to what the radio receives on, and its RX to what the radio sends on: each one's output is the other's input.</p>
+
+<div class="todo"><b>Leave the adapter's voltage jumper off.</b> With it on, the adapter puts its own 5 V (or 3.3 V) onto the red wire, against the radio's +5 V.</div>
+
+<div class="todo"><b>Ground and +5 V are the other way round on the V6.</b> On a V3, V4 or V5 Raduino, pin 1 of the display header is ground and pin 2 is +5 V; on a V6, pin 1 is +5 V and pin 2 is ground. Plug the cable into the radio exactly as the Nextion's was, and check the colours against the pictures for your uBITX before you switch on. A lead the wrong way round at the radio connects the adapter's ground to +5 V, and can damage the adapter, the computer's USB port or the radio. If you make your own lead, wire it by what each wire does, never by position on the connector.</div>
+
+<h4>At the adapter</h4>
 <figure class="missing">
-  <img src="images/usb-ttl-adapter.jpg" alt="The USB-to-TTL adapter, with the Nextion wire colours for each pin" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <img src="images/usb-ttl-adapter.jpg" alt="The CP2102 and FT232RL adapters, with the wire colour for each pin and the voltage jumper" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
   <div class="ph">Photo to come: the USB-to-TTL adapter, with its pins labelled.</div>
-  <figcaption>The USB-to-TTL adapter, with the Nextion wire colour for each pin. Leave the voltage jumper off: with it on, the adapter would try to power the uBITX.</figcaption>
+  <figcaption>Two common adapters, a CP2102 and an FT232RL, with the wire from the Raduino on each pin. The arrows point to the voltage jumper: leave it off.</figcaption>
 </figure>
 
-<div class="todo"><b>Ground and +5 V are in opposite places on the V3–V5 and the V6.</b> Plug the cable into the radio exactly as the Nextion's was, and check the colours against the photo for your uBITX before you switch on. A lead that is the wrong way round at the radio connects the adapter's ground to +5 V, and can damage the adapter, the computer's USB port or the radio. If you make your own lead, wire it by colour (by what each wire does), never by position on the connector.</div>
-
+<h4>At the radio</h4>
 <figure class="missing">
   <img src="images/uBITX_V3_4_5_Nextion_Wiring.jpg" alt="The Nextion cable on a uBITX V3, V4 or V5 Raduino" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
   <div class="ph">Photo to come: the Nextion cable on a uBITX V3, V4 or V5.</div>
   <figcaption>uBITX V3, V4 and V5: the Nextion cable on the Raduino's display header.</figcaption>
 </figure>
-
 <figure class="missing">
   <img src="images/uBITX_V6_Nextion_Wiring.jpg" alt="The Nextion cable on a uBITX V6 Raduino, seen from below" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
   <div class="ph">Photo to come: the Nextion cable on a uBITX V6.</div>
   <figcaption>uBITX V6: the Nextion cable on the bottom of the Raduino, with ground and +5 V on a connector of their own.</figcaption>
+</figure>
+
+<h4>The wiring, pin by pin</h4>
+<figure class="missing">
+  <img src="images/usb-ttl-wiring-v3_4_5_Raduino.jpg" alt="Wiring diagram: a CP2102 or FT232RL adapter to the display header of a uBITX V3, V4 or V5 Raduino" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <div class="ph">Diagram to come: the wiring for a V3, V4 or V5.</div>
+  <figcaption>uBITX V3, V4 and V5: the display header's pins 1 (ground), 2 (+5 V), 4 (D8) and 6 (D9) to a CP2102 or an FT232RL. Use one adapter, not both.</figcaption>
+</figure>
+<figure class="missing">
+  <img src="images/usb_ttl_wiring_v6_Raduino.jpg" alt="Wiring diagram: a CP2102 or FT232RL adapter to the display header of a uBITX V6 Raduino" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <div class="ph">Diagram to come: the wiring for a V6.</div>
+  <figcaption>uBITX V6: the display header's pins 1 (+5 V), 2 (ground), 5 (D9) and 11 (D8) to a CP2102 or an FT232RL. Use one adapter, not both.</figcaption>
 </figure>
 
 <div class="note"><b>A second adapter for watching the line?</b> A monitoring adapter on the same wires, with its TX connected, can make the radio send the same reports over and over, without end. Connect only its GND and RX. See <a href="#trouble">When things go wrong</a>.</div>
