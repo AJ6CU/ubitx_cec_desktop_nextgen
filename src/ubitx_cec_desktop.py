@@ -1256,7 +1256,7 @@ class UbitxCecDesktop(sCTk):
             return False
 
         self.rig_stream = stream
-        self.connection = uBITX_Link(self, stream, self.model, 250)
+        self._set_connection(uBITX_Link(self, stream, self.model, 250))
         # FIX (2026-11-06): the operator's command headroom and timings --
         # Machine settings.
         self.connection.command_headroom = self._headroom_setting()
@@ -1286,13 +1286,35 @@ class UbitxCecDesktop(sCTk):
                 self.after_cancel(self.connection.reader_process_id)
             except Exception:
                 pass
-        self.connection = NullRig()
+        self._set_connection(NullRig())
         if self.rig_stream is not None:
             try:
                 self.rig_stream.close()
             except Exception:
                 pass
             self.rig_stream = None
+
+    def _set_connection(self, link):
+        """
+        FIX (2026-11-18): THE RIG'S LINK, REPLACED EVERYWHERE IT IS HELD.
+
+        The SDR link and the scanner are handed the rig's link when they are
+        built, at start-up, and keep it. Connecting again from Setup -- a new
+        adapter, a port that would not open at start-up -- made a new link
+        here, but the SDR and the scanner went on sending to the old one: a
+        closed port, or the NullRig standing in for none. So the rig still
+        reached the SDR (that goes through the model), but a frequency
+        clicked in the SDR, or a channel the scanner tuned, never reached the
+        rig (Mark, a CP2102 swapped in for the old adapter).
+
+        At start-up this runs before either exists; they are given the link
+        when they are built.
+        """
+        self.connection = link
+        for holder in ("sdr", "scanner"):
+            part = getattr(self, holder, None)
+            if part is not None:
+                part._rig = link
 
     def _check_rig_answered(self):
         """
