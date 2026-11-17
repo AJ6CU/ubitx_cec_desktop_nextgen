@@ -1,4 +1,4 @@
-# Open items — ubitx_cec_desktop (2026-11-14)
+# Open items — ubitx_cec_desktop (2026-11-17)
 
 The short list. Detail for each is in TODO.md.
 
@@ -21,6 +21,10 @@ The short list. Detail for each is in TODO.md.
   - there's no way to give a command line for rigctld;
   - watch for the 10 Hz tuning step not reaching the SDR;
   - tidy up once the old app is retired.
+
+- **SDR window layout (to experiment, 2026-11-15):** show only the SDR's waterfall under the app. Undock Controls + panel in Brown/upstream (kept in config.toml at start-up; no command-line option). Idea: an "Arrange SDR windows" step in Setup using a separate SDR profile (SDROXIDE_CONFIG_DIR). See TODO.
+- **Upstream SDRoxide ports:** span PR 1 open as upstream #888; app test of the span build, then APF branch build; PRs 2-3 after #888. See TODO and sdroxide/UPSTREAM_PORT.md.
+- **RTL-SDR Blog V4L in SDRoxide (upstream #602; 2026-11-17):** patches written for upstream and Brown, porting librtlsdr's V4L commit (osmocom 0204c9c): named by its "Blog V4L" strings, confirmed by its R820T-reading tuner, upconverts below 28.8 MHz, two inputs, no direct sampling. TESTED 2026-11-16 on Brown v2.3.0.4.3 (Mac): 17+59+12 tests pass; V4L works (WWV 10 MHz, NOAA 162.550, input switch, direct sampling refused); V4 and a plain R820T/V3 unchanged. BROWN PR #751 OPEN (branch brown-rtlsdr-blog-v4l on AJ6CU/sdroxide). UPSTREAM PR #906 OPEN (branch rtlsdr-blog-v4l on AJ6CU/sdroxide; tested on v1.7.3 a9d6516f: 18+54+12 tests; V4L, V4, V3 on air; direct sampling refused). Next: a pointer comment on #602; watch both PRs. Not pursued: the ppm estimate jumping after a direct-sampling switch (Mark: not worth it). Over rtl_tcp a V4L still gets direct sampling on HF (protocol carries the chip only). See sdroxide/V4L_PR.md.
 
 ## Documentation
 

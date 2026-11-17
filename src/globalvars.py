@@ -54,7 +54,7 @@ DOWNARROWBUTTONDISABLED = "arrow_down_normal_disabled.png"
 
 CURSOR = "\u2581"
 
-BAUD = 57600     #9600
+BAUD = 57600     #9600  Not clear that 9600 is fast enough...
 
 MASTER_CAL_BOUNDS = {'LOW': -500000, 'HIGH': 500000}
 BFO_CAL_BOUNDS = {'LOW': 11048000, 'HIGH': 12010000}
