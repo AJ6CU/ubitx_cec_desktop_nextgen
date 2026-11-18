@@ -16,9 +16,13 @@ Save each one in `help/images/` under the name given. The page shows it in place
 | `channels.png` | Done: Channels with a channel set chosen (FT8 or CW calling), ideally mid-scan. |
 | `cw.png` | Done: CW with the radio's values filled in. |
 | `setup-logbook.png` | Done: Setup → **Logbook & more** sub-tab: the Logbook group and the buttons under Other settings. |
+| `ubitx.h_part1.jpg` | Done: the top of `ubitx.h` (board version, Nextion display, USE_I2CSMETER off). |
+| `ubitx.h_part2.jpg` | Done: the "Enable all features" list commented out. |
+| `ubitx.h_part3.jpg` | Done: the "Recommended for Nextion" list turned on. |
+| `nextion_baud_change.jpg` | Done: `SWSerial_Begin` 9600 to 57600 in `ubitx_lcd_nextion.ino`. |
+| `arduino_ide_nano_bootloader.jpg` | Done: Tools, Arduino Nano, port and Processor (new or old bootloader). |
 
 Also wanted, for the sections marked "To fill in":
-- the firmware, Option B: the Arduino IDE with `ubitx.h` open at the changed lines, and Tools showing Arduino Nano and the Processor (new or old bootloader);
 - each SDR program's server setting (Brown's Settings ▸ Servers, SDR++'s Rigctl Server module, Gqrx's Remote control, SDRangel's device set and channels).
 
 Name those as you like and tell me the names; I'll put them in.

@@ -193,14 +193,39 @@ avrdude -c arduino -p m328p -P /dev/ttyUSB0 -b 115200 -D -U flash:w:KD8CEC_1.20_
       <li>make sure <code>#define UBITX_DISPLAY_NEXTION</code> is the one display line not commented out;</li>
       <li>set <code>UBITX_BOARD_VERSION</code> for your radio: <b>4</b> for a uBITX V3 or V4, <b>5</b> for a V5 or V6;</li>
       <li>comment out <code>#define USE_I2CSMETER</code> (line 42): put <code>//</code> in front of it. That line is for an extra S-meter Nano on the I2C bus, which the app doesn't use; without it the firmware reads the radio's own S-meter sensor;</li>
-      <li><b>switch the feature list to the Nextion one.</b> Comment out the "Enable all features" list (lines 62–83, from <code>#define FN_BAND</code> to <code>#define FN_TXONOFF</code>): put <code>/*</code> on a line before it and <code>*/</code> on a line after it. Then turn on the "Recommended for Nextion, TJC LCD" list: delete the <code>/*</code> on line 137 and the <code>*/</code> on line 161. With every feature on, the firmware is too big for the Nano's memory and the upload fails.</li>
+      <li><b>switch the feature list to the Nextion one.</b> Comment out the "Enable all features" list (lines 62–83 of the unchanged file, from <code>#define FN_BAND</code> to <code>#define FN_TXONOFF</code>): put <code>/*</code> on a new line before it and <code>*/</code> on a new line after it. Then turn on the "Recommended for Nextion, TJC LCD" list further down: delete the <code>/*</code> on the line above <code>//Recommended for Nextion, TJC LCD 88%</code>, and the <code>*/</code> after its last line, <code>#define FN_TXONOFF 1 //70</code>. (In the unchanged file those are lines 137 and 161; after adding the two lines above, 139 and 163.) With every feature on, the firmware is too big for the Nano's memory and the upload fails.</li>
     </ul>
+<figure class="missing">
+  <img src="images/ubitx.h_part1.jpg" alt="ubitx.h in the Arduino IDE: the board version, the Nextion display and USE_I2CSMETER commented out" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <div class="ph">Screenshot to come: the top of ubitx.h.</div>
+  <figcaption><code>ubitx.h</code>, the top: <code>UBITX_BOARD_VERSION</code> (4 for a V3/V4, 5 for a V5/V6), <code>UBITX_DISPLAY_NEXTION</code> the only display left on, and <code>USE_I2CSMETER</code> commented out.</figcaption>
+</figure>
+<figure class="missing">
+  <img src="images/ubitx.h_part2.jpg" alt="ubitx.h: the Enable all features list inside /* and */" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <div class="ph">Screenshot to come: the Enable all features list commented out.</div>
+  <figcaption>The &ldquo;Enable all features&rdquo; list, now between <code>/*</code> and <code>*/</code>: with it on, the firmware does not fit in the Nano.</figcaption>
+</figure>
+<figure class="missing">
+  <img src="images/ubitx.h_part3.jpg" alt="ubitx.h: the Recommended for Nextion list turned on" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <div class="ph">Screenshot to come: the Nextion feature list turned on.</div>
+  <figcaption>The &ldquo;Recommended for Nextion, TJC LCD&rdquo; list, with its <code>/*</code> and <code>*/</code> removed.</figcaption>
+</figure>
   </li>
-  <li>In <code>ubitx_lcd_nextion.ino</code>, change <code>SWSerial_Begin(9600);</code> to <code>SWSerial_Begin(57600);</code>, the speed the app uses.</li>
-  <li>Under <b>Tools</b>, choose the board <b>Arduino Nano</b>, the Nano's <b>Port</b>, and the <b>Processor</b> that matches its bootloader: <b>ATmega328P</b> for the new bootloader (uploads at 115200), <b>ATmega328P (Old Bootloader)</b> for the old one (57600). If the upload says <i>not in sync</i>, try the other. Then <b>Upload</b>.</li>
+  <li>In <code>ubitx_lcd_nextion.ino</code>, change <code>SWSerial_Begin(9600);</code> to <code>SWSerial_Begin(57600);</code>, the speed the app uses.
+<figure class="missing">
+  <img src="images/nextion_baud_change.jpg" alt="ubitx_lcd_nextion.ino: SWSerial_Begin(9600) to be changed to 57600" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <div class="ph">Screenshot to come: the Nextion speed in ubitx_lcd_nextion.ino.</div>
+  <figcaption><code>ubitx_lcd_nextion.ino</code>, line 49: the Nextion line's speed, 9600 to 57600.</figcaption>
+</figure>
+  </li>
+  <li>Under <b>Tools</b>, choose the board <b>Arduino Nano</b>, the Nano's <b>Port</b>, and the <b>Processor</b> that matches its bootloader: <b>ATmega328P</b> for the new bootloader (uploads at 115200), <b>ATmega328P (Old Bootloader)</b> for the old one (57600). If the upload says <i>not in sync</i>, try the other. Then <b>Upload</b>.
+<figure class="missing">
+  <img src="images/arduino_ide_nano_bootloader.jpg" alt="The Arduino IDE's Tools menu: Board Arduino Nano, the port, and Processor ATmega328P or ATmega328P (Old Bootloader)" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <div class="ph">Screenshot to come: the Arduino IDE's Tools menu.</div>
+  <figcaption>Tools: Board <b>Arduino Nano</b>, the Nano's Port, and the Processor: <b>ATmega328P</b> for the new bootloader, <b>ATmega328P (Old Bootloader)</b> for the old one.</figcaption>
+</figure>
+  </li>
 </ol>
-
-<div class="todo"><b>To fill in:</b> screenshots of <code>ubitx.h</code> with the right lines, and the Arduino IDE's board settings.</div>
 
 <h4>After flashing</h4>
 <p>Power the radio off and on. Your calibration survives a firmware update; if it was lost, use <span class="ui">Backup and restore…</span> with <span class="ui">Config file → To the radio</span>. When the app connects, <span class="ui">Setup → About…</span> shows the firmware version the radio reported.</p>
