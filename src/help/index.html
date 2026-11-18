@@ -101,6 +101,7 @@
         <li><a href="#firmware">Installing KD8CEC 1.2</a></li>
         <li><a href="#usb-ttl">The USB-to-TTL adapter</a></li>
         <li><a href="#tr-switch">Protecting the SDR</a></li>
+        <li><a href="#install">Installing the app</a></li>
         <li><a href="#first-start">First start</a></li>
         <li><a href="#sdr-setup">Setting up an SDR</a></li>
       </ol></li>
@@ -144,7 +145,7 @@
 <ul>
   <li><b>A uBITX</b> (any version) running <b>KD8CEC firmware 1.2, the Nextion build with Baud set at 57600 (not the default 9600)</b>. See <a href="#firmware">Installing KD8CEC 1.2 (57600 baud)</a>.</li>
   <li><b>A USB-to-TTL serial adapter</b>, wired to the radio where a Nextion display would plug in. See <a href="#usb-ttl">The USB-to-TTL adapter</a>.</li>
-  <li><b>A computer</b> running macOS, Windows or Linux.</li>
+  <li><b>A computer</b> running macOS, Windows or Linux (a Raspberry Pi works too), with Python 3.10 or newer. See <a href="#install">Installing the app</a>.</li>
   <li><b>An SDR</b> (RTL-SDR v3,v4,v4L, for example) with one of these programs: SDRoxide Brown, SDRoxide, SDR++, Gqrx or SDRangel.</li>
     <li><b>With an SDR on the same antenna: a transmit/receive (T/R) antenna switch. This is required, not optional.</b> Without one, the uBITX's transmit power goes straight into the SDR and burns out its input the first time you transmit. A switch such as <a href="https://www.amazon.com/Antenna-Sharer-Transceiver-Switch-Device/dp/B0FFM8M41H" target="_blank"> this one</a> connects the SDR to the antenna while you receive and disconnects it while the uBITX transmits. See <a href="#tr-switch">Protecting the SDR</a>.</li>
 </ul>
@@ -351,6 +352,67 @@ avrdude -c arduino -p m328p -P /dev/ttyUSB0 -b 115200 -D -U flash:w:KD8CEC_1.20_
 <p>Before trusting it with the SDR, check it once with a dummy load, or with the SDR left unplugged: transmit, and listen for the switch's relay or watch its TX light.</p>
 
 <div class="note"><b>An SDR on its own antenna?</b> It needs no switch, but keep its antenna well away from the uBITX's. A few metres apart is a start; the closer they are, the more of your signal reaches the SDR.</div>
+
+<!-- FIX: how to download, install, upgrade and remove the app on each platform (2026-11-18) -->
+<h3 id="install">Installing the app</h3>
+
+<p>Download the file for your computer from the app's <a href="https://github.com/AJ6CU/ubitx_cec_desktop_nextgen/releases" target="_blank"><b>Releases</b> page on GitHub</a>, under <b>Assets</b> of the newest release:</p>
+<ul>
+  <li><b>Windows:</b> <code>uBITX-CEC-Desktop-<i>version</i>-Windows.zip</code></li>
+  <li><b>macOS:</b> <code>uBITX-CEC-Desktop-<i>version</i>-macOS.zip</code></li>
+  <li><b>Linux and Raspberry Pi OS:</b> <code>uBITX-CEC-Desktop-<i>version</i>-Linux.tar.gz</code></li>
+</ul>
+
+<p>Each holds a folder with the program, an installer, an uninstaller and a READ ME. The app runs on <b>Python 3.10 or newer, with Tk</b>, Python's window toolkit. The installer checks for it, puts the app in a folder of its own with everything it needs, and makes a shortcut. Nothing is installed into Python itself, and no administrator password is needed, except on Linux to add a missing system package, and then only after asking.</p>
+
+<h4>Windows</h4>
+<ol>
+  <li>If you don't have Python, install it from <a href="https://www.python.org/downloads/windows/" target="_blank">python.org</a>, version 3.10 or newer. In its installer, keep <b>tcl/tk and IDLE</b> ticked.</li>
+  <li>Right-click the downloaded zip and choose <b>Extract All…</b> Double-clicking the installer inside the zip without extracting it does not work.</li>
+  <li>In the extracted folder, double-click <b>Install uBITX CEC Desktop.py</b>. Python runs it in a window that shows its progress. If Windows asks which program should open it, choose <b>Python</b>. It doesn't need <i>Run as administrator</i>.</li>
+  <li>Start the app from the <b>Start menu</b> or the <b>Desktop</b> shortcut.</li>
+</ol>
+<div class="note">The installer is a Python file rather than a <code>.bat</code> because Windows 11's Smart App Control blocks unsigned <code>.bat</code> files. The app goes in <code>%LOCALAPPDATA%\uBITX CEC Desktop</code>. Once it's installed, the extracted folder isn't needed.</div>
+
+<h4>macOS</h4>
+<ol>
+  <li>If you don't have Python, install it from <a href="https://www.python.org/downloads/macos/" target="_blank">python.org</a>, version 3.10 or newer. python.org's installer includes Tk. With Homebrew's Python instead, also run <code>brew install python-tk@3.<i>x</i></code> for your version. Apple's own <code>python3</code> is too old.</li>
+  <li>Double-click the zip to unpack it, then double-click <b>Install uBITX CEC Desktop.command</b>.</li>
+  <li>The first time, macOS refuses to open it (<i>"Apple could not verify…"</i>) because the script isn't signed. Click <b>Done</b>, open <b>System Settings → Privacy &amp; Security</b>, scroll down to <b>Security</b>, click <b>Open Anyway</b> next to the installer, confirm, and double-click the installer again.<br>
+  Or: open Terminal, type <code>zsh</code> and a space, drag the <code>.command</code> file into the window, and press Return.</li>
+  <li>Start the app from <b>Applications</b> (the one in your home folder), Launchpad or Spotlight: <b>uBITX CEC Desktop</b>. It opens without a warning, because the installer made it on your Mac.</li>
+</ol>
+
+<h4>Linux and Raspberry Pi OS</h4>
+<ol>
+  <li>Unpack the download and run the installer:
+<pre><code>cd ~/Downloads
+tar xzf uBITX-CEC-Desktop-<i>version</i>-Linux.tar.gz
+bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
+  <li>The installer checks for Python's Tk and venv packages (<code>python3-tk</code>, <code>python3-venv</code>), and for your membership of the <code>dialout</code> group, which lets you open the radio's serial port. It offers to add whatever is missing, using <code>sudo</code>. If it adds you to <code>dialout</code>, log out and in again before starting the app.</li>
+  <li>Start the app from the application menu (Internet or Ham Radio), or type <code>ubitx-cec-desktop</code>.</li>
+</ol>
+
+<h4>Upgrading</h4>
+<p>Download the new release and run its installer, in the same way as the first time. It replaces the program and keeps your settings.</p>
+
+<h4>Removing the app</h4>
+<p>Run the uninstaller from the same folder as the installer. Close the app first.</p>
+<ul>
+  <li><b>Windows:</b> <b>Uninstall uBITX CEC Desktop.py</b></li>
+  <li><b>macOS:</b> <b>Uninstall uBITX CEC Desktop.command</b></li>
+  <li><b>Linux:</b> <code>bash uninstall.sh</code></li>
+</ul>
+<p>Your <b>settings and logbook are kept</b> in a folder called <code>.ubitx_cec_desktop</code> in your home folder (<code>%USERPROFILE%\.ubitx_cec_desktop</code> on Windows), so a later install picks them up again. To remove them too, delete that folder yourself.</p>
+
+<h4>If the app doesn't start</h4>
+<ul>
+  <li><b>Windows:</b> run <b>Start with messages.py</b> in <code>%LOCALAPPDATA%\uBITX CEC Desktop</code>. It shows what went wrong.</li>
+  <li><b>macOS:</b> the app's messages are in <code>~/Library/Logs/uBITX CEC Desktop.log</code>.</li>
+  <li><b>Linux:</b> start it from a terminal with <code>ubitx-cec-desktop</code> and read the messages there.</li>
+  <li>Running the installer again repairs an installation.</li>
+</ul>
+<p>The SDR programs (SDRoxide, SDR++, Gqrx, SDRangel) are installed separately, from their own sites.</p>
 
 <h3 id="first-start">First start</h3>
 <ol>
