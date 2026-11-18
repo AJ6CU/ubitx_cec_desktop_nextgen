@@ -15,13 +15,23 @@ KD8CEC's uBITX Manager on Windows, or `avrdude` (it comes with the Arduino IDE)
 on a Mac or Linux. Back up your calibration first: the help page, "Installing
 KD8CEC 1.2", says how.
 
-Built from KD8CEC's source, `github.com/phdlee/ubitx`, tag `v1.20`, with two
+Built from KD8CEC's source, `github.com/phdlee/ubitx`, tag `v1.20`, with these
 changes in `ubitx_20/`:
 
-- `ubitx.h`: `#define UBITX_DISPLAY_NEXTION` as the display, and
-  `UBITX_BOARD_VERSION` as in the table;
+- `ubitx.h`: `#define UBITX_DISPLAY_NEXTION` as the display;
+  `UBITX_BOARD_VERSION` as in the table; and the feature list switched to the
+  Nextion one -- the "Enable all features" list (lines 62-83) commented out and
+  the "Recommended for Nextion, TJC LCD" list (lines 137-161) turned on, since
+  with every feature on the firmware does not fit in the Nano;
 - `ubitx_lcd_nextion.ino`: `SWSerial_Begin(9600);` changed to
   `SWSerial_Begin(57600);`.
 
+Uploading, for example on a Mac (the help page has Linux and Windows too):
+
+    avrdude -c arduino -p m328p -P /dev/cu.wchusbserial1410 -b 115200 -D -U flash:w:KD8CEC_1.20_Nextion_57600_uBITX_V5_V6.hex:i
+
+Use `-b 115200` for a Nano with the new bootloader, `-b 57600` for the old one
+(many clones); if one says "not in sync", try the other.
+
 The firmware is KD8CEC's (Ian Lee), released under the GNU GPL v3; its source,
-and the two changes above, are all that is needed to rebuild these files.
+and the changes above, are all that is needed to rebuild these files.

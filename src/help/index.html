@@ -41,6 +41,7 @@
   .lead { color: var(--muted); font-size: 17px; margin-top: 0; }
   code, kbd { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.9em;
               background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+  h5 { font-size: 15px; margin: 18px 0 6px; }
   pre { background: var(--code-bg); padding: 12px 14px; border-radius: 8px; overflow-x: auto; }
   pre code { background: none; padding: 0; }
   .ui { font-weight: 600; }
@@ -115,24 +116,63 @@
 <div class="note"><b>The app talks to the radio at 57600 baud.</b> KD8CEC's own 1.2 files run the Nextion line at 9600. The files below are KD8CEC 1.2 with that line at 57600, the app's speed. If you flash KD8CEC's own files instead, set <span class="ui">Speed</span> to 9600 in <span class="ui">Setup → Station &amp; Radio</span>.</div>
 
 <h4>Option A: a ready-built file</h4>
+<p>Download the file for your uBITX from the app's <b>Releases</b> page on GitHub (<code>github.com/AJ6CU/ubitx_cec_desktop_nextgen</code>), or from the <code>firmware</code> folder there:</p>
+<ul>
+  <li><b>uBITX V3 or V4:</b> <code>KD8CEC_1.20_Nextion_57600_uBITX_V3_V4.hex</code></li>
+  <li><b>uBITX V5 or V6:</b> <code>KD8CEC_1.20_Nextion_57600_uBITX_V5_V6.hex</code></li>
+</ul>
+<p>Then upload it to the Raduino's Arduino Nano with <code>avrdude</code>, the program the Arduino IDE itself uses. Connect a USB cable to the <b>Nano's own USB port</b> (not the USB-to-TTL adapter), close the app and anything else that might hold the port, and follow the steps for your computer.</p>
+
+<div class="note"><b>The upload speed depends on the Nano's bootloader.</b> Most Nanos sold since 2018 have the <b>new bootloader</b> and take <code>-b 115200</code>. Older ones, and many clones, have the <b>old bootloader</b> and take <code>-b 57600</code>. Try 115200 first; if avrdude says <i>not in sync</i> or <i>programmer is not responding</i>, run the same command again with <code>-b 57600</code>. Neither speed can harm the Nano.</div>
+
+<h5>macOS</h5>
 <ol>
-  <li>Download the file for your uBITX from the app's <b>Releases</b> page on GitHub (<code>github.com/AJ6CU/ubitx_cec_desktop_nextgen</code>), or from the <code>firmware</code> folder there:
-    <ul>
-      <li><b>uBITX V3 or V4:</b> <code>KD8CEC_1.20_Nextion_57600_uBITX_V3_V4.hex</code></li>
-      <li><b>uBITX V5 or V6:</b> <code>KD8CEC_1.20_Nextion_57600_uBITX_V5_V6.hex</code></li>
-    </ul>
-  </li>
-  <li>Upload it to the Raduino's Arduino Nano over its own USB port. On Windows, KD8CEC's <b>uBITX Manager</b> does this. On a Mac or Linux, <code>avrdude</code> does (it comes with the Arduino IDE).</li>
+  <li>Install avrdude with Homebrew (<code>brew.sh</code> if you don't have it):
+<pre><code>brew install avrdude</code></pre></li>
+  <li>Find the Nano's port: run this, plug the Nano in, and run it again. The new name is the Nano (a clone usually shows as <code>/dev/cu.wchusbserial…</code> or <code>/dev/cu.usbserial-…</code>):
+<pre><code>ls /dev/cu.*</code></pre></li>
+  <li>Upload, with your port and file in place of these:
+<pre><code>cd ~/Downloads
+avrdude -c arduino -p m328p -P /dev/cu.wchusbserial1410 -b 115200 -D -U flash:w:KD8CEC_1.20_Nextion_57600_uBITX_V5_V6.hex:i</code></pre></li>
 </ol>
 
-<div class="todo"><b>To fill in:</b> the uBITX Manager steps, and the <code>avrdude</code> command line for the Nano (board, programmer and port), with screenshots.</div>
+<h5>Linux and Raspberry Pi OS</h5>
+<ol>
+  <li>Install avrdude, and let your user open serial ports (log out and in again after the second command):
+<pre><code>sudo apt install avrdude
+sudo usermod -aG dialout $USER</code></pre></li>
+  <li>Find the Nano's port: it is usually <code>/dev/ttyUSB0</code> (a clone) or <code>/dev/ttyACM0</code>. This shows the latest:
+<pre><code>ls /dev/ttyUSB* /dev/ttyACM*</code></pre>
+  On Ubuntu, if no <code>ttyUSB</code> port appears for a clone Nano, the braille service <b>brltty</b> has taken it: <code>sudo apt remove brltty</code>, then unplug and plug the Nano in again.</li>
+  <li>Upload:
+<pre><code>cd ~/Downloads
+avrdude -c arduino -p m328p -P /dev/ttyUSB0 -b 115200 -D -U flash:w:KD8CEC_1.20_Nextion_57600_uBITX_V5_V6.hex:i</code></pre></li>
+</ol>
+
+<h5>Windows</h5>
+<ol>
+  <li>Download avrdude for Windows from <code>github.com/avrdudes/avrdude/releases</code>: the file ending <code>windows-x64.zip</code>. Extract it, for example to <code>C:\avrdude</code>, and copy the <code>.hex</code> file into the same folder.</li>
+  <li>Find the Nano's port: plug it in and open <b>Device Manager → Ports (COM &amp; LPT)</b>. A clone shows as <i>USB-SERIAL CH340 (COM5)</i> or similar; note the COM number. If it shows with a warning sign, install the CH340 driver (search "CH340 driver" on the WCH site).</li>
+  <li>Open <b>PowerShell</b> and upload, with your COM port and file:
+<pre><code>cd C:\avrdude
+.\avrdude.exe -c arduino -p m328p -P COM5 -b 115200 -D -U flash:w:KD8CEC_1.20_Nextion_57600_uBITX_V5_V6.hex:i</code></pre></li>
+</ol>
+<p>KD8CEC's own <b>uBITX Manager</b> (Windows) can also upload a hex file, if you already use it.</p>
+
+<p>A good upload ends with <code>avrdude done. Thank you.</code> after writing and then verifying the flash.</p>
 
 <h4>Option B: build it yourself</h4>
 <ol>
-  <li>Install the Arduino IDE, and open <code>ubitx_20/ubitx_20.ino</code> from KD8CEC's source.</li>
-  <li>In <code>ubitx.h</code>, make sure <code>#define UBITX_DISPLAY_NEXTION</code> is the one display line not commented out, and set <code>UBITX_BOARD_VERSION</code> for your radio: <b>4</b> for a uBITX V3 or V4, <b>5</b> for a V5 or V6.</li>
+  <li>Install the Arduino IDE, download KD8CEC's source (<code>github.com/phdlee/ubitx</code>, release 1.20), and open <code>ubitx_20/ubitx_20.ino</code>.</li>
+  <li>In <code>ubitx.h</code>:
+    <ul>
+      <li>make sure <code>#define UBITX_DISPLAY_NEXTION</code> is the one display line not commented out;</li>
+      <li>set <code>UBITX_BOARD_VERSION</code> for your radio: <b>4</b> for a uBITX V3 or V4, <b>5</b> for a V5 or V6;</li>
+      <li><b>switch the feature list to the Nextion one.</b> Comment out the "Enable all features" list (lines 62–83, from <code>#define FN_BAND</code> to <code>#define FN_TXONOFF</code>): put <code>/*</code> on a line before it and <code>*/</code> on a line after it. Then turn on the "Recommended for Nextion, TJC LCD" list: delete the <code>/*</code> on line 137 and the <code>*/</code> on line 161. With every feature on, the firmware is too big for the Nano's memory and the upload fails.</li>
+    </ul>
+  </li>
   <li>In <code>ubitx_lcd_nextion.ino</code>, change <code>SWSerial_Begin(9600);</code> to <code>SWSerial_Begin(57600);</code>, the speed the app uses.</li>
-  <li>Choose the board <b>Arduino Nano</b> (processor ATmega328P; try "Old Bootloader" if the upload fails), choose its port, and upload.</li>
+  <li>Under <b>Tools</b>, choose the board <b>Arduino Nano</b>, the Nano's <b>Port</b>, and the <b>Processor</b> that matches its bootloader: <b>ATmega328P</b> for the new bootloader (uploads at 115200), <b>ATmega328P (Old Bootloader)</b> for the old one (57600). If the upload says <i>not in sync</i>, try the other. Then <b>Upload</b>.</li>
 </ol>
 
 <div class="todo"><b>To fill in:</b> screenshots of <code>ubitx.h</code> with the right lines, and the Arduino IDE's board settings.</div>
