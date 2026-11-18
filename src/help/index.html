@@ -125,19 +125,19 @@
 
 <h3 id="what-you-need">What you need</h3>
 <ul>
-  <li><b>A uBITX</b> (any version) running <b>KD8CEC firmware 1.2, the Nextion build</b>. See <a href="#firmware">Installing KD8CEC 1.2</a>.</li>
+  <li><b>A uBITX</b> (any version) running <b>KD8CEC firmware 1.2, the Nextion build with Baud set at 57600 (not the default 9600)</b>. See <a href="#firmware">Installing KD8CEC 1.2 (57600 baud)</a>.</li>
   <li><b>A USB-to-TTL serial adapter</b>, wired to the radio where a Nextion display would plug in. See <a href="#usb-ttl">The USB-to-TTL adapter</a>.</li>
   <li><b>A computer</b> running macOS, Windows or Linux.</li>
   <li><b>Optional: an SDR</b> (an RTL-SDR, for example) with one of these programs: SDRoxide Brown, SDRoxide, SDR++, Gqrx or SDRangel. Without one the app still runs the radio; you listen through the radio's own speaker.</li>
 </ul>
 
-<h3 id="firmware">Installing KD8CEC 1.2</h3>
+<h3 id="firmware">Installing KD8CEC 1.2 (57600 baud)</h3>
 
-<p>KD8CEC's firmware 1.2 (it reports itself as <code>+v1.200</code>) replaces the uBITX's original Raduino software. It must be the build for a <b>Nextion display</b>: that's the protocol the app speaks. The source and ready-built files are in KD8CEC's repository, <code>github.com/phdlee/ubitx</code>, and his notes are on <code>hamskey.com</code>.</p>
+<p>KD8CEC's firmware 1.2 (it reports itself as <code>+v1.200</code>) replaces the uBITX's original Raduino software. It must be the build for a <b>Nextion display at 57600 baud</b>: that's the protocol the app speaks. The source is in KD8CEC's repository, <code>github.com/phdlee/ubitx</code>, and his notes are on <code>hamskey.com</code>. <i>The original ready made binaries for the Nextion will not be useable, see notes below.</i></i></p>
 
-<div class="todo"><b>Before you flash: back up.</b> Your radio's calibration (master cal and BFO) lives in its EEPROM. If you already run KD8CEC firmware, open <span class="ui">Setup → Logbook &amp; more → Backup and restore…</span> and copy <span class="ui">From the radio → Config file</span> first, or write the values down.</div>
+<div class="todo"><b>Before you flash: back up.</b> Your radio's calibration (master cal and BFO) lives in its EEPROM. If you already run KD8CEC firmware, open <span class="ui">Setup → Logbook &amp; more → Backup and restore…</span> and copy <span class="ui">From the radio → Config file</span> first, or write the values down. You can also use the uBITX Setting Editor. See <a href="https://github.com/AJ6CU/uBITX-Settings-Editor">uBITX-Settings_Editor</a></div>
 
-<div class="note"><b>The app talks to the radio at 57600 baud.</b> KD8CEC's own 1.2 files run the Nextion line at 9600. The files below are KD8CEC 1.2 with that line at 57600, the app's speed. If you flash KD8CEC's own files instead, set <span class="ui">Speed</span> to 9600 in <span class="ui">Setup → Station &amp; Radio</span>.</div>
+<div class="note"><b>The app talks to the radio at 57600 baud.</b> KD8CEC's own 1.2 files run the Nextion line at 9600. The files below are KD8CEC 1.2 with that line at 57600, the app's speed. You <b> must </b> install this update.</div>
 
 <h4>Option A: a ready-built file</h4>
 <p>Download the file for your uBITX from the app's <b>Releases</b> page on GitHub (<code>github.com/AJ6CU/ubitx_cec_desktop_nextgen</code>), or from the <code>firmware</code> folder there:</p>
@@ -181,7 +181,6 @@ avrdude -c arduino -p m328p -P /dev/ttyUSB0 -b 115200 -D -U flash:w:KD8CEC_1.20_
 <pre><code>cd C:\avrdude
 .\avrdude.exe -c arduino -p m328p -P COM5 -b 115200 -D -U flash:w:KD8CEC_1.20_Nextion_57600_uBITX_V5_V6.hex:i</code></pre></li>
 </ol>
-<p>KD8CEC's own <b>uBITX Manager</b> (Windows) can also upload a hex file, if you already use it.</p>
 
 <p>A good upload ends with <code>avrdude done. Thank you.</code> after writing and then verifying the flash.</p>
 
@@ -227,15 +226,23 @@ avrdude -c arduino -p m328p -P /dev/ttyUSB0 -b 115200 -D -U flash:w:KD8CEC_1.20_
   </li>
 </ol>
 
+    <div class="note"><b>Your Radio and Nextion will no longer talk.</b>Your Nextion is flashed for 9600 baud. After you update your firmware to 57600, your radio will no longer talk to your Nextion screen.  The solution is to go to use the Nextion Editor to create a 57600 baud version for your screen. In the future I will create some generic ones and make them available in at the <a href="https://github.com/AJ6CU/Nextion-screens-for-uBitx-KD8CEC-firmware">Nextion Screen Repository</a></div>
+
 <h4>After flashing</h4>
 <p>Power the radio off and on. Your calibration survives a firmware update; if it was lost, use <span class="ui">Backup and restore…</span> with <span class="ui">Config file → To the radio</span>. When the app connects, <span class="ui">Setup → About…</span> shows the firmware version the radio reported.</p>
 
 <h3 id="usb-ttl">The USB-to-TTL adapter</h3>
 
 <p>The app connects where a Nextion display would: a USB-to-TTL serial adapter plugged into the computer, with its wires on the Raduino's Nextion serial lines. It is not the Nano's own USB port; that one is for flashing firmware.</p>
+    <p>I have used two types of adapters, both readily available on Amazon and Ali-Express. The FT232RL is based on the FTDI chip. It is the less expensive option and the one I used throughout my development. However, after doing some research, I saw some cautions that because of the many clones of this chip, some of which are worse than others, these adapters tend to be more noisy.  Subsequently, I started using the CP2102 USB to TTL. They are about 4x the cost, ~$12 USD per board vs $2.50 USD for the FT232 variant. I have not really been able to tell the difference yet, but I keep looking hoping to justify my purchase...</p>
 
 <p>Four wires, the same four a Nextion display uses. The easiest lead is the Nextion's own cable: unplug it from the display and plug that end into the adapter. Its colours are the Nextion's standard ones, and the pictures below use them too:</p>
-
+<p> Unless you are an expert wire crimper of JST connectors, I highly recommend that you invest in a set of premade wires. You can get them in F-F and M-F. The Amazon links are:
+</p>
+    <ul>
+    <li><a href="https://www.amazon.com/dp/B08G188ZQ8" target="_blank">Male-Female</a></li>
+    <li><a href="https://www.amazon.com/dp/B08G18PWQ6" target="_blank">Female-Female</a></li>
+</ul>
 <table>
   <tr><th>Wire</th><th>What it carries</th><th>Raduino pin, V3–V5</th><th>Raduino pin, V6</th><th>CP2102</th><th>FT232RL</th></tr>
   <tr><td><b>Black</b></td><td>Ground</td><td>1</td><td>2</td><td>GND</td><td>GND</td></tr>
@@ -281,8 +288,8 @@ avrdude -c arduino -p m328p -P /dev/ttyUSB0 -b 115200 -D -U flash:w:KD8CEC_1.20_
   <figcaption>uBITX V6: the display header's pins 1 (+5 V), 2 (ground), 5 (D9) and 11 (D8) to a CP2102 or an FT232RL. Use one adapter, not both.</figcaption>
 </figure>
 
-<div class="note"><b>A second adapter for watching the line?</b> A monitoring adapter on the same wires, with its TX connected, can make the radio send the same reports over and over, without end. Connect only its GND and RX. See <a href="#trouble">When things go wrong</a>.</div>
-
+<!-- <div class="note"><b>A second adapter for watching the line?</b> A monitoring adapter on the same wires, with its TX connected, can make the radio send the same reports over and over, without end. Connect only its GND and RX. See <a href="#trouble">When things go wrong</a>.</div>
+-->
 <h3 id="first-start">First start</h3>
 <ol>
   <li>Plug in the adapter and switch the radio on.</li>
