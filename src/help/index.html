@@ -64,6 +64,30 @@
     nav { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--line); }
     main { padding: 20px 16px 60px; }
   }
+  /* FIX (2026-11-18): printing, and the PDF made from this page. One column,
+     the navigation kept as the contents, light colours whatever the system's,
+     long commands wrapped instead of cut off, and nothing split across a page. */
+  @media print {
+    :root {
+      --bg: #ffffff; --panel: #ffffff; --text: #1d232b; --muted: #5b6573;
+      --line: #c9d0d8; --accent: #1a4375; --accent-soft: #eef3fa;
+      --warn-bg: #fff8e6; --warn-line: #e3b341; --code-bg: #f1f3f6;
+    }
+    body { font-size: 11pt; }
+    .wrap { display: block; max-width: none; }
+    nav { position: static; height: auto; overflow: visible; border: 0; padding: 0 0 12pt;
+          font-size: 11pt; break-after: page; }
+    nav .title { font-size: 20pt; }
+    main { padding: 0; }
+    h2 { break-before: page; border-top: 0; margin-top: 0; padding-top: 0; }
+    h2, h3, h4, h5 { break-after: avoid; }
+    pre { white-space: pre-wrap; word-break: break-all; overflow: visible; }
+    figure, .note, .todo, table, pre { break-inside: avoid; }
+    figure { margin: 8pt 0 12pt; }
+    figure img { max-height: 4.3in; max-width: 100%; width: auto; }
+    figure.missing { display: none; }
+    a { color: var(--accent); text-decoration: none; }
+  }
 </style>
 </head>
 <body>
