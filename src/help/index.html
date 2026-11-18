@@ -100,6 +100,7 @@
         <li><a href="#what-you-need">What you need</a></li>
         <li><a href="#firmware">Installing KD8CEC 1.2</a></li>
         <li><a href="#usb-ttl">The USB-to-TTL adapter</a></li>
+        <li><a href="#tr-switch">Protecting the SDR</a></li>
         <li><a href="#first-start">First start</a></li>
         <li><a href="#sdr-setup">Setting up an SDR</a></li>
       </ol></li>
@@ -114,11 +115,27 @@
 <main>
 
 <h1>uBITX CEC Desktop</h1>
-<p class="lead">A desktop front panel for a uBITX running KD8CEC's firmware, with an SDR alongside as the receiver and waterfall.</p>
+<p class="lead">A control panel runs on laptops that seamlessly merges an uBITX running KD8CEC's firmware with an SDR dongle providing a compelling radio for home operation or xOTA.</p>
 
-<p>The app talks to the radio the way KD8CEC's Nextion display does, so everything the radio reports (frequencies, mode, RIT, split, lock, the keyer settings) shows here, and everything you change here goes to the radio. If an SDR program is running, the app keeps it tuned to the radio, so you can listen and watch the band through the SDR while the uBITX transmits.</p>
+    <p>By moving the RX and the user interface off radio, uBITX CEC Desktop greatly improves the capability of the popular uBITX radio. Depending on your sdr software choice, you immediately enahnce your uBITX radio with:</p>
+    <ul>
+        <li>AGC</li>
+        <li>NR</li>
+        <li>NB</li>
+        <li>SQL</li>
+        <li>RX Filter width control</li>
+        <li>CW Peaking</li>
+        <li>CW Decoding based on a Neural engine</li>
+        <li>Real S-Meter</li>
+        <li>Zoomable Waterfall with click to QSY</li>
+        <li>QSO Logging</li>
+        <li>Improved Split management</li>
+        <li>Multiple Channel banks</li>
+        <li>Scanning with signal strength </li>
+    </ul>
 
-<div class="note"><b>The radio leads.</b> The app shows what the radio <em>reports</em>, not what was asked of it. If a change doesn't show, the radio didn't take it, and the app won't pretend it did.</div>
+<p>And all this is made possible through the software using the existing Nextion screen protocol to talk to the radio. You can QSY by either clicking on the waterfall, clicking/moving a virtual knob on in the user interface (UX) or if you prefer, using the knob on the front of your radio. The SDR effectively replaces the RX side of your radio giving you a host of features and much better Signal to Noise. The software runs on common laptops or desktops using the OS of your choice: Linux, Windows or macOS. And the software running on your laptop is much easier to use than squinting and trying to touch the right button on your screen!</p>
+
 
 <!-- ============================================================== -->
 <h2 id="getting-started">1. Getting started</h2>
@@ -128,19 +145,25 @@
   <li><b>A uBITX</b> (any version) running <b>KD8CEC firmware 1.2, the Nextion build with Baud set at 57600 (not the default 9600)</b>. See <a href="#firmware">Installing KD8CEC 1.2 (57600 baud)</a>.</li>
   <li><b>A USB-to-TTL serial adapter</b>, wired to the radio where a Nextion display would plug in. See <a href="#usb-ttl">The USB-to-TTL adapter</a>.</li>
   <li><b>A computer</b> running macOS, Windows or Linux.</li>
-  <li><b>Optional: an SDR</b> (an RTL-SDR, for example) with one of these programs: SDRoxide Brown, SDRoxide, SDR++, Gqrx or SDRangel. Without one the app still runs the radio; you listen through the radio's own speaker.</li>
+  <li><b>An SDR</b> (RTL-SDR v3,v4,v4L, for example) with one of these programs: SDRoxide Brown, SDRoxide, SDR++, Gqrx or SDRangel.</li>
+    <li><b>With an SDR on the same antenna: a transmit/receive (T/R) antenna switch. This is required, not optional.</b> Without one, the uBITX's transmit power goes straight into the SDR and burns out its input the first time you transmit. A switch such as <a href="https://www.amazon.com/Antenna-Sharer-Transceiver-Switch-Device/dp/B0FFM8M41H" target="_blank"> this one</a> connects the SDR to the antenna while you receive and disconnects it while the uBITX transmits. See <a href="#tr-switch">Protecting the SDR</a>.</li>
 </ul>
+    <figure class="missing">
+  <img src="images/station.jpg" alt="The complete station: the uBITX, the SDR dongle, the antenna switch and a laptop running uBITX CEC Desktop" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <div class="ph">Photo to come: the complete station.</div>
+  <figcaption>The complete station: the uBITX, an RTL-SDR dongle, the antenna switch that protects it (see <a href="#tr-switch">Protecting the SDR</a>), and a laptop running uBITX CEC Desktop with the SDR program beside it.</figcaption>
+</figure>
 
 <h3 id="firmware">Installing KD8CEC 1.2 (57600 baud)</h3>
 
-<p>KD8CEC's firmware 1.2 (it reports itself as <code>+v1.200</code>) replaces the uBITX's original Raduino software. It must be the build for a <b>Nextion display at 57600 baud</b>: that's the protocol the app speaks. The source is in KD8CEC's repository, <code>github.com/phdlee/ubitx</code>, and his notes are on <code>hamskey.com</code>. <i>The original ready made binaries for the Nextion will not be useable, see notes below.</i></i></p>
+<p>KD8CEC's firmware 1.2 (it reports itself as <code>+v1.200</code>) replaces the uBITX's original Raduino software. It must be the build for a <b>Nextion display at 57600 baud</b>: that's the protocol the app speaks. The source is in KD8CEC's repository, <code>github.com/phdlee/ubitx</code>, and his notes are on <code>hamskey.com</code>. <i>The original ready made KD8CEC binaries will not be useable, see notes below.</i></i></p>
 
-<div class="todo"><b>Before you flash: back up.</b> Your radio's calibration (master cal and BFO) lives in its EEPROM. If you already run KD8CEC firmware, open <span class="ui">Setup → Logbook &amp; more → Backup and restore…</span> and copy <span class="ui">From the radio → Config file</span> first, or write the values down. You can also use the uBITX Setting Editor. See <a href="https://github.com/AJ6CU/uBITX-Settings-Editor">uBITX-Settings_Editor</a></div>
+<div class="todo"><b>Before you flash: back up.</b> Your radio's calibration (master cal and BFO) lives in its EEPROM. You can also use the <a href="https://github.com/AJ6CU/uBITX-Settings-Editor" target="_blank">uBITX-Settings_Editor</a> to backup your configuration to a file that you can later restore. Alternatively, you can record the values on paper an restore them lated. </div>
 
 <div class="note"><b>The app talks to the radio at 57600 baud.</b> KD8CEC's own 1.2 files run the Nextion line at 9600. The files below are KD8CEC 1.2 with that line at 57600, the app's speed. You <b> must </b> install this update.</div>
 
 <h4>Option A: a ready-built file</h4>
-<p>Download the file for your uBITX from the app's <b>Releases</b> page on GitHub (<code>github.com/AJ6CU/ubitx_cec_desktop_nextgen</code>), or from the <code>firmware</code> folder there:</p>
+<p>Download the file for your uBITX from the app's <b>Releases</b> page on <a href="https://github.com/AJ6CU/ubitx_cec_desktop_nextgen/tree/main/firmware" target="_blank">GitHub</a> </p>
 <ul>
   <li><b>uBITX V3 or V4:</b> <code>KD8CEC_1.20_Nextion_57600_uBITX_V3_V4.hex</code></li>
   <li><b>uBITX V5 or V6:</b> <code>KD8CEC_1.20_Nextion_57600_uBITX_V5_V6.hex</code></li>
@@ -183,6 +206,7 @@ avrdude -c arduino -p m328p -P /dev/ttyUSB0 -b 115200 -D -U flash:w:KD8CEC_1.20_
 </ol>
 
 <p>A good upload ends with <code>avrdude done. Thank you.</code> after writing and then verifying the flash.</p>
+    <div class="note">On Windows you can also use the XLoader application that was originally recommended for installing KD8CEC. Be aware that you might need to right click on the executable and select a Windows 7 compatibility option given the age of XLoader.</div>
 
 <h4>Option B: build it yourself</h4>
 <ol>
@@ -192,7 +216,7 @@ avrdude -c arduino -p m328p -P /dev/ttyUSB0 -b 115200 -D -U flash:w:KD8CEC_1.20_
       <li>make sure <code>#define UBITX_DISPLAY_NEXTION</code> is the one display line not commented out;</li>
       <li>set <code>UBITX_BOARD_VERSION</code> for your radio: <b>4</b> for a uBITX V3 or V4, <b>5</b> for a V5 or V6;</li>
       <li>comment out <code>#define USE_I2CSMETER</code> (line 42): put <code>//</code> in front of it. That line is for an extra S-meter Nano on the I2C bus, which the app doesn't use; without it the firmware reads the radio's own S-meter sensor;</li>
-      <li><b>switch the feature list to the Nextion one.</b> Comment out the "Enable all features" list (lines 62–83 of the unchanged file, from <code>#define FN_BAND</code> to <code>#define FN_TXONOFF</code>): put <code>/*</code> on a new line before it and <code>*/</code> on a new line after it. Then turn on the "Recommended for Nextion, TJC LCD" list further down: delete the <code>/*</code> on the line above <code>//Recommended for Nextion, TJC LCD 88%</code>, and the <code>*/</code> after its last line, <code>#define FN_TXONOFF 1 //70</code>. (In the unchanged file those are lines 137 and 161; after adding the two lines above, 139 and 163.) With every feature on, the firmware is too big for the Nano's memory and the upload fails.</li>
+      <li><b>switch the feature list to the Nextion one.</b> Comment out the "Enable all features" list (lines 62–83 of the unchanged file, from <code>#define FN_BAND</code> thru <code>#define FN_TXONOFF</code>): put <code>/*</code> on a new line before it and <code>*/</code> on a new line after it. Then turn on the "Recommended for Nextion, TJC LCD" list further down: delete the <code>/*</code> on the line above <code>//Recommended for Nextion, TJC LCD 88%</code>, and the <code>*/</code> after its last line, <code>#define FN_TXONOFF 1 //70</code>. (In the unchanged file those are lines 137 and 161; after adding the two lines above, 139 and 163.) With every feature on, the firmware is too big for the Nano's memory and the upload fails.</li>
     </ul>
 <figure class="missing">
   <img src="images/ubitx.h_part1.jpg" alt="ubitx.h in the Arduino IDE: the board version, the Nextion display and USE_I2CSMETER commented out" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
@@ -229,14 +253,14 @@ avrdude -c arduino -p m328p -P /dev/ttyUSB0 -b 115200 -D -U flash:w:KD8CEC_1.20_
     <div class="note"><b>Your Radio and Nextion will no longer talk.</b>Your Nextion is flashed for 9600 baud. After you update your firmware to 57600, your radio will no longer talk to your Nextion screen.  The solution is to go to use the Nextion Editor to create a 57600 baud version for your screen. In the future I will create some generic ones and make them available in at the <a href="https://github.com/AJ6CU/Nextion-screens-for-uBitx-KD8CEC-firmware">Nextion Screen Repository</a></div>
 
 <h4>After flashing</h4>
-<p>Power the radio off and on. Your calibration survives a firmware update; if it was lost, use <span class="ui">Backup and restore…</span> with <span class="ui">Config file → To the radio</span>. When the app connects, <span class="ui">Setup → About…</span> shows the firmware version the radio reported.</p>
+<p>Power the radio off and on. Your calibration survives a firmware update; if it was lost, use uBITX System Editor to restore from a backup file or just manually type them in. </p>
 
 <h3 id="usb-ttl">The USB-to-TTL adapter</h3>
 
-<p>The app connects where a Nextion display would: a USB-to-TTL serial adapter plugged into the computer, with its wires on the Raduino's Nextion serial lines. It is not the Nano's own USB port; that one is for flashing firmware.</p>
-    <p>I have used two types of adapters, both readily available on Amazon and Ali-Express. The FT232RL is based on the FTDI chip. It is the less expensive option and the one I used throughout my development. However, after doing some research, I saw some cautions that because of the many clones of this chip, some of which are worse than others, these adapters tend to be more noisy.  Subsequently, I started using the CP2102 USB to TTL. They are about 4x the cost, ~$12 USD per board vs $2.50 USD for the FT232 variant. I have not really been able to tell the difference yet, but I keep looking hoping to justify my purchase...</p>
+<p>The app connects to the Nextion wiring harness thru an USB-to-TTL serial adapter.  Dont try to use the Nano's own USB port; that one is for flashing firmware!</p>
+    <p>I have used two types of these adapters, both of which are readily available on Amazon and Ali-Express. The FT232RL is based on the FTDI chip. It is the less expensive option and the one I used throughout my development. However, I have recently seen some saw some cautions in regards to this adapter. Apparently, there are many clones of this chip &#8212; some of which are worse than others &#8212; and the poorer made tend to be more noisy.  Subsequently, I started using the CP2102 USB to TTL. They are about 4x the cost, ~$12 USD per board vs $2.50 USD for the FT232 variant. I have not really been able to tell the difference yet, but I keep looking hoping to justify my purchase...</p>
 
-<p>Four wires, the same four a Nextion display uses. The easiest lead is the Nextion's own cable: unplug it from the display and plug that end into the adapter. Its colours are the Nextion's standard ones, and the pictures below use them too:</p>
+<p>The easiest approach is to use the Nextion's own cable: unplug it from the display and plug that end into a male JST connector. Its colours are the Nextion's standard ones, and the pictures below use them too:</p>
 <p> Unless you are an expert wire crimper of JST connectors, I highly recommend that you invest in a set of premade wires. You can get them in F-F and M-F. The Amazon links are:
 </p>
     <ul>
@@ -253,7 +277,7 @@ avrdude -c arduino -p m328p -P /dev/ttyUSB0 -b 115200 -D -U flash:w:KD8CEC_1.20_
 
 <p>The adapter's TX goes to what the radio receives on, and its RX to what the radio sends on: each one's output is the other's input.</p>
 
-<div class="todo"><b>Leave the adapter's voltage jumper off.</b> With it on, the adapter puts its own 5 V (or 3.3 V) onto the red wire, against the radio's +5 V.</div>
+<div class="todo"><b>Leave the adapter's voltage jumper off.</b> With it on, the adapter puts its own 5 V (or 3.3 V) onto the red wire, against the radio's +5 V. The radio can draw more current than this adapter can provide causing a potential failure. Also, your radio is going to stay on, even with the power switch off.</div>
 
 <div class="todo"><b>Ground and +5 V are the other way round on the V6.</b> On a V3, V4 or V5 Raduino, pin 1 of the display header is ground and pin 2 is +5 V; on a V6, pin 1 is +5 V and pin 2 is ground. Plug the cable into the radio exactly as the Nextion's was, and check the colours against the pictures for your uBITX before you switch on. A lead the wrong way round at the radio connects the adapter's ground to +5 V, and can damage the adapter, the computer's USB port or the radio. If you make your own lead, wire it by what each wire does, never by position on the connector.</div>
 
@@ -290,6 +314,44 @@ avrdude -c arduino -p m328p -P /dev/ttyUSB0 -b 115200 -D -U flash:w:KD8CEC_1.20_
 
 <!-- <div class="note"><b>A second adapter for watching the line?</b> A monitoring adapter on the same wires, with its TX connected, can make the radio send the same reports over and over, without end. Connect only its GND and RX. See <a href="#trouble">When things go wrong</a>.</div>
 -->
+<h3 id="tr-switch">Protecting the SDR</h3>
+
+<p>An SDR dongle is a sensitive receiver built for microwatts. A few watts from the uBITX fed straight into it will burn out its input, and that happens the first time you transmit. So if the SDR listens on the same antenna as the radio, a <b>transmit/receive (T/R) antenna switch</b> must sit between them.</p>
+
+<div class="todo"><b>Never connect the SDR to the uBITX's antenna with a plain T-connector or a splitter.</b> The app can't protect the SDR either: the radio tells it that it is transmitting only <em>after</em> it has started. The protection has to be in hardware, ahead of the SDR.</div>
+
+<h4>How a T/R switch works</h4>
+<p>The switch has three connections: the <b>antenna</b>, the <b>transceiver</b> (the uBITX) and the <b>receiver</b> (the SDR). While you listen, the SDR is connected to the antenna and hears the band. As soon as the uBITX transmits, the switch cuts the SDR off and the power goes only to the antenna; when you stop, it gives the antenna back to the SDR.</p>
+<p>Switches made for this, often sold as an <b>"SDR antenna sharer"</b> or <b>"SDR T/R switch"</b>, notice the transmission in one of two ways:</p>
+<ul>
+  <li><b>RF sensing</b>: the switch detects the transmitted power itself and switches within a few milliseconds. Nothing to wire beyond the coax, so this is the easy choice.</li>
+  <li><b>PTT</b>: a control wire from the radio's PTT (transmit) line tells the switch before any power is sent. Gentler still on the SDR, but the standard Raduino has no PTT output to connect it to, so on a uBITX choose a switch that <b>senses RF</b>.</li>
+</ul>
+<p>Many do both. The one in <a href="#what-you-need">What you need</a> senses RF and also has a PTT input; it covers DC to 160 MHz, takes up to 100 W (the uBITX gives about 10), and needs <b>13.8 V DC</b> to work. Check that yours covers the bands you use and is powered whenever the radio is on: an unpowered switch may leave the SDR connected to the antenna.</p>
+
+<h4>Which switch</h4>
+<p>Look for one made <b>for an SDR</b>: it keeps the uBITX connected to the antenna all the time and only cuts the SDR off while you transmit, so both the radio and the SDR hear the band. A general-purpose T/R switch, made to pair a separate receiver with a transmitter, gives the antenna to <em>either</em> side: with the SDR on its receive port, the uBITX hears nothing while you listen, and listening <em>through the radio</em> stops working (listening through the SDR still works).</p>
+<table>
+  <tr><th>Switch</th><th>What it is</th></tr>
+  <tr><td><a href="https://www.gigaparts.com/intellitron-sds-4000s-sdr-rf-sensing-t-r-switch.html" target="_blank">Intellitron SDS-4000S</a></td><td>Ready-made, for SDRs. Senses RF, or PTT. Up to 450 MHz and 200 W; SMA port for the dongle; 12 V supply.</td></tr>
+  <tr><td><a href="https://mfjenterprises.com/products/mfj-1708b-sdr" target="_blank">MFJ-1708B-SDR</a> (SMA version: 1708B-SDRS)</td><td>Ready-made, for SDRs, senses RF. The long-time standard; MFJ has closed, but dealers still have them.</td></tr>
+  <tr><td>"SDR antenna sharer" (the one in <a href="#what-you-need">What you need</a>)</td><td>Ready-made and cheap, sold under many names. Senses RF, or PTT. DC to 160 MHz, 100 W, 13.8 V supply.</td></tr>
+  <tr><td><a href="https://qrpkits.com/eztrswitch.html" target="_blank">Pacific Antenna Easy TR Switch</a></td><td>A $20 kit to build. Senses RF from about 100 mW; 160–6 m, 150 W. General-purpose: the uBITX hears nothing while you listen.</td></tr>
+  <tr><td><a href="https://lz1aq.signacor.com/docs/integrating-sdr-and-standard-transceiver.php" target="_blank">LZ1AQ TRX-SDR switch</a></td><td>A design for SDRs, built to keep both receivers on the antenna. The kit is no longer made, but the design and manual are published. Switched by PTT only, which the standard Raduino doesn't provide.</td></tr>
+</table>
+<p>RTL-SDR.com's <a href="https://www.rtl-sdr.com/using-a-transmit-receive-switch-to-protect-an-sdr-from-a-transmit-radio/" target="_blank">article on protecting an SDR</a>, and its readers' comments, describe more, home-built relay boxes among them.</p>
+
+<h4>Connecting it</h4>
+<ol>
+  <li>Antenna to the switch's <b>antenna</b> (or ANT) port.</li>
+  <li>The uBITX's antenna socket to the switch's <b>transceiver</b> (TRX or TX) port, with a coax lead.</li>
+  <li>The SDR to the switch's <b>receiver</b> (RX or SDR) port.</li>
+  <li>Power the switch, and connect its PTT wire too if you use one.</li>
+</ol>
+<p>Before trusting it with the SDR, check it once with a dummy load, or with the SDR left unplugged: transmit, and listen for the switch's relay or watch its TX light.</p>
+
+<div class="note"><b>An SDR on its own antenna?</b> It needs no switch, but keep its antenna well away from the uBITX's. A few metres apart is a start; the closer they are, the more of your signal reaches the SDR.</div>
+
 <h3 id="first-start">First start</h3>
 <ol>
   <li>Plug in the adapter and switch the radio on.</li>
