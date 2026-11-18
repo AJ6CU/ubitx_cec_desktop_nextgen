@@ -19,7 +19,9 @@ Built from KD8CEC's source, `github.com/phdlee/ubitx`, tag `v1.20`, with these
 changes in `ubitx_20/`:
 
 - `ubitx.h`: `#define UBITX_DISPLAY_NEXTION` as the display;
-  `UBITX_BOARD_VERSION` as in the table; and the feature list switched to the
+  `UBITX_BOARD_VERSION` as in the table; `#define USE_I2CSMETER` (line 42)
+  commented out, so the radio's own S-meter sensor is read, not an extra I2C
+  S-meter Nano; and the feature list switched to the
   Nextion one -- the "Enable all features" list (lines 62-83) commented out and
   the "Recommended for Nextion, TJC LCD" list (lines 137-161) turned on, since
   with every feature on the firmware does not fit in the Nano;

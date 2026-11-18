@@ -168,6 +168,7 @@ avrdude -c arduino -p m328p -P /dev/ttyUSB0 -b 115200 -D -U flash:w:KD8CEC_1.20_
     <ul>
       <li>make sure <code>#define UBITX_DISPLAY_NEXTION</code> is the one display line not commented out;</li>
       <li>set <code>UBITX_BOARD_VERSION</code> for your radio: <b>4</b> for a uBITX V3 or V4, <b>5</b> for a V5 or V6;</li>
+      <li>comment out <code>#define USE_I2CSMETER</code> (line 42): put <code>//</code> in front of it. That line is for an extra S-meter Nano on the I2C bus, which the app doesn't use; without it the firmware reads the radio's own S-meter sensor;</li>
       <li><b>switch the feature list to the Nextion one.</b> Comment out the "Enable all features" list (lines 62–83, from <code>#define FN_BAND</code> to <code>#define FN_TXONOFF</code>): put <code>/*</code> on a line before it and <code>*/</code> on a line after it. Then turn on the "Recommended for Nextion, TJC LCD" list: delete the <code>/*</code> on line 137 and the <code>*/</code> on line 161. With every feature on, the firmware is too big for the Nano's memory and the upload fails.</li>
     </ul>
   </li>
