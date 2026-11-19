@@ -8,3 +8,4 @@ src/__pycache__/ubitx_link.cpython-313.pyc
 build/
 dist/
 .DS_Store
+__pycache__/
