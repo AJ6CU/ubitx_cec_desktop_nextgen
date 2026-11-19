@@ -534,6 +534,9 @@ bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
 
 <!-- FIX (2026-11-19): one section per SDR program -- what it's good and bad at,
      where to get it and learn it, and how to set it up for uBITX CEC Desktop (Mark) -->
+<!-- FIX (2026-11-19): the Raspberry Pi, from Mark's Pi 5 tests (Trixie, 2026-11-12) -->
+<div class="note"><b>On a Raspberry Pi.</b> A <b>Pi 5</b> is the minimum: a Pi 4 is too slow. Memory isn't the limit, so a 4 GB Pi 5 is enough. The Pi 5 has no audio output of its own, so to hear the SDR, add a USB sound adapter, or use HDMI with speakers. Each program below says how it does on a Pi.</div>
+
 <h4 id="sdr-windows">Arranging the windows</h4>
 <p>uBITX CEC Desktop is the control panel, and the SDR program is the ears and eyes. A layout that works well:</p>
 <ul>
@@ -574,6 +577,8 @@ bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
   <li><b>Getting a part back:</b> closing an undocked window docks it again, and <b>DOCK ALL WINDOWS</b> brings everything back.</li>
   <li><b>Next time:</b> Brown remembers the arrangement.</li>
 </ul>
+<p><b>In CW, keep QRG off.</b> The <b>QRG</b> chip in Brown's CW operating panel makes Brown's readout show the frequency being copied, which is the dial plus the CW pitch. With it on, Brown reads about 700 Hz above uBITX CEC Desktop. With it off, the two agree. uBITX CEC Desktop sends the radio's frequency either way.</p>
+<p><b>On a Raspberry Pi 5.</b> Brown runs well, but set the CW skimmer to <b>Timing</b>, not <b>Neural</b>, in the <b>SKIM</b> chip of the Display box, or turn the skimmers off. On Neural, the CW skimmer alone takes about two of the Pi's four cores. With that one change, the other settings can stay as they are.</p>
 
 <!-- ---------------------------------------------------------------- -->
 <h4 class="program" id="sdr-sdroxide">SDRoxide</h4>
@@ -593,6 +598,7 @@ bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
   <li><b>Hamlib rigctld server:</b> enabled, on <code>127.0.0.1</code>, port <code>4532</code>, without transmit. Press <b>APPLY</b>.</li>
   <li><b>Decoded CW over UDP:</b> on, to <code>127.0.0.1</code>, port <b><code>9999</code></b>. SDRoxide's port, not Brown's 9998.</li>
 </ul>
+<p><b>On a Raspberry Pi 5:</b> as with Brown, set the CW skimmer to <b>Timing</b>, not Neural.</p>
 <p><b>The window.</b> As with Brown: in <span class="ui">Settings → UI</span>, under <i>Undocked windows, the floating panel and workspaces</i>, undock the <b>Controls</b> and the <b>Operating panel</b>, or use <b>UNDOCK ALL WINDOWS</b> and dock back the spectrum.</p>
 <div class="note"><b>Two SDRoxides on a Mac.</b> SDRoxide and SDRoxide Brown install under the same name, so only one of them can sit in Applications under it. Point <span class="ui">SDR settings…</span> at the copy you mean.</div>
 
@@ -634,6 +640,14 @@ bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
   <li>Press <b>Start</b>.</li>
 </ul>
 <p>On Windows and Linux, uBITX CEC Desktop starts SDR++ with its dongle already running.</p>
+<p><b>On a Raspberry Pi (and other Linux):</b></p>
+<ul>
+  <li><b>Install:</b> SDR++'s own arm64 <code>.deb</code> from its Releases page works on Raspberry Pi OS (Trixie). It uses about a third of one core.</li>
+  <li><b>Before it can open the dongle:</b> install the <code>rtl-sdr</code> package, and stop the kernel's TV driver from taking the dongle:
+<pre><code>sudo apt install rtl-sdr
+echo "blacklist dvb_usb_rtl28xxu" | sudo tee /etc/modprobe.d/blacklist-rtl.conf</code></pre>
+then restart the Pi.</li>
+</ul>
 <p><b>The window.</b> The menu button at the top left hides the side menu and leaves the spectrum and waterfall. Size the window to sit under uBITX CEC Desktop.</p>
 
 <!-- ---------------------------------------------------------------- -->
@@ -660,6 +674,14 @@ bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
   <li><span class="ui">Tools → Remote control</span>, or the matching button on the toolbar, starts the server.</li>
 </ol>
 <p>Check it's still on after Gqrx restarts.</p>
+<p><b>Setting it up</b>, on a Pi and elsewhere, in Gqrx's I/O devices dialog:</p>
+<ul>
+  <li><b>Device string:</b> <code>rtl=0</code>.</li>
+  <li><b>An RTL-SDR Blog V3, or another plain R820T dongle:</b> for HF, use <code>rtl=0,direct_samp=2</code> (Q-branch direct sampling). A V4 or V4L doesn't need it.</li>
+  <li><b>Audio output:</b> <b>default</b>, not a USB sound card chosen by name. On a Pi, PipeWire holds the card, and choosing it directly failed.</li>
+  <li><b>Starting afresh:</b> <code>gqrx -r</code> resets Gqrx's settings.</li>
+</ul>
+<p><b>On a Raspberry Pi 5</b>, Gqrx is the lightest choice, at about a third of one core. uBITX CEC Desktop gets more from it than from SDR++, so it's the one to use on a Pi when Brown is too heavy.</p>
 <p><b>The window.</b> Gqrx's panels (receiver options, input controls, FFT settings, audio) are docks. Close the ones you don't need, or drag them out of the window, and leave the spectrum and waterfall. The <span class="ui">View</span> menu brings them back.</p>
 
 <!-- ---------------------------------------------------------------- -->
@@ -688,6 +710,7 @@ bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
   <li><b>The Morse Decoder feature</b>, for decoded CW. uBITX CEC Desktop points it at the WDSP receiver and turns on its output when you turn decoding on.</li>
   <li><b>Save it.</b> SDRangel keeps its setup when it closes normally. Saving it as a configuration in SDRangel also lets you get it back after a crash.</li>
 </ol>
+<p><b>On a Raspberry Pi:</b> there's no SDRangel that installs on Raspberry Pi OS (Trixie). Debian doesn't have it, and SDRangel's own arm64 package is built for a newer Ubuntu. It means building from source, so use Gqrx on a Pi instead.</p>
 <p><b>The window.</b> SDRangel's channels and features open as small windows inside its main window. Roll up the ones you don't need to watch, the Channel Power and the Morse Decoder, with the arrow on their title bars. Keep the device's spectrum and waterfall in view under uBITX CEC Desktop.</p>
 
 
