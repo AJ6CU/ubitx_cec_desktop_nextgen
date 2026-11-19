@@ -565,11 +565,24 @@ bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
       <li><b>Max clients</b> 1, or more if other programs use it too.</li>
       <li>Leave <b>Allow clients to transmit</b> off, since the uBITX does the transmitting.</li>
     </ul>
-    Press <b>APPLY</b>. The status line should say it's listening.</li>
-  <li><b>Decoded CW over UDP:</b> on, <b>Send to</b> <code>127.0.0.1</code>, <b>Port</b> <code>9998</code>. That's the <span class="ui">CW port</span> uBITX CEC Desktop's Setup → SDR fills in for Brown. Text is sent only in CW, while Brown's CW panel is decoding.</li>
+    Press <b>APPLY</b>. The status line should say it's listening.
+<!-- FIX (2026-11-19): Mark's screenshots of Brown's settings -->
+<figure class="missing">
+  <img src="images/brown-servers-hamlib.png" alt="Brown, Settings, Servers: the Hamlib rigctld server enabled on 127.0.0.1 port 4532" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <div class="ph">Screenshot to come: Brown, Settings, Servers: the Hamlib rigctld server enabled on 127.0.0.1 port 4532.</div>
+  <figcaption>Brown's Hamlib server, listening on 127.0.0.1:4532 with uBITX CEC Desktop connected (1 client).</figcaption>
+</figure>
+  </li>
+  <li><b>Decoded CW over UDP:</b> on, <b>Send to</b> <code>127.0.0.1</code>, <b>Port</b> <code>9998</code>. That's the <span class="ui">CW port</span> uBITX CEC Desktop's Setup → SDR fills in for Brown. Press <b>APPLY</b> under it: this part has its own. Text is sent only in CW, while Brown's CW panel is decoding.
+<figure class="missing">
+  <img src="images/brown-servers-cw.png" alt="Brown, Settings, Servers: Decoded CW over UDP enabled, sending to 127.0.0.1 port 9998" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <div class="ph">Screenshot to come: Brown, Settings, Servers: Decoded CW over UDP enabled, sending to 127.0.0.1 port 9998.</div>
+  <figcaption>Decoded CW over UDP, further down the same page. Its own <b>APPLY</b> is the one to press.</figcaption>
+</figure>
+  </li>
 </ul>
 <!-- FIX (2026-11-19): undock the panadapter -- one step (Mark) -->
-<p><b>The window.</b> Brown can take any of its parts out of the main window. The simplest way to get a waterfall to put under uBITX CEC Desktop is to undock the <b>Panadapter</b>, the spectrum and waterfall. In <span class="ui">Settings → UI</span>, under <i>Undocked — modules in their own windows</i>, set <b>Panadapter</b> to <b>Undocked — its own window</b>. Or use the <b>🪟 WINDOWS</b> chip at the right of the radio-tab strip, and set <b>SP1 — the spectrum</b> to <b>IN ITS OWN WINDOW</b>.</p>
+<p><b>The window.</b> Brown can take any of its parts out of the main window. The simplest way to get a waterfall to put under uBITX CEC Desktop is to undock the <b>Panadapter</b>, the spectrum and waterfall. In <span class="ui">Settings → Detachable</span>, under <i>Detachable windows</i>, set <b>Panadapter</b> to <b>Undocked — its own window</b>. Or use the <b>🪟 WINDOWS</b> chip at the right of the radio-tab strip, and set <b>SP1 — the spectrum</b> to <b>IN ITS OWN WINDOW</b>.</p>
 <ul>
   <li><b>What you get:</b> a window that is just the spectrum and waterfall. Size it to sit under uBITX CEC Desktop.</li>
   <li><b>The main window</b> keeps Brown's controls and decoders. Put it on another screen or out of the way: the waterfall keeps running without it in view. When Brown starts, its main window comes up in front of the undocked one, so move it back each time.</li>
@@ -577,8 +590,18 @@ bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
   <li><b>Getting a part back:</b> closing an undocked window docks it again, and <b>DOCK ALL WINDOWS</b> brings everything back.</li>
   <li><b>Next time:</b> Brown remembers the arrangement.</li>
 </ul>
+<figure class="missing">
+  <img src="images/brown-undock.png" alt="Brown, Settings, Detachable: Panadapter set to Undocked, its own window" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <div class="ph">Screenshot to come: Brown, Settings, Detachable: Panadapter set to Undocked, its own window.</div>
+  <figcaption>Settings → Detachable, with the Panadapter undocked. The Operating panel, the Controls and the second spectrum stay docked.</figcaption>
+</figure>
 <!-- FIX (2026-11-19): the SDR's own band plan (Mark) -->
 <p><b>The band plan and the first start.</b> Brown's band plan follows the <b>IARU region</b> on the <span class="ui">General</span> tab of its Settings: the band labels along the bottom of the waterfall, which band buttons it shows, and its digital presets. Set it to your own region. Left on another, the labels won't match your band plan. In Region 1, for example, 3.9–4.0 and 7.2–7.3 MHz are marked as broadcast. On its first start, Brown's <b>WELCOME</b> pages walk through the station, the radio and transmitting. Work through them, or skip them. Brown's transmit lockout never comes into play here, because the uBITX does the transmitting.</p>
+<figure class="missing">
+  <img src="images/brown-region.png" alt="Brown's settings: the IARU region set to Region 2, The Americas, and 11M/CB to United States" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <div class="ph">Screenshot to come: Brown's settings: the IARU region set to Region 2, The Americas, and 11M/CB to United States.</div>
+  <figcaption>The IARU region, here Region 2 (the Americas). The 11M/CB setting beside it is for CB and doesn't matter to uBITX CEC Desktop.</figcaption>
+</figure>
 <p><b>In CW, keep QRG off.</b> The <b>QRG</b> chip in Brown's CW operating panel makes Brown's readout show the frequency being copied, which is the dial plus the CW pitch. With it on, Brown reads about 700 Hz above uBITX CEC Desktop. With it off, the two agree. uBITX CEC Desktop sends the radio's frequency either way.</p>
 <p><b>On a Raspberry Pi 5.</b> Brown runs well, but set the CW skimmer to <b>Timing</b>, not <b>Neural</b>, in the <b>SKIM</b> chip of the Display box, or turn the skimmers off. On Neural, the CW skimmer alone takes about two of the Pi's four cores. With that one change, the other settings can stay as they are.</p>
 
