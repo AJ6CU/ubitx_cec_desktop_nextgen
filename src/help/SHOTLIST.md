@@ -23,7 +23,7 @@ Save each one in `help/images/` under the name given. The page shows it in place
 | `arduino_ide_nano_bootloader.jpg` | Done: Tools, Arduino Nano, port and Processor (new or old bootloader). |
 | `station.jpg` | The complete station: uBITX, SDR dongle, antenna switch and laptop, with the cables visible (antenna to switch, switch to uBITX and SDR, USB-TTL adapter and SDR to the laptop). The app on screen, ideally with the SDR's waterfall showing. |
 | `sdr-layout.jpg` | Setting up an SDR ▸ Arranging the windows: uBITX CEC Desktop on top, the SDR's spectrum and waterfall below at the same width. JPG (the waterfall), about 1600 px wide, under 400 KB. |
-| `brown-servers-hamlib.png` | Done: Brown, Settings ▸ Servers, the Hamlib rigctld server. (Retake with *Allow clients to transmit* off, to match the help.) |
+| `brown-servers-hamlib.png` | Done: Brown, Settings ▸ Servers, the Hamlib rigctld server. Allow clients to transmit off. |
 | `brown-servers-cw.png` | Done: Brown, Settings ▸ Servers, Decoded CW over UDP on 127.0.0.1:9998, its own APPLY. |
 | `brown-undock.png` | Done: Brown, Settings ▸ Detachable, Panadapter undocked. |
 | `brown-region.png` | Done: Brown, the IARU region (Region 2) and 11M/CB. |
