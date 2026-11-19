@@ -564,6 +564,8 @@ bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
   <li><b>Getting a part back:</b> closing an undocked window docks it again, and <b>DOCK ALL WINDOWS</b> brings everything back.</li>
   <li><b>Next time:</b> Brown remembers the arrangement.</li>
 </ul>
+<!-- FIX (2026-11-19): the SDR's own band plan (Mark) -->
+<p><b>The band plan and the first start.</b> Brown's band plan follows the <b>IARU region</b> on the <span class="ui">General</span> tab of its Settings: the band labels along the bottom of the waterfall, which band buttons it shows, and its digital presets. Set it to your own region. Left on another, the labels won't match your band plan. In Region 1, for example, 3.9–4.0 and 7.2–7.3 MHz are marked as broadcast. On its first start, Brown's <b>WELCOME</b> pages walk through the station, the radio and transmitting. Work through them, or skip them. Brown's transmit lockout never comes into play here, because the uBITX does the transmitting.</p>
 <p><b>In CW, keep QRG off.</b> The <b>QRG</b> chip in Brown's CW operating panel makes Brown's readout show the frequency being copied, which is the dial plus the CW pitch. With it on, Brown reads about 700 Hz above uBITX CEC Desktop. With it off, the two agree. uBITX CEC Desktop sends the radio's frequency either way.</p>
 <p><b>On a Raspberry Pi 5.</b> Brown runs well, but set the CW skimmer to <b>Timing</b>, not <b>Neural</b>, in the <b>SKIM</b> chip of the Display box, or turn the skimmers off. On Neural, the CW skimmer alone takes about two of the Pi's four cores. With that one change, the other settings can stay as they are.</p>
 
@@ -585,6 +587,7 @@ bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
   <li><b>Hamlib rigctld server:</b> enabled, on <code>127.0.0.1</code>, port <code>4532</code>, without transmit. Press <b>APPLY</b>.</li>
   <li><b>Decoded CW over UDP:</b> on, to <code>127.0.0.1</code>, port <b><code>9999</code></b>. SDRoxide's port, not Brown's 9998.</li>
 </ul>
+<p><b>The band plan and the first start:</b> as with Brown, set the <b>IARU region</b> on the <span class="ui">General</span> tab to your own, and work through or skip the <b>WELCOME</b> pages.</p>
 <p><b>On a Raspberry Pi 5:</b> as with Brown, set the CW skimmer to <b>Timing</b>, not Neural.</p>
 <p><b>The window.</b> As with Brown: in <span class="ui">Settings → UI</span>, under <i>Undocked windows, the floating panel and workspaces</i>, undock the <b>Controls</b> and the <b>Operating panel</b>, or use <b>UNDOCK ALL WINDOWS</b> and dock back the spectrum.</p>
 <div class="note"><b>Two SDRoxides on a Mac.</b> SDRoxide and SDRoxide Brown install under the same name, so only one of them can sit in Applications under it. Point <span class="ui">SDR settings…</span> at the copy you mean.</div>
