@@ -4753,11 +4753,13 @@ class UbitxCecDesktop(sCTk):
                             command=self._refresh_ports).pack(side="left", padx=(4, 0))
 
         line = self._settings_line(box, "Speed", 44)
-        self.baud_picker = sCTkComboBox(
-            line, width=96, height=SETTINGS_CONTROL_HEIGHT,
-            values=["9600", "19200", "38400", "57600", "115200"])
-        self.baud_picker.pack(side="left")
-        self.baud_picker.set(str(gv.config.get_rig_baud()))
+        # FIX (2026-11-18): THE SPEED IS SHOWN, NOT CHOSEN. Mark: at 9600 the
+        # app's timers no longer work, and the Nano tops out at 57600, so a
+        # list of five speeds offered four that fail. The KD8CEC 1.2 build the
+        # help gives runs at 57600; a Pico board at 115200 is set in
+        # settings.json -- see ConfigurationManager.get_rig_baud.
+        sCTkLabelSecondary(line, text=f"{gv.config.get_rig_baud()} baud",
+                           width=96, anchor="w").pack(side="left")
         # Every port a Mac or PC reports, including the ones normally hidden:
         # the filtering can be wrong about somebody's station, and a filter
         # that cannot be overridden is worse than none.
@@ -4811,10 +4813,6 @@ class UbitxCecDesktop(sCTk):
         self._close_rig()
 
         gv.config.set_rig_port(device)
-        try:
-            gv.config.set_rig_baud(int(self.baud_picker.get()))
-        except ValueError:
-            pass
         self._group_note(self.radio_box, f"opening {device}…")
         self.update_idletasks()
         self._open_rig()

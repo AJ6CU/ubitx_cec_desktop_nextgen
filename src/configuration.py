@@ -99,9 +99,33 @@ class ConfigurationManager:
         self.saveConfig()
         self._notify_observers("Rig Port", port)
 
+    # FIX (2026-11-18): THE SPEEDS THE APP WORKS AT. Mark: at 9600 the app's
+    # timers (the start-up wait, the command pacing) no longer work, and the
+    # Nano's software serial tops out at 57600. 115200 is kept for KD8CEC 2.0
+    # on the Pico, whose Nextion line is a hardware UART.
+    RIG_BAUDS = (57600, 115200)
+
     def get_rig_baud(self) -> int:
-        """The rig's serial speed. 57600 is what KD8CEC firmware uses."""
-        return int(self.getValueOrDefault("Rig Baud"))
+        """
+        The rig's serial speed: 57600, what KD8CEC 1.2's Nextion build uses
+        (the 57600 build the help gives), or 115200 for a Pico board.
+
+        FIX (2026-11-18): NOT CHOSEN IN SETUP ANY MORE. A "Rig Baud" in
+        settings.json other than those two -- a 9600 left from testing, or
+        anything unreadable -- is read as 57600, and said so once.
+        """
+        value = self.getValueOrDefault("Rig Baud")
+        try:
+            baud = int(value)
+        except (TypeError, ValueError):
+            baud = None
+        if baud in self.RIG_BAUDS:
+            return baud
+        if not getattr(self, "_baud_warned", False):
+            self._baud_warned = True
+            print(f"[app] Rig Baud {value!r} in settings.json is not one the app works at "
+                  f"({', '.join(map(str, self.RIG_BAUDS))}); using 57600")
+        return 57600
 
     def set_rig_baud(self, baud: int):
         self.config_data["Rig Baud"] = int(baud)

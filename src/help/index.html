@@ -449,7 +449,8 @@ bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
   <li>Plug in the adapter and switch the radio on.</li>
   <li>Start the app. With no radio chosen yet, it opens on <span class="ui">Setup → Station &amp; Radio</span>.</li>
   <li>In the <span class="ui">Radio</span> group, choose the adapter under <span class="ui">Port</span>. Ports are labelled by their chip (FTDI, CH340…). If yours isn't listed, tick <span class="ui">show all</span>, or press <span class="ui">Refresh</span> after plugging it in.</li>
-  <li>Leave <span class="ui">Speed</span> as it is unless your firmware was built for another, and press <span class="ui">Connect</span>.</li>
+  <!-- FIX (2026-11-18): the speed is shown, not chosen -->
+  <li>Press <span class="ui">Connect</span>. <span class="ui">Speed</span> shows <b>57600 baud</b>, the speed of the KD8CEC build above. It can't be changed: the app's timing is made for 57600, and the Nano's display line can't go faster.</li>
 </ol>
 
 <figure class="missing">
