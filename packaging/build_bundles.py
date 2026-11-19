@@ -47,8 +47,8 @@ The installer is a Python file rather than a .bat because Windows 11's Smart
 App Control blocks unsigned .bat files.
 
 To upgrade: run the installer from a newer version's folder.
-To remove: "Uninstall uBITX CEC Desktop.py". Your settings and logbook in
-%USERPROFILE%\\.ubitx_cec_desktop are kept.
+To remove: "Uninstall uBITX CEC Desktop.py". Your settings (in
+%USERPROFILE%\\.ubitx_cec_desktop) and your logbook (where Setup put it) are kept.
 If the program does not start: "Start with messages.py" in
 %LOCALAPPDATA%\\uBITX CEC Desktop shows what went wrong.
 """,
@@ -71,8 +71,8 @@ uBITX CEC Desktop {version} for macOS
    installer makes it on your Mac.
 
 To upgrade: run the installer from a newer version's folder.
-To remove: "Uninstall uBITX CEC Desktop.command". Your settings and logbook
-in ~/.ubitx_cec_desktop are kept.
+To remove: "Uninstall uBITX CEC Desktop.command". Your settings (in
+~/.ubitx_cec_desktop) and your logbook (where Setup put it) are kept.
 The program's messages: ~/Library/Logs/uBITX CEC Desktop.log
 """,
     "Linux": """\
@@ -87,8 +87,8 @@ uBITX CEC Desktop {version} for Linux (and Raspberry Pi OS)
    type:  ubitx-cec-desktop
 
 To upgrade: run install.sh from a newer version's folder.
-To remove: bash uninstall.sh. Your settings and logbook in ~/.ubitx_cec_desktop
-are kept.
+To remove: bash uninstall.sh. Your settings (in ~/.ubitx_cec_desktop) and
+your logbook (where Setup put it) are kept.
 """,
 }
 

@@ -109,7 +109,7 @@ fi
 say "DONE. $APP is installed.
   Start it from the application menu (Internet / Ham Radio), or type: ubitx-cec-desktop
   Program:  $HOME_DIR
-  Settings and logbook stay in ~/.ubitx_cec_desktop (kept by the uninstaller)."
+  Settings stay in ~/.ubitx_cec_desktop, the logbook where Setup puts it (both kept by the uninstaller)."
 case ":$PATH:" in *":$BIN:"*) ;; *) say "(~/.local/bin is not on your PATH yet; it usually is after logging in again.)";; esac
 [ -n "$NOTE" ] && say "$NOTE"
 exit 0

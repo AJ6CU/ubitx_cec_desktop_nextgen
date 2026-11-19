@@ -145,7 +145,7 @@ def main():
     say(f"DONE. {APP} is installed.")
     say("  Start it from the Start menu or the Desktop shortcut.")
     say(f"  Program:  {HOME}")
-    say(f"  Settings and logbook stay in {SETTINGS} (kept by the uninstaller).")
+    say(f"  Settings stay in {SETTINGS}, the logbook where Setup puts it (both kept by the uninstaller).")
     say("  The radio's COM port: Device Manager > Ports (COM & LPT), then the app's Setup page.")
     finish(0)
 

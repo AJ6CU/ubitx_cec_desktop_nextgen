@@ -107,6 +107,6 @@ say "DONE. $APP is installed.
   Start it from Applications (in your home folder), Launchpad or Spotlight.
   Program:  $HOME_DIR
   Messages: ~/Library/Logs/$APP.log
-  Settings and logbook stay in ~/.ubitx_cec_desktop (kept by the uninstaller)."
+  Settings stay in ~/.ubitx_cec_desktop, the logbook where Setup puts it (both kept by the uninstaller)."
 print; read -k1 "?Press a key to close."
 exit 0

@@ -1,7 +1,7 @@
 """
 Removes uBITX CEC Desktop installed by "Install uBITX CEC Desktop.py".
 
-Double-click it. Keeps your settings and logbook (%USERPROFILE%\\.ubitx_cec_desktop);
+Double-click it. Keeps your settings (%USERPROFILE%\\.ubitx_cec_desktop) and your logbook (where Setup put it);
 delete that folder yourself to remove them too. Close the program first.
 """
 import os
@@ -42,8 +42,9 @@ print()
 if problem:
     print("NOT FULLY REMOVED: " + problem)
 else:
-    print(f"{APP} removed. Your settings and logbook are still in "
-          f"{os.path.join(os.path.expanduser('~'), '.ubitx_cec_desktop')}")
+    print(f"{APP} removed. Your settings are still in "
+          f"{os.path.join(os.path.expanduser('~'), '.ubitx_cec_desktop')}, "
+          f"and your logbook where Setup put it.")
 print()
 try:
     input("Press Enter to close this window.")
