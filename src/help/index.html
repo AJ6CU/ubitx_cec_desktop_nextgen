@@ -786,7 +786,8 @@ then restart the Pi.</li>
   <li>RIT off drops the offset, and RIT on always starts at +0.</li>
   <li>Each VFO keeps its own RIT. Switch away and back, and it returns.</li>
   <li>In split, RIT works on the receive VFO; uBITX CEC Desktop keeps it there itself, because the firmware ignores split on transmit while its own RIT is on. Turning split off hands the RIT back to the radio.</li>
-  <li>In split, each VFO transmits on its receive frequency, RIT offset included.</li>
+  <!-- FIX (2026-11-19): what this means -- RIT tunes the VFO itself (Mark) -->
+  <li>In split, RIT tunes the receive VFO itself. So if that VFO later transmits, after <span class="ui">A⇄B</span> for example, it transmits where you were listening, RIT offset included. Many radios would transmit where RIT was switched on instead.</li>
 </ul>
 
 <h3>Status</h3>

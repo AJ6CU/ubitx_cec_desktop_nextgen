@@ -965,6 +965,18 @@ testing by hand may be version-dependent rather than protocol-dependent.
 <a name="the-application"></a>
 ### The application — bugs worth fixing in the current code
 
+**RIT and a VFO that moves to transmit, in split (Mark, 2026-11-19).**
+*Known difference, left as is.* RIT here tunes the receive VFO itself
+(RadioModel.rit_offset is the VFO minus rit_base_hz; role_frequency keeps
+transmit at rit_base_hz only OUT of split). So in split, a VFO that was
+receiving with RIT and then becomes the transmit VFO (A⇄B) transmits on its
+RIT-shifted frequency. Most radios would transmit at the base instead. Mark:
+the better behavior, but not worth reopening VFO A/B, split and RIT, which
+took a lot of work to get right. The help says what happens. If it's ever
+done: role_frequency("tx") in split would use the VFO's own rit base when that
+VFO has RIT on, and A⇄B (which carries each VFO's RIT along) and the
+display's notes would follow; test every VFO/split/RIT combination again.
+
 **Bands: three tables that don't know about each other (Mark, 2026-11-19).**
 *Open.*
 
