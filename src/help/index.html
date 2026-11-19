@@ -267,7 +267,7 @@ avrdude -c arduino -p m328p -P /dev/ttyUSB0 -b 115200 -D -U flash:w:KD8CEC_1.20_
 <p>uBITX CEC Desktop connects to the Nextion wiring harness thru an USB-to-TTL serial adapter.  Dont try to use the Nano's own USB port; that one is for flashing firmware and editing the EEPROM!</p>
     <p>I have used two types of these adapters, both of which are readily available on Amazon and AliExpress. The FT232RL is based on the FTDI chip. It is the less expensive option and the one I used throughout my development. However, I have recently seen some saw some cautions in regards to this adapter. Apparently, there are many clones of this chip &#8212; some of which are worse than others &#8212; and the poorer made tend to be more noisy.  Subsequently, I started using the CP2102 USB to TTL. They are about 4x the cost, ~$12 USD per board vs $2.50 USD for the FT232 variant. I have not really been able to tell the difference yet, but I keep looking hoping to justify my purchase...</p>
 
-<p>The easiest approach is to use the Nextion's own cable: unplug it from the display and plug that end into a male JST connector and use a 6 pin JST Female connector on the other side that matches your USB-to-TTL converter. Its colours are the Nextion's standard ones, and the pictures below use them too:</p>
+<p>The easiest approach is to use the Nextion's own cable: unplug it from the display and plug that end into a male JST connector and use a 6 pin JST Female connector on the other side that matches your USB-to-TTL converter. Its colors are the Nextion's standard ones, and the pictures below use them too:</p>
 <p> Unless you are an expert wire crimper of JST connectors, I highly recommend that you invest in a set of premade wires. You can get them in F-F and M-F. The Amazon links are:
 </p>
     <ul>
@@ -286,12 +286,12 @@ avrdude -c arduino -p m328p -P /dev/ttyUSB0 -b 115200 -D -U flash:w:KD8CEC_1.20_
 
 <div class="todo"><b>Leave the adapter's voltage jumper off.</b> With it on, the adapter puts its own 5 V (or 3.3 V) onto the red wire, against the radio's +5 V. The radio can draw more current than this adapter can provide causing a potential failure. Also, your radio is going to stay on, even with the power switch off.</div>
 
-<div class="todo"><b>Ground and +5 V are the other way round on the V6.</b> On a V3, V4 or V5 Raduino, pin 1 of the display header is ground and pin 2 is +5 V; on a V6, pin 1 is +5 V and pin 2 is ground. Plug the cable into the radio exactly as the Nextion's was, and check the colours against the pictures for your uBITX before you switch on. A lead the wrong way round at the radio connects the adapter's ground to +5 V, and can damage the adapter, the computer's USB port or the radio. If you make your own lead, wire it by what each wire does, never by position on the connector.</div>
+<div class="todo"><b>Ground and +5 V are the other way round on the V6.</b> On a V3, V4 or V5 Raduino, pin 1 of the display header is ground and pin 2 is +5 V; on a V6, pin 1 is +5 V and pin 2 is ground. Plug the cable into the radio exactly as the Nextion's was, and check the colors against the pictures for your uBITX before you switch on. A lead the wrong way round at the radio connects the adapter's ground to +5 V, and can damage the adapter, the computer's USB port or the radio. If you make your own lead, wire it by what each wire does, never by position on the connector.</div>
 
 <h4>At the adapter</h4>
 <figure class="missing">
-  <img src="images/usb-ttl-adapter.jpg" alt="The CP2102 and FT232RL adapters, with the wire colour for each pin and the voltage jumper" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
-  <div class="ph">Photo to come: the USB-to-TTL adapter, with its pins labelled.</div>
+  <img src="images/usb-ttl-adapter.jpg" alt="The CP2102 and FT232RL adapters, with the wire color for each pin and the voltage jumper" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <div class="ph">Photo to come: the USB-to-TTL adapter, with its pins labeled.</div>
   <figcaption>Two common adapters, a CP2102 and an FT232RL, with the wire from the Raduino on each pin. The arrows point to the voltage jumper: leave it off.</figcaption>
 </figure>
 
@@ -461,7 +461,7 @@ bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
       <li><b>Linux:</b> from the application menu, or type <code>ubitx-cec-desktop</code>.</li>
     </ul>
     With no radio chosen yet, it opens on <span class="ui">Setup → Station &amp; Radio</span>.</li>
-  <li>In the <span class="ui">Radio</span> group, choose the adapter under <span class="ui">Port</span>. Ports are labelled by their chip (FTDI, CH340…). If yours isn't listed, tick <span class="ui">show all</span>, or press <span class="ui">Refresh</span> after plugging it in.</li>
+  <li>In the <span class="ui">Radio</span> group, choose the adapter under <span class="ui">Port</span>. Ports are labeled by their chip (FTDI, CH340…). If yours isn't listed, tick <span class="ui">show all</span>, or press <span class="ui">Refresh</span> after plugging it in.</li>
   <!-- FIX (2026-11-18): the speed is shown, not chosen -->
   <li>Press <span class="ui">Connect</span>. <span class="ui">Speed</span> shows <b>57600 baud</b>, the speed of the KD8CEC build above. It can't be changed: uBITX CEC Desktop's timing is made for 57600, and the Nano's display line can't go faster.</li>
 </ol>
@@ -493,7 +493,7 @@ bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
 
 <!-- FIX (2026-11-18): what each program lets uBITX CEC Desktop control, as a grid (Mark) -->
 <h4 id="sdr-controls">What each program lets you control</h4>
-<p>What uBITX CEC Desktop can do in each SDR program, once connected (see <a href="#sdr-connect">Connecting uBITX CEC Desktop to the SDR</a>, at the end of this section). <span class="yes">✓</span> means yes, – means no, and ? means not yet checked. After <span class="ui">Connect</span>, the line under the SDR group lists what your copy actually allows. A control the program doesn't offer is greyed in uBITX CEC Desktop.</p>
+<p>What uBITX CEC Desktop can do in each SDR program, once connected (see <a href="#sdr-connect">Connecting uBITX CEC Desktop to the SDR</a>, at the end of this section). <span class="yes">✓</span> means yes, – means no, and ? means not yet checked. After <span class="ui">Connect</span>, the line under the SDR group lists what your copy actually allows. A control the program doesn't offer is grayed in uBITX CEC Desktop.</p>
 <table class="matrix">
   <tr><th></th><th>SDRoxide Brown</th><th>SDRoxide</th><th>SDR++</th><th>Gqrx</th><th>SDRangel</th></tr>
   <tr><td>Frequency and mode</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td></tr>
@@ -712,7 +712,7 @@ then restart the Pi.</li>
 <ol>
   <!-- FIX (2026-11-19): remind the reader to start uBITX CEC Desktop (Mark) -->
   <li>Start uBITX CEC Desktop, if it isn't running, as in <a href="#first-start">First start</a>, and connect the radio first if you haven't yet.</li>
-  <li><span class="ui">Setup → SDR</span>, <span class="ui">Software</span>: choose your program. <span class="ui">-none-</span> is the default, and with it Connect and the address fields stay greyed.</li>
+  <li><span class="ui">Setup → SDR</span>, <span class="ui">Software</span>: choose your program. <span class="ui">-none-</span> is the default, and with it Connect and the address fields stay grayed.</li>
   <li><span class="ui">Address</span> and <span class="ui">Port</span> fill in with the program's usual ones; change them only if you changed them in the program.</li>
   <li>Tick <span class="ui">Start it</span> if uBITX CEC Desktop should start the program for you. uBITX CEC Desktop closes a program it started when it quits, and leaves alone one that was already running.</li>
   <li>Press <span class="ui">Connect</span>. The line under the group lists what the program lets uBITX CEC Desktop control.</li>
@@ -739,8 +739,8 @@ then restart the Pi.</li>
 
 <h3>Receive and transmit</h3>
 <ul>
-  <li><b>RX panel (left).</b> The frequency you're listening on. Tune with the physical knob, or click a digit and scroll over the virtual knob to change it. You can also left click on the virtual knob to move the selected digit down, or right click to move it up. <span class="ui">RIT</span> turns receive incremental tuning on; the note beside it shows the offset and the frequency you'll transmit on. <span class="ui">Lock</span> is the radio's lock: everything that would change the radio or the SDR is greyed while it's on.</li>
-  <li><b>TX panel (right).</b> The frequency you'll transmit on, with <span class="ui">off air</span> / <span class="ui">on air</span>. It shows a different VFO only in split. <span class="ui">TX off</span> is KD8CEC's practice mode: the radio keys everything but the transmit relay, so nothing goes out. Use it to practise CW.</li>
+  <li><b>RX panel (left).</b> The frequency you're listening on. Tune with the physical knob, or click a digit and scroll over the virtual knob to change it. You can also left click on the virtual knob to move the selected digit down, or right click to move it up. <span class="ui">RIT</span> turns receive incremental tuning on; the note beside it shows the offset and the frequency you'll transmit on. <span class="ui">Lock</span> is the radio's lock: everything that would change the radio or the SDR is grayed while it's on.</li>
+  <li><b>TX panel (right).</b> The frequency you'll transmit on, with <span class="ui">off air</span> / <span class="ui">on air</span>. It shows a different VFO only in split. <span class="ui">TX off</span> is KD8CEC's practice mode: the radio keys everything but the transmit relay, so nothing goes out. Use it to practice CW.</li>
 </ul>
 
 <div class="note"><b>Which VFO is which in split.</b> The panel tells you: whatever VFO sits in the RX panel is the one you receive on, even if it's VFO B. The firmware's usual arrangement is receive on A, transmit on B, but A/B swaps them.</div>
@@ -749,7 +749,7 @@ then restart the Pi.</li>
 <p><span class="ui">SIG</span> is the signal strength, in S-units and dBm. With an SDR it's the SDR's reading. Listening through the radio, it's the radio's S-meter sensor, which only means something once its levels are set (<span class="ui">Setup → Logbook &amp; more → EEPROM settings…</span>). <span class="ui">SWR</span> and <span class="ui">PWR</span> wait for a sensor board.</p>
 
 <h3>Listening aids</h3>
-<p><span class="ui">AGC</span>, <span class="ui">NR</span>, <span class="ui">Notch</span>, <span class="ui">SQL</span>, <span class="ui">NB</span>, <span class="ui">CW</span> (the peak filter) and <span class="ui">DEC</span> (the CW decoder) are the SDR's. Click a lamp to switch it; click the arrow beside it for its settings. A pop-up closes on Escape or a click elsewhere. <b>Pin</b> it to keep it open; pinned pop-ups come back where you left them. A lamp is greyed when the SDR can't do it, and says why. Notch is greyed in CW, where it would remove the signal.</p>
+<p><span class="ui">AGC</span>, <span class="ui">NR</span>, <span class="ui">Notch</span>, <span class="ui">SQL</span>, <span class="ui">NB</span>, <span class="ui">CW</span> (the peak filter) and <span class="ui">DEC</span> (the CW decoder) are the SDR's. Click a lamp to switch it; click the arrow beside it for its settings. A pop-up closes on Escape or a click elsewhere. <b>Pin</b> it to keep it open; pinned pop-ups come back where you left them. A lamp is grayed when the SDR can't do it, and says why. Notch is grayed in CW, where it would remove the signal.</p>
 <p>With <span class="ui">DEC</span> on, in CW, decoded text runs along the bottom of the tab.</p>
 
 <h3>Filter, band, mode and span</h3>
@@ -761,7 +761,7 @@ then restart the Pi.</li>
 </ul>
 
 <h3>RF gain and volume</h3>
-<p><span class="ui">RF gain</span> is the SDR's front-end gain. <span class="ui">Volume</span> is the SDR's audio; double-click it to mute and unmute. Listening through the radio, volume is the radio's own knob, so this one is greyed.</p>
+<p><span class="ui">RF gain</span> is the SDR's front-end gain. <span class="ui">Volume</span> is the SDR's audio; double-click it to mute and unmute. Listening through the radio, volume is the radio's own knob, so this one is grayed.</p>
 
 <h3>VFOs and split</h3>
 <table>
@@ -783,7 +783,7 @@ then restart the Pi.</li>
 </ul>
 
 <h3>Status</h3>
-<p><span class="ui">Help</span> opens this page. <span class="ui">rig ok</span> is the radio's connection. The SDR button says <span class="ui">sdr ok</span>, or, in an alert colour, <span class="ui">sdr — reconnect</span> (press it to try again) or <span class="ui">no sdr — choose one</span>.</p>
+<p><span class="ui">Help</span> opens this page. <span class="ui">rig ok</span> is the radio's connection. The SDR button says <span class="ui">sdr ok</span>, or, in an alert color, <span class="ui">sdr — reconnect</span> (press it to try again) or <span class="ui">no sdr — choose one</span>.</p>
 
 <!-- ============================================================== -->
 <h2 id="rx">3. RX</h2>
