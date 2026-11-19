@@ -414,9 +414,10 @@ class SmallKnob(sCTkFrame):
                 holder, divisions=12, knob_diameter=diameter,
                 width=width, height=height,
                 fg_color=backdrop,
-                command=on_step,
-                left_click_callback=lambda: on_step(-1),
-                right_click_callback=lambda: on_step(+1))
+                # FIX (2026-11-19): no click callbacks -- the dial steps
+                # itself on a click, turning the knob, and calls on_step with
+                # -1 or +1 (see the tuning dial's note).
+                command=on_step)
         # The canvas size is applied through configure(), which takes an
         # explicit width and height as given. The constructor sizes the
         # canvas for the knob plus a generous label margin -- 110px round a
@@ -692,8 +693,11 @@ class RolePanel(sCTkFrame):
             width=KNOB_DIAMETER + 10, height=KNOB_DIAMETER + 10,
             fg_color="transparent",
             command=self._on_turn,
-            left_click_callback=lambda: self._click_step(-1),
-            right_click_callback=lambda: self._click_step(+1),
+            # FIX (2026-11-19): NO CLICK CALLBACKS (Mark: a click tuned but the
+            # knob never moved, RX or TX). The library runs a click callback
+            # INSTEAD of stepping, so the knob was not redrawn. Without one, a
+            # left click steps the dial -1 and a right click +1: the knob
+            # turns, and _on_turn gets the same -1/+1 the callbacks passed.
             double_click_command=lambda d: d.set_pressed(True),
             shift_double_click_command=lambda d: d.set_pressed(False))
         # FIX: the canvas size through configure(), as the small knobs do.
@@ -800,9 +804,6 @@ class RolePanel(sCTkFrame):
 
     def _on_digit(self, step):
         self._app.refresh()
-
-    def _click_step(self, direction):
-        self._on_turn(direction)
 
     def show_pending(self, displayed_hz):
         """
