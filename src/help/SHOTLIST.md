@@ -22,6 +22,7 @@ Save each one in `help/images/` under the name given. The page shows it in place
 | `nextion_baud_change.jpg` | Done: `SWSerial_Begin` 9600 to 57600 in `ubitx_lcd_nextion.ino`. |
 | `arduino_ide_nano_bootloader.jpg` | Done: Tools, Arduino Nano, port and Processor (new or old bootloader). |
 | `station.jpg` | The complete station: uBITX, SDR dongle, antenna switch and laptop, with the cables visible (antenna to switch, switch to uBITX and SDR, USB-TTL adapter and SDR to the laptop). The app on screen, ideally with the SDR's waterfall showing. |
+| `sdr-layout.jpg` | Setting up an SDR ▸ Arranging the windows: uBITX CEC Desktop on top, the SDR's spectrum and waterfall below at the same width. JPG (the waterfall), about 1600 px wide, under 400 KB. |
 
 Also wanted, for the sections marked "To fill in":
 - each SDR program's server setting (Brown's Settings ▸ Servers, SDR++'s Rigctl Server module, Gqrx's Remote control, SDRangel's device set and channels).
