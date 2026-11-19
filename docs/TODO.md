@@ -139,6 +139,34 @@ operator's guide when it is written, collected here as they come up:
 * *Settings that stay in SDRoxide's own window* -- the APF lift, the NR
   engine and the rest rigctl cannot reach; see the SDRoxide section below.
 
+**The help's SDR sections -- to check before release (2026-11-19).** The
+per-program sections (SDRoxide Brown, SDRoxide, SDR++, Gqrx, SDRangel) were
+drafted from the programs' READMEs and manuals; these points need Mark's eyes
+or a running copy:
+
+1. *Videos*: are they the right picks -- view counts could not be read, so
+   they were chosen as recent beginner videos plus the long-standing
+   SignalsEverywhere ones. Especially the 2017 Gqrx video
+   (youtube.com/watch?v=mBU7eSviy_0) and the SignalsEverywhere SDR++
+   overview (aAbgbDVs_0A): neither could be opened directly, only seen
+   embedded on rtl-sdr.com.
+2. *Brown and SDRoxide windows*: does "Settings → UI → Undocked -- modules in
+   their own windows" (Brown) / "Undocked windows, the floating panel and
+   workspaces" (SDRoxide), "Undocked -- its own window", the 🪟 WINDOWS chip
+   and DOCK ALL WINDOWS match the copies installed here?
+3. *SDRangel's "Save it" step*: the exact menu name for saving the setup as
+   a configuration (the help only says "as a configuration in SDRangel").
+4. *Gqrx*: does it keep remote control on after a restart? The help says
+   "check it's still on after Gqrx restarts" until this is known.
+5. *The grid* ("What each program lets you control"):
+   * Gqrx's **mute** and **RF gain** are marked "?". Connect Gqrx and read
+     the line under the SDR group, then set them to ✓ or –.
+   * Upstream SDRoxide is ticked for **VFO A/B and split** (rigctl_sdr.py
+     drives VFOs on both SDRoxides; its README lists VFO A/B, split and
+     RIT/XIT), but the intro of Setting up an SDR says VFO A/B and split come
+     "with SDRoxide Brown". Try split on upstream: if it works, fix the
+     intro; if not, set the grid cell to –.
+
 **Anchors: `id` rather than `name`.** Some renderers ignore `name` on an empty
 anchor, so a table of contents entry silently fails. Where the heading text
 matches the link, the auto-generated slug works without an explicit anchor at
