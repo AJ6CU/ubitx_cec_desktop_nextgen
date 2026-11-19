@@ -965,6 +965,48 @@ testing by hand may be version-dependent rather than protocol-dependent.
 <a name="the-application"></a>
 ### The application — bugs worth fixing in the current code
 
+**Bands: three tables that don't know about each other (Mark, 2026-11-19).**
+*Open.*
+
+* *uBITX CEC Desktop's*: `RadioModel.BANDS` (radio_model.py), ten bands
+  160-10 m with US edges (60 m as one range, 5.330-5.410; 80 m 3.5-4.0). It
+  drives the band picker, the "--" out of band and the picker's arrows from
+  there, and SDR_Link.frame_band (the SDR's view starts at the band's lower
+  edge). A second, UNUSED copy -- `bandStart`/`bandEnd` in globalvars.py,
+  nine bands, no 60 m, "Probably should be retrieved from eeprom" -- can go.
+* *The radio's*: KD8CEC's EEPROM. HAM_BAND_COUNT (260); TX_TUNE_TYPE (261):
+  2 = the radio's band button steps through these bands but tuning is free,
+  100 or more = the radio REFUSES to transmit outside them; HAM_BAND_RANGE
+  (262 on): up to ten from-to pairs, 2 bytes each, in kHz. Empty or invalid,
+  the firmware uses its built-in set (whose 80 m is 3500-3800). Edited in the
+  uBITX Settings Editor. KD8CEC's code to send them over the Nextion protocol
+  is commented out, so the app never hears them -- but they can be read with
+  TS_CMD_READMEM, as the channels are.
+* *SDRoxide's and Brown's*: `bandplan.json`, by IARU region (Settings >
+  General), with sub-segments; it labels the waterfall, decides the band
+  buttons and presets, and backs their own transmit lockout (off the table
+  for us: the uBITX transmits). Not reachable over rigctl; the help now says
+  to set the region (done 2026-11-19).
+
+What to do:
+
+1. *Read the radio's table at connect*, and use it for the picker and "out of
+   band"; RadioModel.BANDS stays as the fallback when the radio's is empty,
+   invalid or unread. The bands' names come from the app (the radio stores
+   only ranges).
+2. *Say when the radio restricts transmit* (TX_TUNE_TYPE >= 100): a note on
+   Operate, and an explanation when a key-down out of band is refused.
+3. *Drop globalvars' unused copy.*
+4. *OPTION -- keep the band plan in step with the radio*, like Backup and
+   restore: a dialog showing the app's band plan beside the radio's, with
+   **Retrieve** (the radio's into the app's settings) and **Store** (the
+   app's into the radio's EEPROM: count, ranges, and the transmit
+   restriction), and the differences visible before anything is written.
+   Store writes EEPROM, so the same confirmation and read-back as Backup and
+   restore. The app's band plan would then be a setting (in settings.json, or
+   a bands.json beside channels.json) rather than a constant, editable for
+   a region or a license class.
+
 **Scroll over a frequency digit to tune by it (Mark, 2026-11-19).** *Open.*
 Today a click on a digit of the RX or TX readout only selects it as the
 tuning step (sCTkFrequencyDisplay: the selected digit's place value is the
