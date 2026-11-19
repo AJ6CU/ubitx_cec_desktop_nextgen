@@ -254,7 +254,7 @@ avrdude -c arduino -p m328p -P /dev/ttyUSB0 -b 115200 -D -U flash:w:KD8CEC_1.20_
     <div class="note"><b>Your Radio and Nextion will no longer talk.</b>Your Nextion is flashed for 9600 baud. After you update your firmware to 57600, your radio will no longer talk to your Nextion screen.  The solution is to go to use the Nextion Editor to create a 57600 baud version for your screen. In the future I will create some generic ones and make them available in at the <a href="https://github.com/AJ6CU/Nextion-screens-for-uBitx-KD8CEC-firmware">Nextion Screen Repository</a></div>
 
 <h4>After flashing</h4>
-<p>Power the radio off and on. Your calibration survives a firmware update; if it was lost, use uBITX System Editor to restore from a backup file or just manually type them in. </p>
+<p>Power the radio off and on. Your calibration survives a firmware update; if it was lost, use uBITX Settings Editor to restore from a backup file or just manually type them in. </p>
 
 <h3 id="usb-ttl">The USB-to-TTL adapter</h3>
 
@@ -380,10 +380,11 @@ avrdude -c arduino -p m328p -P /dev/ttyUSB0 -b 115200 -D -U flash:w:KD8CEC_1.20_
   <li>Double-click the zip to unpack it, then double-click <b>Install uBITX CEC Desktop.command</b>.</li>
   <li>The first time, macOS refuses to open it (<i>"Apple could not verify…"</i>) because the script isn't signed. Click <b>Done</b>, open <b>System Settings → Privacy &amp; Security</b>, scroll down to <b>Security</b>, click <b>Open Anyway</b> next to the installer, confirm, and double-click the installer again.<br>
   Or: open Terminal, type <code>zsh</code> and a space, drag the <code>.command</code> file into the window, and press Return.</li>
-  <li>Start the app from <b>Applications</b> (the one in your home folder), Launchpad or Spotlight: <b>uBITX CEC Desktop</b>. It opens without a warning, because the installer made it on your Mac.<br>
+  <li>Start the app from <b>Applications</b> (the one in your home folder), Launchpad or Spotlight: <b>uBITX CEC Desktop</b>. It opens without a warning, because the installer made it on your Mac.</li>
+      </ol>
   <!-- FIX (2026-11-18): many Mac users have never opened the Applications folder in their home folder -->
-  This <b>Applications</b> folder is not the main one most apps go into, but the one inside your home folder. To find it, in Finder choose <b>Go → Home</b> (<kbd>⇧⌘H</kbd>) and open <b>Applications</b>, or choose <b>Go → Go to Folder…</b> and type <code>~/Applications</code>. The easiest way is Spotlight: press <kbd>⌘</kbd>-<kbd>Space</kbd>, type <b>uBITX</b>, and press Return. To keep it handy: once it's running, right-click its icon in the Dock and choose <b>Options → Keep in Dock</b>.</li>
-</ol>
+ <div class="note"><b>Where to find it.</b> This <b>Applications</b> folder is not the main one most apps go into, but the one inside your home folder. To find it, in Finder choose <b>Go → Home</b> (<kbd>⇧⌘H</kbd>) and open <b>Applications</b>, or choose <b>Go → Go to Folder…</b> and type <code>~/Applications</code>. The easiest way is Spotlight: press <kbd>⌘</kbd>-<kbd>Space</kbd>, type <b>uBITX</b>, and press Return. To keep it handy: once it's running, right-click its icon in the Dock and choose <b>Options → Keep in Dock</b>.</div>
+
 
 <h4>Linux and Raspberry Pi OS</h4>
 <ol>
@@ -405,7 +406,7 @@ bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
   <li><b>macOS:</b> <b>Uninstall uBITX CEC Desktop.command</b></li>
   <li><b>Linux:</b> <code>bash uninstall.sh</code></li>
 </ul>
-<p>Removing the app <b>keeps your settings and your logbook</b>, so a later install picks them up again. See <a href="#your-files">Where your settings are kept</a> to remove those too.</p>
+    <p>Removing the app <b>keeps your settings and your logbook</b>, so a later install picks them up again. </p>
 
 <!-- FIX (2026-11-18): where the app keeps its files on each platform, and what each one holds -->
 <h4 id="your-files">Where your settings are kept</h4>
@@ -429,8 +430,8 @@ bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
 </table>
 <p><b>Not in this folder:</b></p>
 <ul>
-  <li><b>Your logbook.</b> It goes where <span class="ui">Setup → Logbook &amp; more</span> says. The default is <code>uBITX_Logbook.adi</code> in your <b>Documents</b> folder. It goes in your home folder instead if there's no Documents folder, or if a logbook from an earlier version is already there. <span class="ui">Setup → Logbook &amp; more</span> and <span class="ui">About…</span> show where yours is.</li>
-  <li><b>The radio's own settings</b> (calibration, CW, and so on). They live in the radio's EEPROM. Back them up with <span class="ui">Setup → Logbook &amp; more → Backup and restore…</span></li>
+  <li><b>Your logbook.</b> It goes where <span class="ui">Setup → Logbook &amp; more</span> says. The default is <code>uBITX_Logbook.adi</code> in your <b>Documents</b> folder. It goes in your home folder instead if there's no Documents folder.</li>
+  <li><b>The radio's own settings</b> (calibration, CW, and so on). They live in the radio's EEPROM. Back them up with <span class="ui">Setup → Logbook &amp; more → Backup and restore…</span>. Although less convenient, you can also use the <a href="https://github.com/AJ6CU/uBITX-Settings-Editor" target="_blank">uBITX-Settings_Editor</a> to backup and restore your radio configuration.</li>
 </ul>
 <p>To back up your station, or move it to another computer, copy the whole folder. To start afresh, quit the app and delete the folder (or just <code>settings.json</code>). The app makes new files with its defaults next time it starts.</p>
 
