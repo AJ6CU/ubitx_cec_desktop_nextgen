@@ -5738,12 +5738,14 @@ class UbitxCecDesktop(sCTk):
         sCTkLabelTertiary(body, text="a visual desktop for KD8CEC-powered uBITX radios").pack(anchor="w", pady=(0, 10))
 
         for label, value in (
-            ("Version", "1.0  ·  June 2026"),
+            # FIX (2026-11-18): the real version and the real logbook, not
+            # fixed strings ("1.0 · June 2026", "~/Downloads/ubitx_Logbook.adi").
+            ("Version", f"{gv.APPVERSION}  ·  {gv.APPDATE}"),
             ("Author", "Mark Hatch (AJ6CU)"),
             ("Email", "markjhatch@gmail.com"),
             ("Radio firmware", self.model.firmware),
             ("Configuration", shown_path(gv.config.configuration_file)),
-            ("Logbook", "~/Downloads/ubitx_Logbook.adi"),
+            ("Logbook", shown_path(self._logbook_path())),
             ("Licence", "GPL v3"),
         ):
             line = sCTkFrame(body, fg_color="transparent", border_width=0)
