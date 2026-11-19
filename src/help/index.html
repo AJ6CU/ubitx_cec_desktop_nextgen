@@ -568,9 +568,12 @@ bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
     Press <b>APPLY</b>. The status line should say it's listening.</li>
   <li><b>Decoded CW over UDP:</b> on, <b>Send to</b> <code>127.0.0.1</code>, <b>Port</b> <code>9998</code>. That's the <span class="ui">CW port</span> uBITX CEC Desktop's Setup → SDR fills in for Brown. Text is sent only in CW, while Brown's CW panel is decoding.</li>
 </ul>
-<p><b>The window.</b> Brown can take its parts out of the main window. In <span class="ui">Settings → UI</span>, under <i>Undocked — modules in their own windows</i>, set the <b>Controls</b> (the top strip of frequency, S-meter and receiver controls) and the <b>Operating panel</b> to <b>Undocked — its own window</b>. The <b>🪟 WINDOWS</b> chip at the right of the radio-tab strip does the same.</p>
+<!-- FIX (2026-11-19): undock the panadapter -- one step (Mark) -->
+<p><b>The window.</b> Brown can take any of its parts out of the main window. The simplest way to get a waterfall to put under uBITX CEC Desktop is to undock the <b>Panadapter</b>, the spectrum and waterfall. In <span class="ui">Settings → UI</span>, under <i>Undocked — modules in their own windows</i>, set <b>Panadapter</b> to <b>Undocked — its own window</b>. Or use the <b>🪟 WINDOWS</b> chip at the right of the radio-tab strip, and set <b>SP1 — the spectrum</b> to <b>IN ITS OWN WINDOW</b>.</p>
 <ul>
-  <li><b>What's left:</b> the main window is just the spectrum and waterfall. Place it under uBITX CEC Desktop, and put the undocked windows on another screen or out of the way.</li>
+  <li><b>What you get:</b> a window that is just the spectrum and waterfall. Size it to sit under uBITX CEC Desktop.</li>
+  <li><b>The main window</b> keeps Brown's controls and decoders. Put it on another screen or out of the way: the waterfall keeps running without it in view. When Brown starts, its main window comes up in front of the undocked one, so move it back each time.</li>
+  <li><b>The other way round:</b> undock the <b>Controls</b> (the top strip of frequency, S-meter and receiver controls) and the <b>Operating panel</b> instead. The main window then becomes the spectrum and the decoders.</li>
   <li><b>Getting a part back:</b> closing an undocked window docks it again, and <b>DOCK ALL WINDOWS</b> brings everything back.</li>
   <li><b>Next time:</b> Brown remembers the arrangement.</li>
 </ul>
@@ -599,7 +602,7 @@ bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
 </ul>
 <p><b>The band plan and the first start:</b> as with Brown, set the <b>IARU region</b> on the <span class="ui">General</span> tab to your own, and work through or skip the <b>WELCOME</b> pages.</p>
 <p><b>On a Raspberry Pi 5:</b> as with Brown, set the CW skimmer to <b>Timing</b>, not Neural.</p>
-<p><b>The window.</b> As with Brown: in <span class="ui">Settings → UI</span>, under <i>Undocked windows, the floating panel and workspaces</i>, undock the <b>Controls</b> and the <b>Operating panel</b>, or use <b>UNDOCK ALL WINDOWS</b> and dock back the spectrum.</p>
+<p><b>The window.</b> As with Brown: in <span class="ui">Settings → UI</span>, under <i>Undocked windows, the floating panel and workspaces</i>, set the <b>Panadapter</b> to its own window, and place it under uBITX CEC Desktop. Or undock the <b>Controls</b> and the <b>Operating panel</b> instead, and keep the spectrum in the main window.</p>
 <div class="note"><b>Two SDRoxides on a Mac.</b> SDRoxide and SDRoxide Brown install under the same name, so only one of them can sit in Applications under it. Point <span class="ui">SDR settings…</span> at the copy you mean.</div>
 
 <!-- ---------------------------------------------------------------- -->
