@@ -965,6 +965,16 @@ testing by hand may be version-dependent rather than protocol-dependent.
 <a name="the-application"></a>
 ### The application — bugs worth fixing in the current code
 
+**Test on a Raspberry Pi 4, 4 GB (Mark, 2026-11-19).** *Open.* The Pi 5 notes
+(Field-laptop floor, 2026-11-12) call the Pi 5 the minimum, but what made the
+Pi 5 struggle was Brown's CW skimmer on **Neural** (about two of its four
+cores); on **Timing**, or with the skimmers off, Brown was 25-57 % of one
+core. So a Pi 4 may well be enough. Try Brown (CW skimmer on Timing, then
+off), Gqrx and SDR++ on a 4 GB Pi 4 with uBITX CEC Desktop: processor use,
+dropped samples, the waterfall's frame rate, the window's responsiveness. Then
+correct the help's "On a Raspberry Pi" note (it now says a Pi 4 is untested)
+and the Pi 5 notes below.
+
 **RIT and a VFO that moves to transmit, in split (Mark, 2026-11-19).**
 *Known difference, left as is.* RIT here tunes the receive VFO itself
 (RadioModel.rit_offset is the VFO minus rit_base_hz; role_frequency keeps
@@ -2375,7 +2385,7 @@ install on Trixie (glibc 2.41, Qt 6.8, FFmpeg 7.1); its 24.04 builds want
 FFmpeg 6 and are amd64. Only an Ubuntu 25.04 arm64 build would match, and
 none was found. For the help page: on a Pi, SDRangel means building from
 source -- use Gqrx.
-The Pi 5 is the minimum Pi
+The Pi 5 is the minimum Pi (but see "Test on a Raspberry Pi 4" above: the Neural CW skimmer was the load)
 -- a Pi 4's processor and graphics are much slower, and the Pi 5 already
 needed its display turned down. Memory is not the limit: Brown, the app
 and the desktop used about 1.25 GB of 16, so a 4 GB Pi 5 runs it the
