@@ -638,6 +638,8 @@ bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
 echo "blacklist dvb_usb_rtl28xxu" | sudo tee /etc/modprobe.d/blacklist-rtl.conf</code></pre>
 then restart the Pi.</li>
 </ul>
+<!-- FIX (2026-11-19): each SDR's own band labels (Mark) -->
+<p><b>The band plan.</b> SDR++ labels the bands along the waterfall from a band plan you choose in the <b>Band Plan</b> section of its side menu. It starts on <i>General</i> (worldwide). Choose your country's plan instead: USA, Canada, United Kingdom, Australia and others are there. The labels are only labels: they don't tune, change the mode or stop anything.</p>
 <p><b>The window.</b> The menu button at the top left hides the side menu and leaves the spectrum and waterfall. Size the window to sit under uBITX CEC Desktop.</p>
 
 <!-- ---------------------------------------------------------------- -->
@@ -672,6 +674,7 @@ then restart the Pi.</li>
   <li><b>Starting afresh:</b> <code>gqrx -r</code> resets Gqrx's settings.</li>
 </ul>
 <p><b>On a Raspberry Pi 5</b>, Gqrx is the lightest choice, at about a third of one core. uBITX CEC Desktop gets more from it than from SDR++, so it's the one to use on a Pi when Brown is too heavy.</p>
+<p><b>The band plan.</b> Gqrx can label the bands across the spectrum: tick <b>Band Plan</b> (<i>Show band plan overlay</i>) in its FFT settings panel. It's off as Gqrx comes. Its plan is the US amateur bands, kept in <code>bandplan.csv</code> in Gqrx's settings folder (<code>~/.config/gqrx/</code> on Linux). Outside the US, edit that file to match your own bands. The labels don't tune or change the mode.</p>
 <p><b>The window.</b> Gqrx's panels (receiver options, input controls, FFT settings, audio) are docks. Close the ones you don't need, or drag them out of the window, and leave the spectrum and waterfall. The <span class="ui">View</span> menu brings them back.</p>
 
 <!-- ---------------------------------------------------------------- -->
@@ -700,6 +703,7 @@ then restart the Pi.</li>
   <li><b>The Morse Decoder feature</b>, for decoded CW. uBITX CEC Desktop points it at the WDSP receiver and turns on its output when you turn decoding on.</li>
   <li><b>Save it.</b> SDRangel keeps its setup when it closes normally. Saving it as a configuration in SDRangel also lets you get it back after a crash.</li>
 </ol>
+<p><b>The band plan.</b> SDRangel has no band plan of its own. If you want the bands marked, its spectrum's <b>annotation markers</b> can do it: add them by hand, or import a <code>.csv</code> list, in the spectrum's markers dialog.</p>
 <p><b>On a Raspberry Pi:</b> there's no SDRangel that installs on Raspberry Pi OS (Trixie). Debian doesn't have it, and SDRangel's own arm64 package is built for a newer Ubuntu. It means building from source, so use Gqrx on a Pi instead.</p>
 <p><b>The window.</b> SDRangel's channels and features open as small windows inside its main window. Roll up the ones you don't need to watch, the Channel Power and the Morse Decoder, with the arrow on their title bars. Keep the device's spectrum and waterfall in view under uBITX CEC Desktop.</p>
 
