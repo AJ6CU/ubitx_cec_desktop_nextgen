@@ -380,7 +380,9 @@ avrdude -c arduino -p m328p -P /dev/ttyUSB0 -b 115200 -D -U flash:w:KD8CEC_1.20_
   <li>Double-click the zip to unpack it, then double-click <b>Install uBITX CEC Desktop.command</b>.</li>
   <li>The first time, macOS refuses to open it (<i>"Apple could not verify…"</i>) because the script isn't signed. Click <b>Done</b>, open <b>System Settings → Privacy &amp; Security</b>, scroll down to <b>Security</b>, click <b>Open Anyway</b> next to the installer, confirm, and double-click the installer again.<br>
   Or: open Terminal, type <code>zsh</code> and a space, drag the <code>.command</code> file into the window, and press Return.</li>
-  <li>Start the app from <b>Applications</b> (the one in your home folder), Launchpad or Spotlight: <b>uBITX CEC Desktop</b>. It opens without a warning, because the installer made it on your Mac.</li>
+  <li>Start the app from <b>Applications</b> (the one in your home folder), Launchpad or Spotlight: <b>uBITX CEC Desktop</b>. It opens without a warning, because the installer made it on your Mac.<br>
+  <!-- FIX (2026-11-18): many Mac users have never opened the Applications folder in their home folder -->
+  This <b>Applications</b> folder is not the main one most apps go into, but the one inside your home folder. To find it, in Finder choose <b>Go → Home</b> (<kbd>⇧⌘H</kbd>) and open <b>Applications</b>, or choose <b>Go → Go to Folder…</b> and type <code>~/Applications</code>. The easiest way is Spotlight: press <kbd>⌘</kbd>-<kbd>Space</kbd>, type <b>uBITX</b>, and press Return. To keep it handy: once it's running, right-click its icon in the Dock and choose <b>Options → Keep in Dock</b>.</li>
 </ol>
 
 <h4>Linux and Raspberry Pi OS</h4>
@@ -403,7 +405,34 @@ bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
   <li><b>macOS:</b> <b>Uninstall uBITX CEC Desktop.command</b></li>
   <li><b>Linux:</b> <code>bash uninstall.sh</code></li>
 </ul>
-<p>Your <b>settings and logbook are kept</b> in a folder called <code>.ubitx_cec_desktop</code> in your home folder (<code>%USERPROFILE%\.ubitx_cec_desktop</code> on Windows), so a later install picks them up again. To remove them too, delete that folder yourself.</p>
+<p>Removing the app <b>keeps your settings and your logbook</b>, so a later install picks them up again. See <a href="#your-files">Where your settings are kept</a> to remove those too.</p>
+
+<!-- FIX (2026-11-18): where the app keeps its files on each platform, and what each one holds -->
+<h4 id="your-files">Where your settings are kept</h4>
+<p>The app keeps everything of its own in one folder, <code>.ubitx_cec_desktop</code>, in your home folder:</p>
+<table>
+  <tr><th>Computer</th><th>Folder</th><th>How to open it</th></tr>
+  <tr><td>Windows</td><td><code>C:\Users\<i>you</i>\.ubitx_cec_desktop</code></td><td>In File Explorer, type <code>%USERPROFILE%\.ubitx_cec_desktop</code> in the address bar.</td></tr>
+  <tr><td>macOS</td><td><code>/Users/<i>you</i>/.ubitx_cec_desktop</code></td><td>Hidden, because its name starts with a dot. In Finder, choose <b>Go → Go to Folder…</b> and type <code>~/.ubitx_cec_desktop</code>. In your home folder, <kbd>⇧⌘.</kbd> shows hidden folders.</td></tr>
+  <tr><td>Linux, Raspberry Pi OS</td><td><code>/home/<i>you</i>/.ubitx_cec_desktop</code></td><td>Hidden, because its name starts with a dot. In the file manager, <kbd>Ctrl</kbd>+<kbd>H</kbd> shows hidden folders.</td></tr>
+</table>
+<p>What's in it. All of them are text files (JSON), made as they're needed, so a new installation has only some of them:</p>
+<table>
+  <tr><th>File</th><th>What it holds</th></tr>
+  <tr><td><code>settings.json</code></td><td>Everything you set in <span class="ui">Setup</span>: the radio's port and speed, the SDR program and its connection, your callsign and the app's appearance, the logbook's settings, and the machine settings.</td></tr>
+  <tr><td><code>channels.json</code></td><td>Your channel sets (<a href="#channels">Channels</a>).</td></tr>
+  <tr><td><code>channels.json.bak</code></td><td>The channel sets as they were before this session's first change. See <i>Undoing a session's edits</i> under Channels.</td></tr>
+  <tr><td><code>geometry.json</code></td><td>The window's size and position.</td></tr>
+  <tr><td><code>screen_fit.json</code></td><td>How much the window is scaled to fit, remembered for each screen size and display scale.</td></tr>
+  <tr><td><code>pinned_aids.json</code></td><td>The listening-aid pop-ups you left pinned, and where.</td></tr>
+  <tr><td><code>sdr_programs.json</code>, <code>sdr_controls.json</code></td><td>Only if you add your own: your descriptions of SDR programs and their controls, merged over the ones that come with the app.</td></tr>
+</table>
+<p><b>Not in this folder:</b></p>
+<ul>
+  <li><b>Your logbook.</b> It goes where <span class="ui">Setup → Logbook &amp; more</span> says. The default is <code>uBITX_Logbook.adi</code> in your home folder.</li>
+  <li><b>The radio's own settings</b> (calibration, CW, and so on). They live in the radio's EEPROM. Back them up with <span class="ui">Setup → Logbook &amp; more → Backup and restore…</span></li>
+</ul>
+<p>To back up your station, or move it to another computer, copy the whole folder. To start afresh, quit the app and delete the folder (or just <code>settings.json</code>). The app makes new files with its defaults next time it starts.</p>
 
 <h4>If the app doesn't start</h4>
 <ul>
@@ -633,7 +662,7 @@ bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
   <tr><td><span class="ui">About…</span></td><td>Versions, including the firmware the radio reported, and where the settings are kept.</td></tr>
 </table>
 
-<p>Everything the app keeps is in one folder, <code>~/.ubitx_cec_desktop/</code>: settings, channel sets, window position, pinned pop-ups, and your own SDR program and control descriptions.</p>
+<p>Everything the app keeps is in one folder, <code>~/.ubitx_cec_desktop/</code>: settings, channel sets, window position, pinned pop-ups, and your own SDR program and control descriptions. See <a href="#your-files">Where your settings are kept</a> for each file and where the folder is on each platform.</p>
 
 <!-- ============================================================== -->
 <h2 id="trouble">7. When things go wrong</h2>
