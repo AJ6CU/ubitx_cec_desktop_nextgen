@@ -48,6 +48,10 @@
   table { border-collapse: collapse; width: 100%; max-width: 820px; margin: 10px 0 18px; font-size: 15px; }
   th, td { border: 1px solid var(--line); padding: 7px 10px; text-align: left; vertical-align: top; }
   th { background: var(--accent-soft); }
+  /* FIX (2026-11-18): the SDR programs' controls, as a grid: ticks centred */
+  table.matrix td:not(:first-child), table.matrix th:not(:first-child) { text-align: center; }
+  table.matrix .yes { color: var(--accent); font-weight: 600; }
+  table.matrix .no { color: var(--muted, #888); }
   .note, .todo { border-left: 4px solid var(--accent); background: var(--accent-soft);
                  padding: 10px 14px; border-radius: 0 8px 8px 0; margin: 14px 0; max-width: 78ch; }
   .todo { border-color: var(--warn-line); background: var(--warn-bg); }
@@ -510,14 +514,42 @@ bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
 <h4>In the SDR program</h4>
 <table>
   <tr><th>Program</th><th>How the app talks to it</th><th>What to turn on</th></tr>
-  <tr><td><b>SDRoxide Brown</b> (recommended)</td><td>Hamlib (rigctl), port 4532</td><td>Settings ▸ Servers: the Hamlib server. For CW decoding in the app, also <b>Decoded CW over UDP</b> (port 9998). Brown gives the most: VFO A/B, split, RIT, NB/NR/notch, APF, squelch, AGC, RF gain, the span.</td></tr>
+  <tr><td><b>SDRoxide Brown</b> (recommended)</td><td>Hamlib (rigctl), port 4532</td><td>Settings ▸ Servers: the Hamlib server. For CW decoding in the app, also <b>Decoded CW over UDP</b> (port 9998). Brown gives the most; see the table below.</td></tr>
   <tr><td><b>SDRoxide</b> (1.6.11 or later)</td><td>Hamlib (rigctl), port 4532</td><td>Settings ▸ Servers: the Hamlib server; Decoded CW over UDP on port 9999.</td></tr>
   <tr><td><b>SDR++</b></td><td>Hamlib (rigctl), port 4532</td><td>The <b>Rigctl Server</b> module, started. SDR++ gives no signal reading, so the S-meter stays empty.</td></tr>
   <tr><td><b>Gqrx</b></td><td>Remote control, port 7356</td><td>Tools ▸ Remote control.</td></tr>
   <tr><td><b>SDRangel</b></td><td>REST API, port 8091</td><td>A device set with the RTL-SDR; the <b>WDSP receiver</b> as its <i>first</i> channel; a <b>Channel Power</b> channel for the S-meter; the <b>Morse Decoder</b> feature for CW. Save the setup in SDRangel.</td></tr>
 </table>
 
-<div class="note"><b>SDRoxide and SDRoxide Brown on a Mac</b> install under the same name, so only one of them can sit in Applications under it. Point <span class="ui">SDR settings…</span> at the copy you mean.</div>
+<!-- FIX (2026-11-18): what each program lets the app control, as a grid (Mark) -->
+<h4 id="sdr-controls">What each program lets you control</h4>
+<p>What the app can do in each SDR program, through the connection above. <span class="yes">✓</span> means yes, – means no, and ? means not yet checked. After <span class="ui">Connect</span>, the line under the SDR group lists what your copy actually allows. A control the program doesn't offer is greyed in the app.</p>
+<table class="matrix">
+  <tr><th></th><th>SDRoxide Brown</th><th>SDRoxide</th><th>SDR++</th><th>Gqrx</th><th>SDRangel</th></tr>
+  <tr><td>Frequency and mode</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td></tr>
+  <tr><td>Filter width (wide / narrow / reset)</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td></tr>
+  <tr><td>Signal reading (S-meter)</td><td class="yes">✓</td><td class="yes">✓</td><td class="no">–</td><td class="yes">✓</td><td class="yes">✓</td></tr>
+  <tr><td>Volume</td><td class="yes">✓</td><td class="yes">✓</td><td class="no">–</td><td class="yes">✓</td><td class="yes">✓</td></tr>
+  <tr><td>Mute</td><td class="yes">✓</td><td class="yes">✓</td><td class="no">–</td><td>?</td><td class="yes">✓</td></tr>
+  <tr><td>Squelch</td><td class="yes">✓</td><td class="yes">✓</td><td class="no">–</td><td class="yes">✓</td><td class="yes">✓</td></tr>
+  <tr><td>AGC</td><td class="yes">✓</td><td class="yes">✓</td><td class="no">–</td><td class="no">–</td><td class="yes">✓</td></tr>
+  <tr><td>Noise reduction (NR)</td><td class="yes">✓</td><td class="yes">✓</td><td class="no">–</td><td class="no">–</td><td class="yes">✓</td></tr>
+  <tr><td>Noise blanker (NB)</td><td class="yes">✓</td><td class="yes">✓</td><td class="no">–</td><td class="no">–</td><td class="yes">✓</td></tr>
+  <tr><td>Notch</td><td class="yes">✓</td><td class="yes">✓</td><td class="no">–</td><td class="no">–</td><td class="yes">✓</td></tr>
+  <tr><td>CW peak filter (APF)</td><td class="yes">✓</td><td class="no">–</td><td class="no">–</td><td class="no">–</td><td class="yes">✓</td></tr>
+  <tr><td>RF gain</td><td class="yes">✓</td><td class="yes">✓</td><td class="no">–</td><td>?</td><td class="yes">✓</td></tr>
+  <tr><td>Span (the width of the spectrum)</td><td class="yes">✓</td><td class="no">–</td><td class="no">–</td><td class="no">–</td><td class="yes">✓</td></tr>
+  <tr><td>Decoded CW text</td><td class="yes">✓</td><td class="yes">✓</td><td class="no">–</td><td class="no">–</td><td class="yes">✓</td></tr>
+  <tr><td>RIT</td><td class="yes">✓</td><td class="yes">✓</td><td class="no">–</td><td class="no">–</td><td class="no">–</td></tr>
+  <tr><td>VFO A/B and split</td><td class="yes">✓</td><td class="yes">✓</td><td class="no">–</td><td class="no">–</td><td class="no">–</td></tr>
+</table>
+<ul>
+  <li><b>SDRoxide:</b> the CW peak filter and the span are SDRoxide Brown's for now. SDRoxide may add them later.</li>
+  <li><b>SDRangel:</b> with the <b>WDSP receiver</b> as the first channel. Its S-meter needs a <b>Channel Power</b> channel, and decoded CW its <b>Morse Decoder</b> feature. SDRangel uses its own RIT for CW, so the app's RIT isn't offered.</li>
+  <li><b>SDR++</b> gives frequency, mode and filter only, so the S-meter stays empty.</li>
+</ul>
+
+<div class="note"><b>Two SDRoxides on a Mac.</b> SDRoxide and SDRoxide Brown install under the same name, so only one of them can sit in Applications under it. Point <span class="ui">SDR settings…</span> at the copy you mean.</div>
 
 <div class="todo"><b>To fill in:</b> screenshots of each program's server setting, and a step-by-step SDRangel setup.</div>
 
