@@ -105,7 +105,7 @@
         <li><a href="#firmware">Installing KD8CEC 1.2</a></li>
         <li><a href="#usb-ttl">The USB-to-TTL adapter</a></li>
         <li><a href="#tr-switch">Protecting the SDR</a></li>
-        <li><a href="#install">Installing the app</a></li>
+        <li><a href="#install">Installing uBITX CEC Desktop</a></li>
         <li><a href="#first-start">First start</a></li>
         <li><a href="#sdr-setup">Setting up an SDR</a></li>
       </ol></li>
@@ -149,7 +149,7 @@
 <ul>
   <li><b>A uBITX</b> (any version) running <b>KD8CEC firmware 1.2, the Nextion build with Baud set at 57600 (not the default 9600)</b>. See <a href="#firmware">Installing KD8CEC 1.2 (57600 baud)</a>.</li>
   <li><b>A USB-to-TTL serial adapter</b>, wired to the radio where a Nextion display would plug in. See <a href="#usb-ttl">The USB-to-TTL adapter</a>.</li>
-  <li><b>A computer</b> running macOS, Windows or Linux (a Raspberry Pi works too), with Python 3.10 or newer. See <a href="#install">Installing the app</a>.</li>
+  <li><b>A computer</b> running macOS, Windows or Linux (a Raspberry Pi works too), with Python 3.10 or newer. See <a href="#install">Installing uBITX CEC Desktop</a>.</li>
   <li><b>An SDR</b> (RTL-SDR v3,v4,v4L, for example) with one of these programs: SDRoxide Brown, SDRoxide, SDR++, Gqrx or SDRangel.</li>
     <li><b>With an SDR on the same antenna: a transmit/receive (T/R) antenna switch. This is required, not optional.</b> Without one, the uBITX's transmit power goes straight into the SDR and burns out its input the first time you transmit. A switch such as <a href="https://www.amazon.com/Antenna-Sharer-Transceiver-Switch-Device/dp/B0FFM8M41H" target="_blank"> this one</a> connects the SDR to the antenna while you receive and disconnects it while the uBITX transmits. See <a href="#tr-switch">Protecting the SDR</a>.</li>
 </ul>
@@ -161,19 +161,19 @@
 
 <h3 id="firmware">Installing KD8CEC 1.2 (57600 baud)</h3>
 
-<p>KD8CEC's firmware 1.2 (it reports itself as <code>+v1.200</code>) replaces the uBITX's original Raduino software. It must be the build for a <b>Nextion display at 57600 baud</b>: that's the protocol the app speaks. The source is in KD8CEC's repository, <code>github.com/phdlee/ubitx</code>, and his notes are on <code>hamskey.com</code>. <i>The original ready made KD8CEC binaries will not be useable, see notes below.</i></i></p>
+<p>KD8CEC's firmware 1.2 (it reports itself as <code>+v1.200</code>) replaces the uBITX's original Raduino software. It must be the build for a <b>Nextion display at 57600 baud</b>: that's the protocol uBITX CEC Desktop speaks. The source is in KD8CEC's repository, <code>github.com/phdlee/ubitx</code>, and his notes are on <code>hamskey.com</code>. <i>The original ready made KD8CEC binaries will not be useable, see notes below.</i></i></p>
 
 <div class="todo"><b>Before you flash: back up.</b> Your radio's calibration (master cal and BFO) lives in its EEPROM. You can also use the <a href="https://github.com/AJ6CU/uBITX-Settings-Editor" target="_blank">uBITX-Settings_Editor</a> to backup your configuration to a file that you can later restore. Alternatively, you can record the values on paper an restore them lated. </div>
 
-<div class="note"><b>The app talks to the radio at 57600 baud.</b> KD8CEC's own 1.2 files run the Nextion line at 9600. The files below are KD8CEC 1.2 with that line at 57600, the app's speed. You <b> must </b> install this update.</div>
+<div class="note"><b>uBITX CEC Desktop talks to the radio at 57600 baud.</b> KD8CEC's own 1.2 files run the Nextion line at 9600. The files below are KD8CEC 1.2 with that line at 57600, uBITX CEC Desktop's speed. You <b> must </b> install this update.</div>
 
 <h4>Option A: a ready-built file</h4>
-<p>Download the file for your uBITX from the app's <b>Releases</b> page on <a href="https://github.com/AJ6CU/ubitx_cec_desktop_nextgen/tree/main/firmware" target="_blank">GitHub</a> </p>
+<p>Download the file for your uBITX from uBITX CEC Desktop's <b>Releases</b> page on <a href="https://github.com/AJ6CU/ubitx_cec_desktop_nextgen/tree/main/firmware" target="_blank">GitHub</a> </p>
 <ul>
   <li><b>uBITX V3 or V4:</b> <code>KD8CEC_1.20_Nextion_57600_uBITX_V3_V4.hex</code></li>
   <li><b>uBITX V5 or V6:</b> <code>KD8CEC_1.20_Nextion_57600_uBITX_V5_V6.hex</code></li>
 </ul>
-<p>Then upload it to the Raduino's Arduino Nano with <code>avrdude</code>, the program the Arduino IDE itself uses. Connect a USB cable to the <b>Nano's own USB port</b> (not the USB-to-TTL adapter), close the app and anything else that might hold the port, and follow the steps for your computer.</p>
+<p>Then upload it to the Raduino's Arduino Nano with <code>avrdude</code>, the program the Arduino IDE itself uses. Connect a USB cable to the <b>Nano's own USB port</b> (not the USB-to-TTL adapter), close uBITX CEC Desktop and anything else that might hold the port, and follow the steps for your computer.</p>
 
 <div class="note"><b>The upload speed depends on the Nano's bootloader.</b> Most Nanos sold since 2018 have the <b>new bootloader</b> and take <code>-b 115200</code>. Older ones, and many clones, have the <b>old bootloader</b> and take <code>-b 57600</code>. Try 115200 first; if avrdude says <i>not in sync</i> or <i>programmer is not responding</i>, run the same command again with <code>-b 57600</code>. Neither speed can harm the Nano.</div>
 
@@ -220,7 +220,7 @@ avrdude -c arduino -p m328p -P /dev/ttyUSB0 -b 115200 -D -U flash:w:KD8CEC_1.20_
     <ul>
       <li>make sure <code>#define UBITX_DISPLAY_NEXTION</code> is the one display line not commented out;</li>
       <li>set <code>UBITX_BOARD_VERSION</code> for your radio: <b>4</b> for a uBITX V3 or V4, <b>5</b> for a V5 or V6;</li>
-      <li>comment out <code>#define USE_I2CSMETER</code> (line 42): put <code>//</code> in front of it. That line is for an extra S-meter Nano on the I2C bus, which the app doesn't use; without it the firmware reads the radio's own S-meter sensor;</li>
+      <li>comment out <code>#define USE_I2CSMETER</code> (line 42): put <code>//</code> in front of it. That line is for an extra S-meter Nano on the I2C bus, which uBITX CEC Desktop doesn't use; without it the firmware reads the radio's own S-meter sensor;</li>
       <li><b>switch the feature list to the Nextion one.</b> Comment out the "Enable all features" list (lines 62–83 of the unchanged file, from <code>#define FN_BAND</code> thru <code>#define FN_TXONOFF</code>): put <code>/*</code> on a new line before it and <code>*/</code> on a new line after it. Then turn on the "Recommended for Nextion, TJC LCD" list further down: delete the <code>/*</code> on the line above <code>//Recommended for Nextion, TJC LCD 88%</code>, and the <code>*/</code> after its last line, <code>#define FN_TXONOFF 1 //70</code>. (In the unchanged file those are lines 137 and 161; after adding the two lines above, 139 and 163.) With every feature on, the firmware is too big for the Nano's memory and the upload fails.</li>
     </ul>
 <figure class="missing">
@@ -239,7 +239,7 @@ avrdude -c arduino -p m328p -P /dev/ttyUSB0 -b 115200 -D -U flash:w:KD8CEC_1.20_
   <figcaption>The &ldquo;Recommended for Nextion, TJC LCD&rdquo; list, with its <code>/*</code> and <code>*/</code> removed.</figcaption>
 </figure>
   </li>
-  <li>In <code>ubitx_lcd_nextion.ino</code>, change <code>SWSerial_Begin(9600);</code> to <code>SWSerial_Begin(57600);</code>, the speed the app uses.
+  <li>In <code>ubitx_lcd_nextion.ino</code>, change <code>SWSerial_Begin(9600);</code> to <code>SWSerial_Begin(57600);</code>, the speed uBITX CEC Desktop uses.
 <figure class="missing">
   <img src="images/nextion_baud_change.jpg" alt="ubitx_lcd_nextion.ino: SWSerial_Begin(9600) to be changed to 57600" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
   <div class="ph">Screenshot to come: the Nextion speed in ubitx_lcd_nextion.ino.</div>
@@ -262,7 +262,7 @@ avrdude -c arduino -p m328p -P /dev/ttyUSB0 -b 115200 -D -U flash:w:KD8CEC_1.20_
 
 <h3 id="usb-ttl">The USB-to-TTL adapter</h3>
 
-<p>The app connects to the Nextion wiring harness thru an USB-to-TTL serial adapter.  Dont try to use the Nano's own USB port; that one is for flashing firmware!</p>
+<p>uBITX CEC Desktop connects to the Nextion wiring harness thru an USB-to-TTL serial adapter.  Dont try to use the Nano's own USB port; that one is for flashing firmware!</p>
     <p>I have used two types of these adapters, both of which are readily available on Amazon and Ali-Express. The FT232RL is based on the FTDI chip. It is the less expensive option and the one I used throughout my development. However, I have recently seen some saw some cautions in regards to this adapter. Apparently, there are many clones of this chip &#8212; some of which are worse than others &#8212; and the poorer made tend to be more noisy.  Subsequently, I started using the CP2102 USB to TTL. They are about 4x the cost, ~$12 USD per board vs $2.50 USD for the FT232 variant. I have not really been able to tell the difference yet, but I keep looking hoping to justify my purchase...</p>
 
 <p>The easiest approach is to use the Nextion's own cable: unplug it from the display and plug that end into a male JST connector. Its colours are the Nextion's standard ones, and the pictures below use them too:</p>
@@ -323,7 +323,7 @@ avrdude -c arduino -p m328p -P /dev/ttyUSB0 -b 115200 -D -U flash:w:KD8CEC_1.20_
 
 <p>An SDR dongle is a sensitive receiver built for microwatts. A few watts from the uBITX fed straight into it will burn out its input, and that happens the first time you transmit. So if the SDR listens on the same antenna as the radio, a <b>transmit/receive (T/R) antenna switch</b> must sit between them.</p>
 
-<div class="todo"><b>Never connect the SDR to the uBITX's antenna with a plain T-connector or a splitter.</b> The app can't protect the SDR either: the radio tells it that it is transmitting only <em>after</em> it has started. The protection has to be in hardware, ahead of the SDR.</div>
+<div class="todo"><b>Never connect the SDR to the uBITX's antenna with a plain T-connector or a splitter.</b> uBITX CEC Desktop can't protect the SDR either: the radio tells it that it is transmitting only <em>after</em> it has started. The protection has to be in hardware, ahead of the SDR.</div>
 
 <h4>How a T/R switch works</h4>
 <p>The switch has three connections: the <b>antenna</b>, the <b>transceiver</b> (the uBITX) and the <b>receiver</b> (the SDR). While you listen, the SDR is connected to the antenna and hears the band. As soon as the uBITX transmits, the switch cuts the SDR off and the power goes only to the antenna; when you stop, it gives the antenna back to the SDR.</p>
@@ -357,7 +357,7 @@ avrdude -c arduino -p m328p -P /dev/ttyUSB0 -b 115200 -D -U flash:w:KD8CEC_1.20_
 
 <div class="note"><b>An SDR on its own antenna?</b> It needs no switch, but keep its antenna well away from the uBITX's. A few metres apart is a start; the closer they are, the more of your signal reaches the SDR.</div>
 
-<!-- FIX: how to download, install, upgrade and remove the app on each platform (2026-11-18) -->
+<!-- FIX: how to download, install, upgrade and remove uBITX CEC Desktop on each platform (2026-11-18) -->
 <h3 id="install">Installing uBITX CEC Desktop</h3>
 
 <p>Download the file for your computer from the uBITX CEC Desktop releases page on <a href="https://github.com/AJ6CU/ubitx_cec_desktop_nextgen/releases" target="_blank"> GitHub</a>, under <b>Assets</b> of the newest release:</p>
@@ -367,16 +367,16 @@ avrdude -c arduino -p m328p -P /dev/ttyUSB0 -b 115200 -D -U flash:w:KD8CEC_1.20_
   <li><b>Linux and Raspberry Pi OS:</b> <code>uBITX-CEC-Desktop-<i>version</i>-Linux.tar.gz</code></li>
 </ul>
 
-<p>Each holds a folder with the program, an installer, an uninstaller and a READ ME. The app runs on <b>Python 3.10 or newer, with Tk</b>, Python's window toolkit. The installer checks for it, puts the app in a folder of its own with everything it needs, and makes a shortcut. Nothing is installed into Python itself, and no administrator password is needed, except on Linux to add a missing system package, and then only after asking.</p>
+<p>Each holds a folder with the program, an installer, an uninstaller and a READ ME. uBITX CEC Desktop runs on <b>Python 3.10 or newer, with Tk</b>, Python's window toolkit. The installer checks for it, puts uBITX CEC Desktop in a folder of its own with everything it needs, and makes a shortcut. Nothing is installed into Python itself, and no administrator password is needed, except on Linux to add a missing system package, and then only after asking.</p>
 
 <h4>Windows</h4>
 <ol>
   <li>If you don't have Python, install it from <a href="https://www.python.org/downloads/windows/" target="_blank">python.org</a>, version 3.10 or newer. In its installer, keep <b>tcl/tk and IDLE</b> ticked.</li>
   <li>Right-click the downloaded zip and choose <b>Extract All…</b> Double-clicking the installer inside the zip without extracting it does not work.</li>
   <li>In the extracted folder, double-click <b>Install uBITX CEC Desktop.py</b>. Python runs it in a window that shows its progress. If Windows asks which program should open it, choose <b>Python</b>. It doesn't need <i>Run as administrator</i>.</li>
-  <li>Start the app from the <b>Start menu</b> or the <b>Desktop</b> shortcut.</li>
+  <li>Start uBITX CEC Desktop from the <b>Start menu</b> or the <b>Desktop</b> shortcut.</li>
 </ol>
-<div class="note">The installer is a Python file rather than a <code>.bat</code> because Windows 11's Smart App Control blocks unsigned <code>.bat</code> files. The app goes in <code>%LOCALAPPDATA%\uBITX CEC Desktop</code>. Once it's installed, the extracted folder isn't needed.</div>
+<div class="note">The installer is a Python file rather than a <code>.bat</code> because Windows 11's Smart App Control blocks unsigned <code>.bat</code> files. uBITX CEC Desktop goes in <code>%LOCALAPPDATA%\uBITX CEC Desktop</code>. Once it's installed, the extracted folder isn't needed.</div>
 
 <h4>macOS</h4>
 <ol>
@@ -384,7 +384,7 @@ avrdude -c arduino -p m328p -P /dev/ttyUSB0 -b 115200 -D -U flash:w:KD8CEC_1.20_
   <li>Double-click the zip to unpack it, then double-click <b>Install uBITX CEC Desktop.command</b>.</li>
   <li>The first time, macOS refuses to open it (<i>"Apple could not verify…"</i>) because the script isn't signed. Click <b>Done</b>, open <b>System Settings → Privacy &amp; Security</b>, scroll down to <b>Security</b>, click <b>Open Anyway</b> next to the installer, confirm, and double-click the installer again.<br>
   Or: open Terminal, type <code>zsh</code> and a space, drag the <code>.command</code> file into the window, and press Return.</li>
-  <li>Start the app from <b>Applications</b> (the one in your home folder), Launchpad or Spotlight: <b>uBITX CEC Desktop</b>. It opens without a warning, because the installer made it on your Mac.</li>
+  <li>Start uBITX CEC Desktop from <b>Applications</b> (the one in your home folder), Launchpad or Spotlight: <b>uBITX CEC Desktop</b>. It opens without a warning, because the installer made it on your Mac.</li>
       </ol>
   <!-- FIX (2026-11-18): many Mac users have never opened the Applications folder in their home folder -->
  <div class="note"><b>Where to find it.</b> This <b>Applications</b> folder is not the main one most apps go into, but the one inside your home folder. To find it, in Finder choose <b>Go → Home</b> (<kbd>⇧⌘H</kbd>) and open <b>Applications</b>, or choose <b>Go → Go to Folder…</b> and type <code>~/Applications</code>. The easiest way is Spotlight: press <kbd>⌘</kbd>-<kbd>Space</kbd>, type <b>uBITX</b>, and press Return. To keep it handy: once it's running, right-click its icon in the Dock and choose <b>Options → Keep in Dock</b>.</div>
@@ -396,25 +396,25 @@ avrdude -c arduino -p m328p -P /dev/ttyUSB0 -b 115200 -D -U flash:w:KD8CEC_1.20_
 <pre><code>cd ~/Downloads
 tar xzf uBITX-CEC-Desktop-<i>version</i>-Linux.tar.gz
 bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
-  <li>The installer checks for Python's Tk and venv packages (<code>python3-tk</code>, <code>python3-venv</code>), and for your membership of the <code>dialout</code> group, which lets you open the radio's serial port. It offers to add whatever is missing, using <code>sudo</code>. If it adds you to <code>dialout</code>, log out and in again before starting the app.</li>
-  <li>Start the app from the application menu (Internet or Ham Radio), or type <code>ubitx-cec-desktop</code>.</li>
+  <li>The installer checks for Python's Tk and venv packages (<code>python3-tk</code>, <code>python3-venv</code>), and for your membership of the <code>dialout</code> group, which lets you open the radio's serial port. It offers to add whatever is missing, using <code>sudo</code>. If it adds you to <code>dialout</code>, log out and in again before starting uBITX CEC Desktop.</li>
+  <li>Start uBITX CEC Desktop from the application menu (Internet or Ham Radio), or type <code>ubitx-cec-desktop</code>.</li>
 </ol>
 
 <h4>Upgrading</h4>
 <p>Download the new release and run its installer, in the same way as the first time. It replaces the program and keeps your settings.</p>
 
-<h4>Removing the app</h4>
-<p>Run the uninstaller from the same folder as the installer. Close the app first.</p>
+<h4>Removing uBITX CEC Desktop</h4>
+<p>Run the uninstaller from the same folder as the installer. Close uBITX CEC Desktop first.</p>
 <ul>
   <li><b>Windows:</b> <b>Uninstall uBITX CEC Desktop.py</b></li>
   <li><b>macOS:</b> <b>Uninstall uBITX CEC Desktop.command</b></li>
   <li><b>Linux:</b> <code>bash uninstall.sh</code></li>
 </ul>
-    <p>Removing the app <b>keeps your settings and your logbook</b>, so a later install picks them up again. </p>
+    <p>Removing uBITX CEC Desktop <b>keeps your settings and your logbook</b>, so a later install picks them up again. </p>
 
-<!-- FIX (2026-11-18): where the app keeps its files on each platform, and what each one holds -->
+<!-- FIX (2026-11-18): where uBITX CEC Desktop keeps its files on each platform, and what each one holds -->
 <h4 id="your-files">Where your settings are kept</h4>
-<p>The app keeps everything of its own in one folder, <code>.ubitx_cec_desktop</code>, in your home folder:</p>
+<p>uBITX CEC Desktop keeps everything of its own in one folder, <code>.ubitx_cec_desktop</code>, in your home folder:</p>
 <table>
   <tr><th>Computer</th><th>Folder</th><th>How to open it</th></tr>
   <tr><td>Windows</td><td><code>C:\Users\<i>you</i>\.ubitx_cec_desktop</code></td><td>In File Explorer, type <code>%USERPROFILE%\.ubitx_cec_desktop</code> in the address bar.</td></tr>
@@ -424,25 +424,25 @@ bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
 <p>What's in it. All of them are text files (JSON), made as they're needed, so a new installation has only some of them:</p>
 <table>
   <tr><th>File</th><th>What it holds</th></tr>
-  <tr><td><code>settings.json</code></td><td>Everything you set in <span class="ui">Setup</span>: the radio's port and speed, the SDR program and its connection, your callsign and the app's appearance, the logbook's settings, and the machine settings.</td></tr>
+  <tr><td><code>settings.json</code></td><td>Everything you set in <span class="ui">Setup</span>: the radio's port and speed, the SDR program and its connection, your callsign and uBITX CEC Desktop's appearance, the logbook's settings, and the machine settings.</td></tr>
   <tr><td><code>channels.json</code></td><td>Your channel sets (<a href="#channels">Channels</a>).</td></tr>
   <tr><td><code>channels.json.bak</code></td><td>The channel sets as they were before this session's first change. See <i>Undoing a session's edits</i> under Channels.</td></tr>
   <tr><td><code>geometry.json</code></td><td>The window's size and position.</td></tr>
   <tr><td><code>screen_fit.json</code></td><td>How much the window is scaled to fit, remembered for each screen size and display scale.</td></tr>
   <tr><td><code>pinned_aids.json</code></td><td>The listening-aid pop-ups you left pinned, and where.</td></tr>
-  <tr><td><code>sdr_programs.json</code>, <code>sdr_controls.json</code></td><td>Only if you add your own: your descriptions of SDR programs and their controls, merged over the ones that come with the app.</td></tr>
+  <tr><td><code>sdr_programs.json</code>, <code>sdr_controls.json</code></td><td>Only if you add your own: your descriptions of SDR programs and their controls, merged over the ones that come with uBITX CEC Desktop.</td></tr>
 </table>
 <p><b>Not in this folder:</b></p>
 <ul>
   <li><b>Your logbook.</b> It goes where <span class="ui">Setup → Logbook &amp; more</span> says. The default is <code>uBITX_Logbook.adi</code> in your <b>Documents</b> folder. It goes in your home folder instead if there's no Documents folder.</li>
   <li><b>The radio's own settings</b> (calibration, CW, and so on). They live in the radio's EEPROM. Back them up with <span class="ui">Setup → Logbook &amp; more → Backup and restore…</span>. Although less convenient, you can also use the <a href="https://github.com/AJ6CU/uBITX-Settings-Editor" target="_blank">uBITX-Settings_Editor</a> to backup and restore your radio configuration.</li>
 </ul>
-<p>To back up your station, or move it to another computer, copy the whole folder. To start afresh, quit the app and delete the folder (or just <code>settings.json</code>). The app makes new files with its defaults next time it starts.</p>
+<p>To back up your station, or move it to another computer, copy the whole folder. To start afresh, quit uBITX CEC Desktop and delete the folder (or just <code>settings.json</code>). uBITX CEC Desktop makes new files with its defaults next time it starts.</p>
 
-<h4>If the app doesn't start</h4>
+<h4>If uBITX CEC Desktop doesn't start</h4>
 <ul>
   <li><b>Windows:</b> run <b>Start with messages.py</b> in <code>%LOCALAPPDATA%\uBITX CEC Desktop</code>. It shows what went wrong.</li>
-  <li><b>macOS:</b> the app's messages are in <code>~/Library/Logs/uBITX CEC Desktop.log</code>.</li>
+  <li><b>macOS:</b> uBITX CEC Desktop's messages are in <code>~/Library/Logs/uBITX CEC Desktop.log</code>.</li>
   <li><b>Linux:</b> start it from a terminal with <code>ubitx-cec-desktop</code> and read the messages there.</li>
   <li>Running the installer again repairs an installation.</li>
 </ul>
@@ -451,10 +451,10 @@ bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
 <h3 id="first-start">First start</h3>
 <ol>
   <li>Plug in the adapter and switch the radio on.</li>
-  <li>Start the app. With no radio chosen yet, it opens on <span class="ui">Setup → Station &amp; Radio</span>.</li>
+  <li>Start uBITX CEC Desktop. With no radio chosen yet, it opens on <span class="ui">Setup → Station &amp; Radio</span>.</li>
   <li>In the <span class="ui">Radio</span> group, choose the adapter under <span class="ui">Port</span>. Ports are labelled by their chip (FTDI, CH340…). If yours isn't listed, tick <span class="ui">show all</span>, or press <span class="ui">Refresh</span> after plugging it in.</li>
   <!-- FIX (2026-11-18): the speed is shown, not chosen -->
-  <li>Press <span class="ui">Connect</span>. <span class="ui">Speed</span> shows <b>57600 baud</b>, the speed of the KD8CEC build above. It can't be changed: the app's timing is made for 57600, and the Nano's display line can't go faster.</li>
+  <li>Press <span class="ui">Connect</span>. <span class="ui">Speed</span> shows <b>57600 baud</b>, the speed of the KD8CEC build above. It can't be changed: uBITX CEC Desktop's timing is made for 57600, and the Nano's display line can't go faster.</li>
 </ol>
 
 <figure class="missing">
@@ -463,13 +463,13 @@ bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
   <figcaption>Choosing the radio's port.</figcaption>
 </figure>
 
-<p><b>What connecting does.</b> The app restarts the radio, because the radio sends all of its values as it starts up, and that's how the app learns them. It then sets the radio's tuning step to its finest, so a 10 Hz step isn't rounded away. The radio always starts on <b>VFO A</b>.</p>
+<p><b>What connecting does.</b> uBITX CEC Desktop restarts the radio, because the radio sends all of its values as it starts up, and that's how uBITX CEC Desktop learns them. It then sets the radio's tuning step to its finest, so a 10 Hz step isn't rounded away. The radio always starts on <b>VFO A</b>.</p>
 
-<p>If some values don't arrive, the app restarts the radio once or twice more to ask again. A radio that takes a few seconds to boot is waited for; one that never answers is reported as "not answering: is it switched on?".</p>
+<p>If some values don't arrive, uBITX CEC Desktop restarts the radio once or twice more to ask again. A radio that takes a few seconds to boot is waited for; one that never answers is reported as "not answering: is it switched on?".</p>
 
 <h3 id="sdr-setup">Setting up an SDR</h3>
 
-<p>An SDR is optional. With one, the SDR program is the receiver: you hear the band through it and see its waterfall, while the uBITX does the transmitting. The app keeps the SDR on the radio's frequency, mode, filter, RIT and, with SDRoxide Brown, VFO A/B and split.</p>
+<p>An SDR is optional. With one, the SDR program is the receiver: you hear the band through it and see its waterfall, while the uBITX does the transmitting. uBITX CEC Desktop keeps the SDR on the radio's frequency, mode, filter, RIT and, with SDRoxide Brown, VFO A/B and split.</p>
 
 <!-- FIX (2026-11-18): the dongle's driver, per platform, before the SDR program -->
 <h4>Before the SDR program: the dongle's driver</h4>
@@ -483,7 +483,7 @@ bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
       <li>Choose <b>WinUSB</b> as the driver, and press <b>Replace Driver</b> or <b>Install Driver</b>.</li>
     </ol>
     Do it again if you plug the dongle into a different USB port. If the dongle already works in another SDR program, it's done. The dongle no longer works as a TV tuner afterwards.</li>
-  <li><b>macOS: nothing to install.</b> The SDR programs bring their own copy of the driver. SDR++, for example, carries it inside the app. If a program doesn't find an RTL-SDR Blog V4 or V4L, update the program first.</li>
+  <li><b>macOS: nothing to install.</b> The SDR programs bring their own copy of the driver. SDR++, for example, carries it inside its own app. If a program doesn't find an RTL-SDR Blog V4 or V4L, update the program first.</li>
   <li><b>Linux and Raspberry Pi OS: a permission rule.</b>
     <ul>
       <li><b>Access to the dongle:</b> your user needs a udev rule to open it. Your distribution's <code>rtl-sdr</code> package installs one (<code>sudo apt install rtl-sdr</code>), and so does SDRoxide's <code>.deb</code>. Unplug the dongle and plug it in again afterwards.</li>
@@ -495,12 +495,12 @@ bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
   </li>
 </ul>
 
-<h4>In the app</h4>
+<h4>In uBITX CEC Desktop</h4>
 <ol>
   <li><span class="ui">Setup → SDR</span>, <span class="ui">Software</span>: choose your program. <span class="ui">-none-</span> is the default, and with it Connect and the address fields stay greyed.</li>
   <li><span class="ui">Address</span> and <span class="ui">Port</span> fill in with the program's usual ones; change them only if you changed them in the program.</li>
-  <li>Tick <span class="ui">Start it</span> if the app should start the program for you. The app closes a program it started when it quits, and leaves alone one that was already running.</li>
-  <li>Press <span class="ui">Connect</span>. The line under the group lists what the program lets the app control.</li>
+  <li>Tick <span class="ui">Start it</span> if uBITX CEC Desktop should start the program for you. uBITX CEC Desktop closes a program it started when it quits, and leaves alone one that was already running.</li>
+  <li>Press <span class="ui">Connect</span>. The line under the group lists what the program lets uBITX CEC Desktop control.</li>
 </ol>
 
 <figure class="missing">
@@ -509,21 +509,21 @@ bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
   <figcaption>Choosing the SDR program.</figcaption>
 </figure>
 
-<p>If the program isn't where the app expects it, set its location in <span class="ui">SDR settings…</span>; "custom location set" then shows beside Connect.</p>
+<p>If the program isn't where uBITX CEC Desktop expects it, set its location in <span class="ui">SDR settings…</span>; "custom location set" then shows beside Connect.</p>
 
 <h4>In the SDR program</h4>
 <table>
-  <tr><th>Program</th><th>How the app talks to it</th><th>What to turn on</th></tr>
-  <tr><td><b>SDRoxide Brown</b> (recommended)</td><td>Hamlib (rigctl), port 4532</td><td>Settings ▸ Servers: the Hamlib server. For CW decoding in the app, also <b>Decoded CW over UDP</b> (port 9998). Brown gives the most; see the table below.</td></tr>
+  <tr><th>Program</th><th>How uBITX CEC Desktop talks to it</th><th>What to turn on</th></tr>
+  <tr><td><b>SDRoxide Brown</b> (recommended)</td><td>Hamlib (rigctl), port 4532</td><td>Settings ▸ Servers: the Hamlib server. For CW decoding in uBITX CEC Desktop, also <b>Decoded CW over UDP</b> (port 9998). Brown gives the most; see the table below.</td></tr>
   <tr><td><b>SDRoxide</b> (1.6.11 or later)</td><td>Hamlib (rigctl), port 4532</td><td>Settings ▸ Servers: the Hamlib server; Decoded CW over UDP on port 9999.</td></tr>
   <tr><td><b>SDR++</b></td><td>Hamlib (rigctl), port 4532</td><td>The <b>Rigctl Server</b> module, started. SDR++ gives no signal reading, so the S-meter stays empty.</td></tr>
   <tr><td><b>Gqrx</b></td><td>Remote control, port 7356</td><td>Tools ▸ Remote control.</td></tr>
   <tr><td><b>SDRangel</b></td><td>REST API, port 8091</td><td>A device set with the RTL-SDR; the <b>WDSP receiver</b> as its <i>first</i> channel; a <b>Channel Power</b> channel for the S-meter; the <b>Morse Decoder</b> feature for CW. Save the setup in SDRangel.</td></tr>
 </table>
 
-<!-- FIX (2026-11-18): what each program lets the app control, as a grid (Mark) -->
+<!-- FIX (2026-11-18): what each program lets uBITX CEC Desktop control, as a grid (Mark) -->
 <h4 id="sdr-controls">What each program lets you control</h4>
-<p>What the app can do in each SDR program, through the connection above. <span class="yes">✓</span> means yes, – means no, and ? means not yet checked. After <span class="ui">Connect</span>, the line under the SDR group lists what your copy actually allows. A control the program doesn't offer is greyed in the app.</p>
+<p>What uBITX CEC Desktop can do in each SDR program, through the connection above. <span class="yes">✓</span> means yes, – means no, and ? means not yet checked. After <span class="ui">Connect</span>, the line under the SDR group lists what your copy actually allows. A control the program doesn't offer is greyed in uBITX CEC Desktop.</p>
 <table class="matrix">
   <tr><th></th><th>SDRoxide Brown</th><th>SDRoxide</th><th>SDR++</th><th>Gqrx</th><th>SDRangel</th></tr>
   <tr><td>Frequency and mode</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td></tr>
@@ -545,7 +545,7 @@ bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
 </table>
 <ul>
   <li><b>SDRoxide:</b> the CW peak filter and the span are SDRoxide Brown's for now. SDRoxide may add them later.</li>
-  <li><b>SDRangel:</b> with the <b>WDSP receiver</b> as the first channel. Its S-meter needs a <b>Channel Power</b> channel, and decoded CW its <b>Morse Decoder</b> feature. SDRangel uses its own RIT for CW, so the app's RIT isn't offered.</li>
+  <li><b>SDRangel:</b> with the <b>WDSP receiver</b> as the first channel. Its S-meter needs a <b>Channel Power</b> channel, and decoded CW its <b>Morse Decoder</b> feature. SDRangel uses its own RIT for CW, so uBITX CEC Desktop's RIT isn't offered.</li>
   <li><b>SDR++</b> gives frequency, mode and filter only, so the S-meter stays empty.</li>
 </ul>
 
@@ -605,7 +605,7 @@ bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
 <ul>
   <li>RIT off drops the offset, and RIT on always starts at +0.</li>
   <li>Each VFO keeps its own RIT. Switch away and back, and it returns.</li>
-  <li>In split, RIT works on the receive VFO; the app keeps it there itself, because the firmware ignores split on transmit while its own RIT is on. Turning split off hands the RIT back to the radio.</li>
+  <li>In split, RIT works on the receive VFO; uBITX CEC Desktop keeps it there itself, because the firmware ignores split on transmit while its own RIT is on. Turning split off hands the RIT back to the radio.</li>
   <li>In split, each VFO transmits on its receive frequency, RIT offset included.</li>
 </ul>
 
@@ -643,7 +643,7 @@ bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
 <p>Two kinds of channel list, shown the same way:</p>
 <ul>
   <li><b><span class="ui">Radio (20 slots)</span></b> is the radio's own memories, read the first time you open the tab. Change them here, then <span class="ui">Write to radio</span>; <span class="ui">Read from radio</span> reads them again.</li>
-  <li><b>Channel sets</b> are the app's, as many as you like, saved as you edit. The app starts you with three: <b>Time signals</b> (WWV and CHU), <b>CW calling</b> (the QRP CW frequencies) and <b>FT8</b>.</li>
+  <li><b>Channel sets</b> are uBITX CEC Desktop's, as many as you like, saved as you edit. uBITX CEC Desktop starts you with three: <b>Time signals</b> (WWV and CHU), <b>CW calling</b> (the QRP CW frequencies) and <b>FT8</b>.</li>
 </ul>
 
 <h3>Working with channels</h3>
@@ -656,7 +656,7 @@ bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
 <h3>Scanning</h3>
 <p><span class="ui">▶ Scan</span> steps through the set, <span class="ui">seconds on each</span>. With <span class="ui">hold on S</span>[n] ticked, a channel whose signal reaches that S-level is held while it lasts and left 3 seconds after it drops. <span class="ui">⏭ Skip</span> moves on now, held or not. Without a signal reading (SDR++), the scan goes by time only.</p>
 
-<div class="note"><b>Undoing a session's edits.</b> Channel-set edits save at once, with no undo. Before a session's first change the app keeps the file as it was, as <code>channels.json.bak</code> in <code>~/.ubitx_cec_desktop/</code>. To go back: quit the app, copy <code>channels.json.bak</code> over <code>channels.json</code>, and start again.</div>
+<div class="note"><b>Undoing a session's edits.</b> Channel-set edits save at once, with no undo. Before a session's first change uBITX CEC Desktop keeps the file as it was, as <code>channels.json.bak</code> in <code>~/.ubitx_cec_desktop/</code>. To go back: quit uBITX CEC Desktop, copy <code>channels.json.bak</code> over <code>channels.json</code>, and start again.</div>
 
 <!-- ============================================================== -->
 <h2 id="cw">5. CW</h2>
@@ -676,12 +676,12 @@ bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
   <tr><td><span class="ui">Delay to TX (ms)</span>, key down to the first element</td><td>After the radio restarts</td></tr>
   <tr><td><span class="ui">Delay to RX (ms)</span>, the last element back to receive</td><td>After the radio restarts</td></tr>
 </table>
-<p>Type a value and press Return, or click elsewhere. It goes to the radio's memory. A value waiting for a restart says so, and a <span class="ui">Restart rig</span> button appears; the app never restarts the radio on its own. Values are kept as the radio stores them, so 45 wpm may read back as 44.</p>
+<p>Type a value and press Return, or click elsewhere. It goes to the radio's memory. A value waiting for a restart says so, and a <span class="ui">Restart rig</span> button appears; uBITX CEC Desktop never restarts the radio on its own. Values are kept as the radio stores them, so 45 wpm may read back as 44.</p>
 
 <!-- ============================================================== -->
 <h2 id="setup">6. Setup</h2>
 
-<p>Setup has three sub-tabs across its top: <span class="ui">Station &amp; Radio</span>, <span class="ui">SDR</span> and <span class="ui">Logbook &amp; more</span>. When the radio isn't answering, the app opens on <span class="ui">Station &amp; Radio</span>.</p>
+<p>Setup has three sub-tabs across its top: <span class="ui">Station &amp; Radio</span>, <span class="ui">SDR</span> and <span class="ui">Logbook &amp; more</span>. When the radio isn't answering, uBITX CEC Desktop opens on <span class="ui">Station &amp; Radio</span>.</p>
 
 <h3 id="setup-station-radio">Station &amp; Radio</h3>
 <p>The Station and Radio groups side by side. See <a href="#first-start">First start</a> for the radio's port.</p>
@@ -690,7 +690,7 @@ bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
 <ul>
   <li><span class="ui">Callsign</span> is the radio's, from its memory. Change it here and it's written to the radio, shown at start-up after a restart.</li>
   <li><span class="ui">Appearance</span>: dark, light, or following the system (the default). On Linux, where the desktop's setting can't always be read, choose Dark or Light.</li>
-  <li><span class="ui">Keep on top</span> keeps the app's window above other windows, on by default. Without it, clicking the SDR's waterfall brings the SDR's large window to the front and the app disappears behind it.</li>
+  <li><span class="ui">Keep on top</span> keeps uBITX CEC Desktop's window above other windows, on by default. Without it, clicking the SDR's waterfall brings the SDR's large window to the front and uBITX CEC Desktop disappears behind it.</li>
 </ul>
 
 <h4>Radio</h4>
@@ -714,19 +714,19 @@ bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
 <table>
   <tr><th>Button</th><th>What it's for</th></tr>
   <tr><td><span class="ui">EEPROM settings…</span></td><td>Settings kept in the radio's memory: show the callsign at start-up, the S-meter reports switch, and the eight <b>S-meter levels</b> for the radio's S-meter sensor. Levels all at 0 read every signal as about S9; set them if you listen through the radio's sensor.</td></tr>
-  <tr><td><span class="ui">Machine settings…</span></td><td>How the app paces commands to the radio (the command headroom), and, under Advanced, the link's timings, with a reset. Leave these alone unless the radio misses commands.</td></tr>
+  <tr><td><span class="ui">Machine settings…</span></td><td>How uBITX CEC Desktop paces commands to the radio (the command headroom), and, under Advanced, the link's timings, with a reset. Leave these alone unless the radio misses commands.</td></tr>
   <tr><td><span class="ui">Backup and restore…</span></td><td>The radio's calibration and CW settings side by side with your config file and the radio's factory copy: <span class="ui">From the radio → Config file</span>, <span class="ui">Config file → To the radio</span> and <span class="ui">Factory → To the radio</span>. It lists the changes and asks before writing. Most take effect after a restart, and the dialog offers one. The factory copy itself is never written.</td></tr>
   <tr><td><span class="ui">SDR settings…</span></td><td>The SDR program's location, and the default filter widths for each mode.</td></tr>
   <tr><td><span class="ui">About…</span></td><td>Versions, including the firmware the radio reported, and where the settings are kept.</td></tr>
 </table>
 
-<p>Everything the app keeps is in one folder, <code>~/.ubitx_cec_desktop/</code>: settings, channel sets, window position, pinned pop-ups, and your own SDR program and control descriptions. See <a href="#your-files">Where your settings are kept</a> for each file and where the folder is on each platform.</p>
+<p>Everything uBITX CEC Desktop keeps is in one folder, <code>~/.ubitx_cec_desktop/</code>: settings, channel sets, window position, pinned pop-ups, and your own SDR program and control descriptions. See <a href="#your-files">Where your settings are kept</a> for each file and where the folder is on each platform.</p>
 
 <!-- ============================================================== -->
 <h2 id="trouble">7. When things go wrong</h2>
 
 <h4>"The port opened but the radio is not answering"</h4>
-<p>Is the radio on, and are the adapter's TX and RX the right way round (adapter RX to the radio's send line)? The app waits up to 10 seconds for a radio that's still starting.</p>
+<p>Is the radio on, and are the adapter's TX and RX the right way round (adapter RX to the radio's send line)? uBITX CEC Desktop waits up to 10 seconds for a radio that's still starting.</p>
 
 <h4>The console fills with the same report, over and over</h4>
 <p>Something is feeding the radio's serial input. A monitoring USB-to-TTL adapter on the same lines does it. Unplug it, or connect only its GND and RX; power-cycling the adapter clears it.</p>
@@ -734,8 +734,8 @@ bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
 <h4>The SDR doesn't follow</h4>
 <p>Check the SDR button on Operate. If it says reconnect, check the program's server setting (see <a href="#sdr-setup">Setting up an SDR</a>) and press it.</p>
 
-<h4>Seeing what the app is doing</h4>
-<p>Start the app from a terminal with <code>UBITX_SDR_TRACE=1</code> set, and the console shows every command sent to the SDR and every change it reports. That's the first thing to send with a problem report.</p>
+<h4>Seeing what uBITX CEC Desktop is doing</h4>
+<p>Start uBITX CEC Desktop from a terminal with <code>UBITX_SDR_TRACE=1</code> set, and the console shows every command sent to the SDR and every change it reports. That's the first thing to send with a problem report.</p>
 
 <p style="margin-top:48px;color:var(--muted);font-size:14px">uBITX CEC Desktop. KD8CEC firmware by Ian Lee, KD8CEC.</p>
 </main>
