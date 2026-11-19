@@ -477,22 +477,6 @@ bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
      assumption that the SDR is up and working with the dongle") -->
 <p>What follows assumes your SDR program already works with your dongle: it starts, finds the dongle and shows a waterfall. If it doesn't, follow that program's own getting-started guide, linked in its section below. On Windows that usually includes switching the dongle to the WinUSB driver once with <a href="https://zadig.akeo.ie/" target="_blank">Zadig</a>.</p>
 
-<h4>In uBITX CEC Desktop</h4>
-<ol>
-  <li><span class="ui">Setup → SDR</span>, <span class="ui">Software</span>: choose your program. <span class="ui">-none-</span> is the default, and with it Connect and the address fields stay greyed.</li>
-  <li><span class="ui">Address</span> and <span class="ui">Port</span> fill in with the program's usual ones; change them only if you changed them in the program.</li>
-  <li>Tick <span class="ui">Start it</span> if uBITX CEC Desktop should start the program for you. uBITX CEC Desktop closes a program it started when it quits, and leaves alone one that was already running.</li>
-  <li>Press <span class="ui">Connect</span>. The line under the group lists what the program lets uBITX CEC Desktop control.</li>
-</ol>
-
-<figure class="missing">
-  <img src="images/setup-sdr.png" alt="Setup, the SDR sub-tab" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
-  <div class="ph">Screenshot to come: Setup → SDR, with SDRoxide Brown chosen.</div>
-  <figcaption>Choosing the SDR program.</figcaption>
-</figure>
-
-<p>If the program isn't where uBITX CEC Desktop expects it, set its location in <span class="ui">SDR settings…</span>; "custom location set" then shows beside Connect.</p>
-
 <h4>In the SDR program, in short</h4>
 <p>Each program's own section below gives the details.</p>
 <table>
@@ -506,7 +490,7 @@ bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
 
 <!-- FIX (2026-11-18): what each program lets uBITX CEC Desktop control, as a grid (Mark) -->
 <h4 id="sdr-controls">What each program lets you control</h4>
-<p>What uBITX CEC Desktop can do in each SDR program, through the connection above. <span class="yes">✓</span> means yes, – means no, and ? means not yet checked. After <span class="ui">Connect</span>, the line under the SDR group lists what your copy actually allows. A control the program doesn't offer is greyed in uBITX CEC Desktop.</p>
+<p>What uBITX CEC Desktop can do in each SDR program, once connected (see <a href="#sdr-connect">Connecting uBITX CEC Desktop to the SDR</a>, at the end of this section). <span class="yes">✓</span> means yes, – means no, and ? means not yet checked. After <span class="ui">Connect</span>, the line under the SDR group lists what your copy actually allows. A control the program doesn't offer is greyed in uBITX CEC Desktop.</p>
 <table class="matrix">
   <tr><th></th><th>SDRoxide Brown</th><th>SDRoxide</th><th>SDR++</th><th>Gqrx</th><th>SDRangel</th></tr>
   <tr><td>Frequency and mode</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td></tr>
@@ -714,6 +698,25 @@ then restart the Pi.</li>
 <p><b>The window.</b> SDRangel's channels and features open as small windows inside its main window. Roll up the ones you don't need to watch, the Channel Power and the Morse Decoder, with the arrow on their title bars. Keep the device's spectrum and waterfall in view under uBITX CEC Desktop.</p>
 
 
+<!-- FIX (2026-11-19): moved here from the top of the section (Mark): connecting
+     fails until the program's server is on, so it comes after the programs -->
+<h4 class="program" id="sdr-connect">Connecting uBITX CEC Desktop to the SDR</h4>
+<p>Once your program's server is on, as in its section above, and the program is running or set to be started:</p>
+<ol>
+  <li><span class="ui">Setup → SDR</span>, <span class="ui">Software</span>: choose your program. <span class="ui">-none-</span> is the default, and with it Connect and the address fields stay greyed.</li>
+  <li><span class="ui">Address</span> and <span class="ui">Port</span> fill in with the program's usual ones; change them only if you changed them in the program.</li>
+  <li>Tick <span class="ui">Start it</span> if uBITX CEC Desktop should start the program for you. uBITX CEC Desktop closes a program it started when it quits, and leaves alone one that was already running.</li>
+  <li>Press <span class="ui">Connect</span>. The line under the group lists what the program lets uBITX CEC Desktop control.</li>
+</ol>
+
+<figure class="missing">
+  <img src="images/setup-sdr.png" alt="Setup, the SDR sub-tab" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <div class="ph">Screenshot to come: Setup → SDR, with SDRoxide Brown chosen.</div>
+  <figcaption>Choosing the SDR program.</figcaption>
+</figure>
+
+<p>If the program isn't where uBITX CEC Desktop expects it, set its location in <span class="ui">SDR settings…</span>; "custom location set" then shows beside Connect.</p>
+
 <!-- ============================================================== -->
 <h2 id="operate">2. Operate</h2>
 
@@ -893,7 +896,7 @@ then restart the Pi.</li>
 <p>Something is feeding the radio's serial input. A monitoring USB-to-TTL adapter on the same lines does it. Unplug it, or connect only its GND and RX; power-cycling the adapter clears it.</p>
 
 <h4>The SDR doesn't follow</h4>
-<p>Check the SDR button on Operate. If it says reconnect, check the program's server setting (see <a href="#sdr-setup">Setting up an SDR</a>) and press it.</p>
+<p>Check the SDR button on Operate. If it says reconnect, check the program's server setting (see its section under <a href="#sdr-setup">Setting up an SDR</a>) and press it.</p>
 
 <h4>Seeing what uBITX CEC Desktop is doing</h4>
 <p>Start uBITX CEC Desktop from a terminal with <code>UBITX_SDR_TRACE=1</code> set, and the console shows every command sent to the SDR and every change it reports. That's the first thing to send with a problem report.</p>
