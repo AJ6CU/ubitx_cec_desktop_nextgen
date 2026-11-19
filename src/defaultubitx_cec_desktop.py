@@ -14,6 +14,27 @@
 # they are the operator's data rather than settings, and because a list of
 # lists is poor fare for a settings file.
 
+import os
+
+
+def _default_logbook_location():
+    """
+    FIX (2026-11-18): WHERE A NEW LOGBOOK GOES -- Documents, not the home folder.
+
+    Mark: the logbook is the one file users are likely to use a lot, and few
+    people ever browse their home folder; they look in Documents. So
+    ~/Documents if there is one, else the home folder (a minimal Linux, or a
+    Windows whose Documents OneDrive has moved). And the home folder still if
+    a logbook from the old default (~/uBITX_Logbook.adi or .csv) is already
+    there, so a settings file without this key doesn't start a second log.
+    A location already saved in settings.json is never changed by this.
+    """
+    home = os.path.expanduser("~")
+    if any(os.path.exists(os.path.join(home, f"uBITX_Logbook.{ext}")) for ext in ("adi", "csv")):
+        return "~"
+    return "~/Documents" if os.path.isdir(os.path.join(home, "Documents")) else "~"
+
+
 default_config_data = {
     # THE RIG. "Rig Port" holds a serial device ("/dev/cu.usbserial-A5069RR4",
     # "COM3") or a network rig ("socket://192.168.1.50:8080"); the prefix says
@@ -72,6 +93,6 @@ default_config_data = {
     "Logbook Switch": "False",
     "Logbook Type": "adi",
     "Logbook Name": "uBITX_Logbook",
-    "Logbook Location": "~",
+    "Logbook Location": _default_logbook_location(),
     "Logbook Backup Interval": "30",
 }
