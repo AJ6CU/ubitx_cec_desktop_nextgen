@@ -52,6 +52,7 @@
   table.matrix td:not(:first-child), table.matrix th:not(:first-child) { text-align: center; }
   table.matrix .yes { color: var(--accent); font-weight: 600; }
   table.matrix .no { color: var(--muted, #888); }
+  table.matrix .sys { color: var(--muted, #888); font-style: italic; }
   /* FIX (2026-11-19): each SDR program's section starts with a rule and a larger heading */
   h4.program { font-size: 19px; border-top: 1px solid var(--line); padding-top: 16px; margin-top: 30px; }
   .note, .todo { border-left: 4px solid var(--accent); background: var(--accent-soft);
@@ -493,14 +494,14 @@ bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
 
 <!-- FIX (2026-11-18): what each program lets uBITX CEC Desktop control, as a grid (Mark) -->
 <h4 id="sdr-controls">Features available with each SDR</h4>
-<p>This table shows features enabled on the uBITX CEC Desktop for each SDR program. <span class="yes">✓</span> means yes, – means no, and ? means not yet checked. A control the program doesn't offer is grayed in uBITX CEC Desktop.</p>
+<p>This table shows features enabled on the uBITX CEC Desktop for each SDR program. <span class="yes">✓</span> means yes, – means no, and ? means not yet checked. <span class="sys"><i>computer</i></span> means the program has no control of its own, so uBITX CEC Desktop uses the computer's volume or mute instead. That turns every program up, down or off, not just the SDR. A control the program doesn't offer is grayed in uBITX CEC Desktop.</p>
 <table class="matrix">
   <tr><th></th><th>SDRoxide Brown</th><th>SDRoxide</th><th>SDR++</th><th>Gqrx</th><th>SDRangel</th></tr>
   <tr><td>Frequency and mode</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td></tr>
   <tr><td>Filter width (wide / narrow / reset)</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td></tr>
   <tr><td>Signal reading (S-meter)</td><td class="yes">✓</td><td class="yes">✓</td><td class="no">–</td><td class="yes">✓</td><td class="yes">✓</td></tr>
-  <tr><td>Volume</td><td class="yes">✓</td><td class="yes">✓</td><td class="no">–</td><td class="yes">✓</td><td class="yes">✓</td></tr>
-  <tr><td>Mute</td><td class="yes">✓</td><td class="yes">✓</td><td class="no">–</td><td>?</td><td class="yes">✓</td></tr>
+  <tr><td>Volume</td><td class="yes">✓</td><td class="yes">✓</td><td class="sys">computer</td><td class="yes">✓</td><td class="yes">✓</td></tr>
+  <tr><td>Mute</td><td class="yes">✓</td><td class="yes">✓</td><td class="sys">computer</td><td>?</td><td class="yes">✓</td></tr>
   <tr><td>Squelch</td><td class="yes">✓</td><td class="yes">✓</td><td class="no">–</td><td class="yes">✓</td><td class="yes">✓</td></tr>
   <tr><td>AGC</td><td class="yes">✓</td><td class="yes">✓</td><td class="no">–</td><td class="no">–</td><td class="yes">✓</td></tr>
   <tr><td>Noise reduction (NR)</td><td class="yes">✓</td><td class="yes">✓</td><td class="no">–</td><td class="no">–</td><td class="yes">✓</td></tr>
@@ -516,7 +517,9 @@ bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
 <ul>
   <li><b>SDRoxide:</b> the CW peak filter and the span are SDRoxide Brown's for now. SDRoxide may add them later.</li>
   <li><b>SDRangel:</b> with the <b>WDSP receiver</b> as the first channel. Its S-meter needs a <b>Channel Power</b> channel, and decoded CW its <b>Morse Decoder</b> feature. SDRangel uses its own RIT for CW, so uBITX CEC Desktop's RIT isn't offered.</li>
-  <li><b>SDR++</b> gives frequency, mode and filter only, so the S-meter stays empty.</li>
+  <li><b>SDR++</b> gives frequency, mode and filter only, so the S-meter stays empty. Volume and mute work through the computer's own volume.</li>
+  <!-- FIX (2026-11-19): the computer's volume fallback (system_audio.py) -->
+  <li><b>The computer's volume:</b> uBITX CEC Desktop uses it for any program that can't set its own level, and the computer's mute for any that can't mute itself. Gqrx's mute is one or the other, which is why its cell is "?". On Windows the volume can be set but not read, so the slider starts in the middle.</li>
 </ul>
 
 <!-- FIX (2026-11-19): one section per SDR program -- what it's good and bad at,
