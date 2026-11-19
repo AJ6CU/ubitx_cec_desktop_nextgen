@@ -2974,7 +2974,7 @@ class UbitxCecDesktop(sCTk):
         # FIX (2026-11-10): greyed while logging is off in Setup (Mark).
         self.log_qso_button = log
         HoverNote(log, "Logs this contact to the logbook set in Setup > Logbook. "
-                       "Greyed while logging is off there.")
+                       "Grayed while logging is off there.")
 
         for column, (label, khz) in enumerate(SPLIT_OFFSETS):
             btn = sCTkButtonSecondary(
@@ -5745,7 +5745,7 @@ class UbitxCecDesktop(sCTk):
             ("Radio firmware", self.model.firmware),
             ("Configuration", shown_path(gv.config.configuration_file)),
             ("Logbook", shown_path(self._logbook_path())),
-            ("Licence", "GPL v3"),
+            ("License", "GPL v3"),
         ):
             line = sCTkFrame(body, fg_color="transparent", border_width=0)
             line.pack(anchor="w", pady=1)
