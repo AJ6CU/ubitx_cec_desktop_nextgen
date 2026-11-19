@@ -965,6 +965,36 @@ testing by hand may be version-dependent rather than protocol-dependent.
 <a name="the-application"></a>
 ### The application — bugs worth fixing in the current code
 
+**Console output under a switch (Mark, 2026-11-19).** *Open, before 1.0.*
+About 300 `print()` calls write to the console all the time, most of them in
+ubitx_link.py (188), then sdr_link.py (36), ubitx_cec_desktop.py (26),
+rest_sdr.py (22) and rigctl_sdr.py (11). Two environment switches already
+add more: `UBITX_SDR_TRACE=1` (rigctl_sdr.py: every SDR command and change)
+and `UBITX_RIG_TIMING=1` (ubitx_link.py: the rig's start-up timing). Plan:
+
+* *Quiet by default*: what is left on is what an operator should see --
+  warnings and errors, such as the radio not answering, a port that won't
+  open, or a setting in settings.json that isn't used (the Rig Baud line).
+* *More on request*, by a command-line switch **or** an environment variable,
+  since the Windows and Mac shortcuts can't easily take arguments:
+  `--verbose` / `UBITX_VERBOSE=1` for everything printed today, and keep the
+  two tracing switches for their detail. Perhaps one variable with names,
+  `UBITX_DEBUG=rig,sdr,timing`, replacing all three.
+* *How*: Python's `logging`, with one logger per part (`rig`, `sdr`, `app`)
+  and the levels mapped -- warnings stay `print`-visible, the rest `debug` --
+  rather than an `if VERBOSE:` in front of 300 prints. The `[rig]`, `[app]`
+  prefixes become the logger names.
+* *Where it ends up*: the console as now. On a Mac the launcher's log,
+  `~/Library/Logs/uBITX CEC Desktop.log`, gets the same. Windows' "Start
+  with messages.py" should turn verbose on by itself, since that's why
+  someone runs it.
+* *Help page, at the same time*: "When things go wrong" -> "Seeing what uBITX
+  CEC Desktop is doing" says how to turn the messages on for each platform
+  (Windows: Start with messages.py; macOS: the log file, or start from
+  Terminal with the variable set; Linux: `UBITX_VERBOSE=1 ubitx-cec-desktop`),
+  and what to send with a problem report. Today that paragraph covers only
+  `UBITX_SDR_TRACE`.
+
 **Rewire the USB-to-TTL monitoring adapter: GND and its RX only.** *Hardware, open.*
 
 With the adapter plugged into the Nano's serial lines, the rig re-sent the
