@@ -122,9 +122,9 @@
 <main>
 
 <h1>uBITX CEC Desktop</h1>
-<p class="lead">A control panel runs on laptops that seamlessly merges an uBITX running KD8CEC's firmware with an SDR dongle providing a compelling radio for home operation or xOTA.</p>
+<p class="lead">A control panel that runs on laptops that seamlessly merges an uBITX running KD8CEC's firmware with an SDR dongle providing a compelling radio for home operation or xOTA.</p>
 
-    <p>By moving the RX and the user interface off radio, uBITX CEC Desktop greatly improves the capability of the popular uBITX radio. Depending on your sdr software choice, you immediately enahnce your uBITX radio with:</p>
+    <p>By moving the RX and the user interface off radio, uBITX CEC Desktop greatly improves the capability of the popular uBITX radio. Depending on your sdr software choice, you immediately enhance your uBITX radio with:</p>
     <ul>
         <li>AGC</li>
         <li>NR</li>
@@ -141,7 +141,7 @@
         <li>Scanning with signal strength </li>
     </ul>
 
-<p>And all this is made possible through the software using the existing Nextion screen protocol to talk to the radio. You can QSY by either clicking on the waterfall, clicking/moving a virtual knob on in the user interface (UX) or if you prefer, using the knob on the front of your radio. The SDR effectively replaces the RX side of your radio giving you a host of features and much better Signal to Noise. The software runs on common laptops or desktops using the OS of your choice: Linux, Windows or macOS. And the software running on your laptop is much easier to use than squinting and trying to touch the right button on your screen!</p>
+<p>And all this is made possible through the software using the existing Nextion screen protocol to talk to the radio. You can QSY by either clicking on the waterfall, clicking/moving a virtual knob on in the user interface (UX) or if you prefer, using the knob on the front of your radio. The SDR effectively replaces the RX side of your radio giving you a host of features and much better Signal to Noise ratio. The software runs on common laptops or desktops using the OS of your choice: Linux, Windows or macOS. And the software running on your laptop is much easier to use than squinting and trying to touch the right button on your screen!</p>
 
 
 <!-- ============================================================== -->
@@ -165,7 +165,7 @@
 
 <p>KD8CEC's firmware 1.2 (it reports itself as <code>+v1.200</code>) replaces the uBITX's original Raduino software. It must be the build for a <b>Nextion display at 57600 baud</b>: that's the protocol uBITX CEC Desktop speaks. The source is in KD8CEC's repository, <code>github.com/phdlee/ubitx</code>, and his notes are on <code>hamskey.com</code>. <i>The original ready made KD8CEC binaries will not be useable, see notes below.</i></p>
 
-<div class="todo"><b>Before you flash: back up.</b> Your radio's calibration (master cal and BFO) lives in its EEPROM. You can also use the <a href="https://github.com/AJ6CU/uBITX-Settings-Editor" target="_blank">uBITX-Settings_Editor</a> to backup your configuration to a file that you can later restore. Alternatively, you can record the values on paper an restore them lated. </div>
+<div class="todo"><b>Before you flash: back up.</b> Your radio's calibration (master cal and BFO) lives in its EEPROM. You can also use the <a href="https://github.com/AJ6CU/uBITX-Settings-Editor" target="_blank">uBITX-Settings-Editor</a> to backup your configuration to a file that you can later restore. Alternatively, you can record the values on paper an restore them later. </div>
 
 <div class="note"><b>uBITX CEC Desktop talks to the radio at 57600 baud.</b> KD8CEC's own 1.2 files run the Nextion line at 9600. The files below are KD8CEC 1.2 with that line at 57600, uBITX CEC Desktop's speed. You <b> must </b> install this update.</div>
 
@@ -257,21 +257,21 @@ avrdude -c arduino -p m328p -P /dev/ttyUSB0 -b 115200 -D -U flash:w:KD8CEC_1.20_
   </li>
 </ol>
 
-    <div class="note"><b>Your Radio and Nextion will no longer talk.</b>Your Nextion is flashed for 9600 baud. After you update your firmware to 57600, your radio will no longer talk to your Nextion screen.  The solution is to go to use the Nextion Editor to create a 57600 baud version for your screen. In the future I will create some generic ones and make them available in at the <a href="https://github.com/AJ6CU/Nextion-screens-for-uBitx-KD8CEC-firmware">Nextion Screen Repository</a></div>
+    <div class="note"><b>Your Radio and Nextion will no longer talk.</b>Your Nextion is flashed for 9600 baud. After you update your firmware to 57600, your radio will no longer talk to your Nextion screen.  The solution is to go to use the Nextion Editor to create a 57600 baud version for your screen. In the future I will create some generic ones and make them available in the <a href="https://github.com/AJ6CU/Nextion-screens-for-uBitx-KD8CEC-firmware">Nextion Screen Repository</a></div>
 
 <h4>After flashing</h4>
 <p>Power the radio off and on. Your calibration survives a firmware update; if it was lost, use uBITX Settings Editor to restore from a backup file or just manually type them in. </p>
 
 <h3 id="usb-ttl">The USB-to-TTL adapter</h3>
 
-<p>uBITX CEC Desktop connects to the Nextion wiring harness thru an USB-to-TTL serial adapter.  Dont try to use the Nano's own USB port; that one is for flashing firmware!</p>
-    <p>I have used two types of these adapters, both of which are readily available on Amazon and Ali-Express. The FT232RL is based on the FTDI chip. It is the less expensive option and the one I used throughout my development. However, I have recently seen some saw some cautions in regards to this adapter. Apparently, there are many clones of this chip &#8212; some of which are worse than others &#8212; and the poorer made tend to be more noisy.  Subsequently, I started using the CP2102 USB to TTL. They are about 4x the cost, ~$12 USD per board vs $2.50 USD for the FT232 variant. I have not really been able to tell the difference yet, but I keep looking hoping to justify my purchase...</p>
+<p>uBITX CEC Desktop connects to the Nextion wiring harness thru an USB-to-TTL serial adapter.  Dont try to use the Nano's own USB port; that one is for flashing firmware and editing the EEPROM!</p>
+    <p>I have used two types of these adapters, both of which are readily available on Amazon and AliExpress. The FT232RL is based on the FTDI chip. It is the less expensive option and the one I used throughout my development. However, I have recently seen some saw some cautions in regards to this adapter. Apparently, there are many clones of this chip &#8212; some of which are worse than others &#8212; and the poorer made tend to be more noisy.  Subsequently, I started using the CP2102 USB to TTL. They are about 4x the cost, ~$12 USD per board vs $2.50 USD for the FT232 variant. I have not really been able to tell the difference yet, but I keep looking hoping to justify my purchase...</p>
 
-<p>The easiest approach is to use the Nextion's own cable: unplug it from the display and plug that end into a male JST connector. Its colours are the Nextion's standard ones, and the pictures below use them too:</p>
+<p>The easiest approach is to use the Nextion's own cable: unplug it from the display and plug that end into a male JST connector and use a 6 pin JST Female connector on the other side that matches your USB-to-TTL converter. Its colours are the Nextion's standard ones, and the pictures below use them too:</p>
 <p> Unless you are an expert wire crimper of JST connectors, I highly recommend that you invest in a set of premade wires. You can get them in F-F and M-F. The Amazon links are:
 </p>
     <ul>
-    <li><a href="https://www.amazon.com/dp/B08G188ZQ8" target="_blank">Male-Female</a></li>
+    <li><a href="https://www.amazon.com/dp/B08G188ZQ8" target="_blank">Male-Female</a> - This is what you need if you follow my advice above.</li>
     <li><a href="https://www.amazon.com/dp/B08G18PWQ6" target="_blank">Female-Female</a></li>
 </ul>
 <table>
@@ -357,7 +357,7 @@ avrdude -c arduino -p m328p -P /dev/ttyUSB0 -b 115200 -D -U flash:w:KD8CEC_1.20_
 </ol>
 <p>Before trusting it with the SDR, check it once with a dummy load, or with the SDR left unplugged: transmit, and listen for the switch's relay or watch its TX light.</p>
 
-<div class="note"><b>An SDR on its own antenna?</b> It needs no switch, but keep its antenna well away from the uBITX's. A few metres apart is a start; the closer they are, the more of your signal reaches the SDR.</div>
+<div class="note"><b>An SDR on its own antenna?</b> It needs no switch, but keep its antenna well away from the uBITX's. A few meters apart is a start; the closer they are, the more of your signal reaches the SDR.</div>
 
 <!-- FIX: how to download, install, upgrade and remove uBITX CEC Desktop on each platform (2026-11-18) -->
 <h3 id="install">Installing uBITX CEC Desktop</h3>
