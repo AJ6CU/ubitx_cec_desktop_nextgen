@@ -965,6 +965,28 @@ testing by hand may be version-dependent rather than protocol-dependent.
 <a name="the-application"></a>
 ### The application — bugs worth fixing in the current code
 
+**Scroll over a frequency digit to tune by it (Mark, 2026-11-19).** *Open.*
+Today a click on a digit of the RX or TX readout only selects it as the
+tuning step (sCTkFrequencyDisplay: the selected digit's place value is the
+knob's step); the readout has no scroll handling, and a click never changes
+the frequency. Mark expected scrolling over a digit to change that digit, as
+in SDR++ and SDRuno. (He once saw a click seem to move the frequency by one,
+but could not repeat it -- most likely the click landed on the knob.)
+
+* *Library (sCTk 0.2.2)*: sCTkFrequencyDisplay binds the wheel and trackpad
+  on its canvas (the dial's handlers are the model: one detent once, the Mac
+  touchpad decoded, "break" returned), finds the digit under the pointer as
+  `_on_click` does, selects it, and reports it through a new callback, say
+  `scroll_command(step, direction)`. Disabled and min_digit respected.
+  Docs and the Designer property.
+* *App*: the RX and TX panels pass a scroll_command that tunes by `step *
+  direction` through the knob's own path (`_on_turn`'s accumulation and
+  show_pending), so Lock, RIT, split and the pending readout behave as with
+  the knob.
+* Then a new sCTk on PyPI, and `scustomtkinter>=0.2.2` in
+  packaging/build_wheel.py.
+* *Help*: Operate says scrolling over a digit tunes by it.
+
 **Console output under a switch (Mark, 2026-11-19).** *Open, before 1.0.*
 About 300 `print()` calls write to the console all the time, most of them in
 ubitx_link.py (188), then sdr_link.py (36), ubitx_cec_desktop.py (26),
