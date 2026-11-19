@@ -27,6 +27,7 @@ Save each one in `help/images/` under the name given. The page shows it in place
 | `brown-servers-cw.png` | Done: Brown, Settings ▸ Servers, Decoded CW over UDP on 127.0.0.1:9998, its own APPLY. |
 | `brown-undock.png` | Done: Brown, Settings ▸ Detachable, Panadapter undocked. |
 | `brown-region.png` | Done: Brown, the IARU region (Region 2) and 11M/CB. |
+| `brown-org-off.png` | Done: Brown's CW panel with the QRG chip off. |
 
 Also wanted, for the sections marked "To fill in":
 - each SDR program's server setting (Brown's Settings ▸ Servers, SDR++'s Rigctl Server module, Gqrx's Remote control, SDRangel's device set and channels).

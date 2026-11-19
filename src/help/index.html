@@ -603,6 +603,12 @@ bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
   <figcaption>The IARU region, here Region 2 (the Americas). The 11M/CB setting beside it is for CB and doesn't matter to uBITX CEC Desktop.</figcaption>
 </figure>
 <p><b>In CW, keep QRG off.</b> The <b>QRG</b> chip in Brown's CW operating panel makes Brown's readout show the frequency being copied, which is the dial plus the CW pitch. With it on, Brown reads about 700 Hz above uBITX CEC Desktop. With it off, the two agree. uBITX CEC Desktop sends the radio's frequency either way.</p>
+<!-- FIX (2026-11-19): Mark's screenshot of the QRG chip, off -->
+<figure class="missing">
+  <img src="images/brown-org-off.png" alt="Brown's CW operating panel with the QRG chip off: the readout shows the dial, 7.044.200" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <div class="ph">Screenshot to come: Brown's CW panel with QRG off.</div>
+  <figcaption>The <b>QRG</b> chip in Brown's CW panel, off. Brown's readout shows the dial, 7.044.200, the same as uBITX CEC Desktop. The frequency being copied, the dial plus the 700 Hz pitch, appears beside the chip as 7.0449 MHz.</figcaption>
+</figure>
 <p><b>On a Raspberry Pi 5.</b> Brown runs well, but set the CW skimmer to <b>Timing</b>, not <b>Neural</b>, in the <b>SKIM</b> chip of the Display box, or turn the skimmers off. On Neural, the CW skimmer alone takes about two of the Pi's four cores. With that one change, the other settings can stay as they are.</p>
 
 <!-- ---------------------------------------------------------------- -->
