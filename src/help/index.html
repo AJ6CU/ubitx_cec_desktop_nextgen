@@ -467,6 +467,30 @@ bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
 
 <p>An SDR is optional. With one, the SDR program is the receiver: you hear the band through it and see its waterfall, while the uBITX does the transmitting. The app keeps the SDR on the radio's frequency, mode, filter, RIT and, with SDRoxide Brown, VFO A/B and split.</p>
 
+<!-- FIX (2026-11-18): the dongle's driver, per platform, before the SDR program -->
+<h4>Before the SDR program: the dongle's driver</h4>
+<p>What an RTL-SDR dongle needs depends on your computer, not on which SDR program you use:</p>
+<ul>
+  <li><b>Windows: switch the dongle to WinUSB, once.</b> Windows takes the dongle for a TV tuner. Every SDR program, SDRoxide and SDRoxide Brown included, needs it switched to the <b>WinUSB</b> driver with <a href="https://zadig.akeo.ie/" target="_blank">Zadig</a>:
+    <ol>
+      <li>Plug in the dongle and start Zadig.</li>
+      <li>Choose <b>Options → List All Devices</b>.</li>
+      <li>Pick <b>Bulk-In, Interface (Interface 0)</b>, or the entry that names your RTL-SDR.</li>
+      <li>Choose <b>WinUSB</b> as the driver, and press <b>Replace Driver</b> or <b>Install Driver</b>.</li>
+    </ol>
+    Do it again if you plug the dongle into a different USB port. If the dongle already works in another SDR program, it's done. The dongle no longer works as a TV tuner afterwards.</li>
+  <li><b>macOS: nothing to install.</b> The SDR programs bring their own copy of the driver. SDR++, for example, carries it inside the app. If a program doesn't find an RTL-SDR Blog V4 or V4L, update the program first.</li>
+  <li><b>Linux and Raspberry Pi OS: a permission rule.</b>
+    <ul>
+      <li><b>Access to the dongle:</b> your user needs a udev rule to open it. Your distribution's <code>rtl-sdr</code> package installs one (<code>sudo apt install rtl-sdr</code>), and so does SDRoxide's <code>.deb</code>. Unplug the dongle and plug it in again afterwards.</li>
+      <li><b>The kernel's TV driver:</b> it can grab the dongle first. SDRoxide releases it by itself. If another program reports <i>usb_claim_interface error</i>, block that driver:
+<pre><code>echo "blacklist dvb_usb_rtl28xxu" | sudo tee /etc/modprobe.d/blacklist-rtl.conf</code></pre>
+      then unplug the dongle and plug it in again, or restart the computer.</li>
+      <li><b>An older <code>rtl-sdr</code> package:</b> it may not know the V4 or V4L. SDR++ and SDRoxide have their own support. For other programs, see <a href="https://www.rtl-sdr.com/V4" target="_blank">RTL-SDR Blog's V4 guide</a>.</li>
+    </ul>
+  </li>
+</ul>
+
 <h4>In the app</h4>
 <ol>
   <li><span class="ui">Setup → SDR</span>, <span class="ui">Software</span>: choose your program. <span class="ui">-none-</span> is the default, and with it Connect and the address fields stay greyed.</li>
