@@ -494,21 +494,21 @@ bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
 
 <!-- FIX (2026-11-18): what each program lets uBITX CEC Desktop control, as a grid (Mark) -->
 <h4 id="sdr-controls">Features available with each SDR</h4>
-<p>This table shows features enabled on the uBITX CEC Desktop for each SDR program. <span class="yes">✓</span> means yes, – means no, and ? means not yet checked. <span class="sys"><i>computer</i></span> means the program has no control of its own, so uBITX CEC Desktop uses the computer's volume or mute instead. That turns every program up, down or off, not just the SDR. A control the program doesn't offer is grayed in uBITX CEC Desktop.</p>
+<p>This table shows features enabled on the uBITX CEC Desktop for each SDR program. <span class="yes">✓</span> means yes and – means no. <span class="sys"><i>computer</i></span> means the program has no control of its own, so uBITX CEC Desktop uses the computer's volume or mute instead. That turns every program up, down or off, not just the SDR. A control the program doesn't offer is grayed in uBITX CEC Desktop.</p>
 <table class="matrix">
   <tr><th></th><th>SDRoxide Brown</th><th>SDRoxide</th><th>SDR++</th><th>Gqrx</th><th>SDRangel</th></tr>
   <tr><td>Frequency and mode</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td></tr>
   <tr><td>Filter width (wide / narrow / reset)</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td></tr>
   <tr><td>Signal reading (S-meter)</td><td class="yes">✓</td><td class="yes">✓</td><td class="no">–</td><td class="yes">✓</td><td class="yes">✓</td></tr>
   <tr><td>Volume</td><td class="yes">✓</td><td class="yes">✓</td><td class="sys">computer</td><td class="yes">✓</td><td class="yes">✓</td></tr>
-  <tr><td>Mute</td><td class="yes">✓</td><td class="yes">✓</td><td class="sys">computer</td><td>?</td><td class="yes">✓</td></tr>
+  <tr><td>Mute</td><td class="yes">✓</td><td class="yes">✓</td><td class="sys">computer</td><td class="yes">✓</td><td class="yes">✓</td></tr>
   <tr><td>Squelch</td><td class="yes">✓</td><td class="yes">✓</td><td class="no">–</td><td class="yes">✓</td><td class="yes">✓</td></tr>
   <tr><td>AGC</td><td class="yes">✓</td><td class="yes">✓</td><td class="no">–</td><td class="no">–</td><td class="yes">✓</td></tr>
   <tr><td>Noise reduction (NR)</td><td class="yes">✓</td><td class="yes">✓</td><td class="no">–</td><td class="no">–</td><td class="yes">✓</td></tr>
   <tr><td>Noise blanker (NB)</td><td class="yes">✓</td><td class="yes">✓</td><td class="no">–</td><td class="no">–</td><td class="yes">✓</td></tr>
   <tr><td>Notch</td><td class="yes">✓</td><td class="yes">✓</td><td class="no">–</td><td class="no">–</td><td class="yes">✓</td></tr>
   <tr><td>CW peak filter (APF)</td><td class="yes">✓</td><td class="no">–</td><td class="no">–</td><td class="no">–</td><td class="yes">✓</td></tr>
-  <tr><td>RF gain</td><td class="yes">✓</td><td class="yes">✓</td><td class="no">–</td><td>?</td><td class="yes">✓</td></tr>
+  <tr><td>RF gain</td><td class="yes">✓</td><td class="yes">✓</td><td class="no">–</td><td class="no">–</td><td class="yes">✓</td></tr>
   <tr><td>Span (the width of the spectrum)</td><td class="yes">✓</td><td class="no">–</td><td class="no">–</td><td class="no">–</td><td class="yes">✓</td></tr>
   <tr><td>Decoded CW text</td><td class="yes">✓</td><td class="yes">✓</td><td class="no">–</td><td class="no">–</td><td class="yes">✓</td></tr>
   <tr><td>RIT</td><td class="yes">✓</td><td class="yes">✓</td><td class="no">–</td><td class="no">–</td><td class="no">–</td></tr>
@@ -754,7 +754,10 @@ then restart the Pi.</li>
   <li><span class="ui">Tools → Remote control settings</span>: port <code>7356</code>. The allowed hosts must include <code>127.0.0.1</code>, as they do by default.</li>
   <li><span class="ui">Tools → Remote control</span>, or the matching button on the toolbar, starts the server.</li>
 </ol>
-<p>Check it's still on after Gqrx restarts.</p>
+<!-- FIX (2026-11-20): checked at the station (Mark): remembered over a restart; Gqrx quits if it's turned off while connected; reconnect -->
+<p>Gqrx remembers it: remote control is still on when Gqrx starts again.</p>
+<p><b>If uBITX CEC Desktop doesn't connect</b> because remote control was off, turn it on in Gqrx, then press the SDR button on Operate, which says <span class="ui">sdr — reconnect</span>.</p>
+<div class="note"><b>Don't turn off remote control while uBITX CEC Desktop is connected.</b> Gqrx quits when you do (seen on macOS). Quit uBITX CEC Desktop first, or leave remote control on. After such a quit, Gqrx asks on its next start whether to edit the settings: answer <b>No</b>, as the settings weren't the cause.</div>
 <p><b>Setting it up</b>, on a Pi and elsewhere, in Gqrx's I/O devices dialog:</p>
 <ul>
   <li><b>Device string:</b> <code>rtl=0</code>.</li>

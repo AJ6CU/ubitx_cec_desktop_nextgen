@@ -155,16 +155,27 @@ or a running copy:
    Panadapter window. Both are in the help, with screenshots.
 3. *SDRangel's "Save it" step*: the exact menu name for saving the setup as
    a configuration (the help only says "as a configuration in SDRangel").
-4. *Gqrx*: does it keep remote control on after a restart? The help says
-   "check it's still on after Gqrx restarts" until this is known.
+4. *Gqrx*: done (2026-11-20). It keeps remote control on over a restart; the
+   help says so.
 5. *The grid* ("What each program lets you control"):
-   * Gqrx's **mute** and **RF gain** are marked "?". Connect Gqrx and read
-     the line under the SDR group, then set them to ✓ or –.
+   * Gqrx: done (2026-11-20). Mute ✓ (Gqrx's own, not the computer's), RF gain
+     – (not offered; "it can do: filter, frequency, mode, mute, signal,
+     squelch, volume").
    * Upstream SDRoxide is ticked for **VFO A/B and split** (rigctl_sdr.py
      drives VFOs on both SDRoxides; its README lists VFO A/B, split and
      RIT/XIT), but the intro of Setting up an SDR says VFO A/B and split come
      "with SDRoxide Brown". Try split on upstream: if it works, fix the
      intro; if not, set the grid cell to –.
+
+**Gqrx quits when remote control is turned off with a client connected
+(2026-11-20, macOS).** Seen with uBITX CEC Desktop connected: "Gqrx quit
+unexpectedly", then on the next start Gqrx's "problems with the current
+configuration" question. The help warns against it. To do: report it to Gqrx
+(github.com/gqrx-sdr/gqrx/issues) with its version and the crash report's first
+lines. Check first that it isn't something uBITX CEC Desktop sent: just before
+"lost the connection" the log had "Gqrx can also do: vfo_ab" and "'F VFOB'
+refused". Repeat with a plain client (nc 127.0.0.1 7356, then turn remote
+control off): if Gqrx quits, it's Gqrx's alone.
 
 **Scans started in the SDR (SCAN / PANO and the like) with uBITX CEC Desktop
 (2026-11-20).** For 1.0: don't use them; the help says so, in Connecting
