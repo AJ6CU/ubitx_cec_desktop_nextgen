@@ -34,6 +34,15 @@ Save each one in `help/images/` under the name given. The page shows it in place
 | `sdrpp-name-and-create.png` | Done: SDR++, Module Manager, a name in the box and the + button. |
 | `sdrpp-configure-rigctl.png` | Done: SDR++, the new server section: localhost 4532, Radio, Tuning, Listen on startup, Start. |
 | `sdrpp-listening.png` | Done: SDR++, the server section with Status: Listening. |
+| `gqrx-startup.png` | Done: Gqrx, Configure I/O devices: device string and input rate (V3). |
+| `gqrx-started-click-tools.png` | Done: Gqrx main window, the tools button for the remote control settings. |
+| `gqrx-remote-control-settings.png` | Done: Gqrx remote control settings: 7356, 127.0.0.1. |
+| `gqrx-turning-on-remote-control.png` | Done: Gqrx Tools menu, Remote control ticked. |
+| `gqrx-tools-only-waterfall.png` | Done: Gqrx View menu, every panel unticked. |
+| `gqrx-only-waterfall.png` | Done: Gqrx with only the spectrum and waterfall. Large (1.1 MB): a JPG candidate. |
+| `gqrx-tools-waterfal-and-controls.png` | Done: Gqrx View menu, FFT Settings ticked. |
+| `gqrx-waterfall-with_fft.png` | Done: Gqrx with FFT Settings: Split, Plot dB, WF dB. Large (770 KB): a JPG candidate. |
+| `gqrx-app-windows-positioned.png` | Done: uBITX CEC Desktop with Gqrx underneath. Large (960 KB): a JPG candidate. |
 
 Also wanted, for the sections marked "To fill in":
 - each SDR program's server setting (Brown's Settings ▸ Servers, SDR++'s Rigctl Server module, Gqrx's Remote control, SDRangel's device set and channels).

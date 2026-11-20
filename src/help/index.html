@@ -749,28 +749,91 @@ then restart the Pi.</li>
 </ul>
 
 <h5>Configuring for uBITX CEC Desktop</h5>
-<p><b>Services.</b> Gqrx calls its server <i>remote control</i>:</p>
-<ol>
-  <li><span class="ui">Tools → Remote control settings</span>: port <code>7356</code>. The allowed hosts must include <code>127.0.0.1</code>, as they do by default.</li>
-  <li><span class="ui">Tools → Remote control</span>, or the matching button on the toolbar, starts the server.</li>
-</ol>
-<!-- FIX (2026-11-20): checked at the station (Mark): remembered over a restart; Gqrx quits if it's turned off while connected; reconnect -->
-<p>Gqrx remembers it: remote control is still on when Gqrx starts again.</p>
-<p><b>If uBITX CEC Desktop doesn't connect</b> because remote control was off, turn it on in Gqrx, then press the SDR button on Operate, which says <span class="ui">sdr — reconnect</span>.</p>
-<div class="note"><b>Don't turn off remote control while uBITX CEC Desktop is connected.</b> Gqrx quits when you do (seen on macOS). Quit uBITX CEC Desktop first, or leave remote control on. After such a quit, Gqrx asks on its next start whether to edit the settings: answer <b>No</b>, as the settings weren't the cause.</div>
-<p><b>Setting it up</b>, on a Pi and elsewhere, in Gqrx's I/O devices dialog:</p>
+<!-- FIX (2026-11-20): reordered to follow Gqrx's first start, with Mark's screenshots -->
+<p><b>The first start: I/O devices.</b> On its first start, Gqrx opens its <i>Configure I/O devices</i> window. Later, the button with a circuit board on the toolbar opens it again.</p>
+<figure class="missing">
+  <img src="images/gqrx-startup.png" alt="Gqrx, Configure I/O devices: device string rtl=0,direct_samp=2 and input rate 2400000" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <div class="ph">Screenshot to come: Gqrx, Configure I/O devices: device string rtl=0,direct_samp=2 and input rate 2400000.</div>
+  <figcaption>The I/O devices window, set up for an RTL-SDR Blog V3: the device string and the input rate.</figcaption>
+</figure>
 <ul>
   <li><b>Device string:</b> <code>rtl=0</code>.</li>
-  <li><b>An RTL-SDR Blog V3, or another plain R820T dongle:</b> for HF, use <code>rtl=0,direct_samp=2</code> (Q-branch direct sampling). A V4 or V4L doesn't need it.</li>
+  <li><b>An RTL-SDR Blog V3, or another plain R820T dongle:</b> as in the picture, for HF, use <code>rtl=0,direct_samp=2</code> (Q-branch direct sampling). A V4 or V4L doesn't need it.</li>
   <!-- FIX (2026-11-20): input rate, decimation and sample rate (Mark) -->
   <li><b>Input rate:</b> what Gqrx asks the dongle for. Its default for an RTL-SDR, <code>1800000</code> (1.8 Msps), is fine: the waterfall is then 1.8 MHz wide. On a computer with power to spare, <code>2400000</code> gives a wider one. Don't go above 2.4 Msps on an RTL-SDR, where most dongles start losing samples.</li>
   <li><b>Decimation:</b> <b>None</b>. The <b>Sample rate</b> shown below it is the input rate divided by the decimation, so with None it's the same as the input rate, and that's the width of the waterfall. On a Raspberry Pi, a lower input rate such as 1.8 Msps saves CPU more simply than decimation does.</li>
   <li><b>Audio output:</b> <b>default</b>, not a USB sound card chosen by name. On a Pi, PipeWire holds the card, and choosing it directly failed.</li>
   <li><b>Starting afresh:</b> <code>gqrx -r</code> resets Gqrx's settings.</li>
 </ul>
+<p><b>Services: remote control,</b> Gqrx's name for its server:</p>
+<ol>
+  <li><b>Open its settings:</b> the tools button (wrench and screwdriver) on the toolbar, or <span class="ui">Tools → Remote control settings</span>.
+<figure class="missing">
+  <img src="images/gqrx-started-click-tools.png" alt="Gqrx main window, an arrow at the tools button on the toolbar" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <div class="ph">Screenshot to come: Gqrx main window, an arrow at the tools button on the toolbar.</div>
+  <figcaption>The tools button opens the remote control settings.</figcaption>
+</figure>
+  </li>
+  <li><b>Set it up:</b> <b>Listen on port</b> <code>7356</code>, and <b>Allowed hosts</b> with <code>127.0.0.1</code> in it, as Gqrx comes. Press <b>OK</b>.
+<figure class="missing">
+  <img src="images/gqrx-remote-control-settings.png" alt="Gqrx remote control settings: port 7356, allowed host 127.0.0.1" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <div class="ph">Screenshot to come: Gqrx remote control settings: port 7356, allowed host 127.0.0.1.</div>
+  <figcaption>Port 7356, and 127.0.0.1 among the allowed hosts.</figcaption>
+</figure>
+  </li>
+  <li><b>Turn it on:</b> <span class="ui">Tools → Remote control</span>. It's ticked while it's on.
+<figure class="missing">
+  <img src="images/gqrx-turning-on-remote-control.png" alt="Gqrx Tools menu with Remote control ticked" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <div class="ph">Screenshot to come: Gqrx Tools menu with Remote control ticked.</div>
+  <figcaption>Tools → Remote control, ticked: the server is on.</figcaption>
+</figure>
+  </li>
+</ol>
+<p>Gqrx remembers it: remote control is still on when Gqrx starts again.</p>
+<p><b>If uBITX CEC Desktop doesn't connect</b> because remote control was off, turn it on in Gqrx, then press the SDR button on Operate, which says <span class="ui">sdr — reconnect</span>.</p>
+<div class="note"><b>Don't turn off remote control while uBITX CEC Desktop is connected.</b> Gqrx quits when you do (seen on macOS). Quit uBITX CEC Desktop first, or leave remote control on. After such a quit, Gqrx asks on its next start whether to edit the settings: answer <b>No</b>, as the settings weren't the cause.</div>
 <p><b>On a Raspberry Pi 5</b>, Gqrx is the lightest choice, at about a third of one core. uBITX CEC Desktop gets more from it than from SDR++, so it's the one to use on a Pi when Brown is too heavy.</p>
 <p><b>The band plan.</b> Gqrx can label the bands across the spectrum: tick <b>Band Plan</b> (<i>Show band plan overlay</i>) in its FFT settings panel. It's off as Gqrx comes. Its plan is the US amateur bands, kept in <code>bandplan.csv</code> in Gqrx's settings folder (<code>~/.config/gqrx/</code> on Linux). Outside the US, edit that file to match your own bands. The labels don't tune or change the mode.</p>
-<p><b>The window.</b> Gqrx's panels (receiver options, input controls, FFT settings, audio) are docks. Close the ones you don't need, or drag them out of the window, and leave the spectrum and waterfall. The <span class="ui">View</span> menu brings them back.</p>
+<!-- FIX (2026-11-20): the window, with Mark's screenshots and notes -->
+<p><b>The window.</b> Gqrx's panels (Input controls, Receiver Options, Audio, FFT Settings and the others) are docks, listed in the <span class="ui">View</span> menu. For a waterfall to sit under uBITX CEC Desktop:</p>
+<ol>
+  <li><b>Adjust the picture:</b> in <span class="ui">View</span>, untick every panel except <b>FFT Settings</b>. That leaves the spectrum, the waterfall and the FFT Settings panel beside them. Three controls there matter:
+    <ul>
+      <li><b>Split</b> (first arrow): how the window is shared between the spectrum plot and the waterfall.</li>
+      <li><b>Plot dB</b> (second arrow): the range of levels the spectrum plot shows.</li>
+      <li><b>WF dB</b> (third arrow): the waterfall's levels, which work like its gain. Narrow it until the noise is dark and the signals stand out.</li>
+    </ul>
+<figure class="missing">
+  <img src="images/gqrx-tools-waterfal-and-controls.png" alt="Gqrx View menu with only FFT Settings ticked" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <div class="ph">Screenshot to come: Gqrx View menu with only FFT Settings ticked.</div>
+  <figcaption>View, with only FFT Settings ticked.</figcaption>
+</figure>
+<figure class="missing">
+  <img src="images/gqrx-waterfall-with_fft.png" alt="Gqrx with the FFT Settings panel: arrows at Split, Plot dB and WF dB" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <div class="ph">Screenshot to come: Gqrx with the FFT Settings panel: arrows at Split, Plot dB and WF dB.</div>
+  <figcaption>The result: the arrows point to Split, Plot dB and WF dB.</figcaption>
+</figure>
+  </li>
+  <li><b>Hide the rest:</b> when the picture is right, untick <b>FFT Settings</b> too, so every panel in <span class="ui">View</span> is unticked. Only the spectrum and the waterfall are left. The <span class="ui">View</span> menu brings any panel back.
+<figure class="missing">
+  <img src="images/gqrx-tools-only-waterfall.png" alt="Gqrx View menu with every panel unticked" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <div class="ph">Screenshot to come: Gqrx View menu with every panel unticked.</div>
+  <figcaption>View, with every panel unticked.</figcaption>
+</figure>
+<figure class="missing">
+  <img src="images/gqrx-only-waterfall.png" alt="Gqrx showing only the spectrum and waterfall" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <div class="ph">Screenshot to come: Gqrx showing only the spectrum and waterfall.</div>
+  <figcaption>The result: the spectrum and the waterfall alone.</figcaption>
+</figure>
+  </li>
+  <li><b>Place it:</b> size Gqrx's window to the width of uBITX CEC Desktop's, and put it underneath. See <a href="#sdr-windows">Arranging the windows</a>. Gqrx comes back in the same place when it starts again. You can make the window shorter, but its height doesn't stay: on the next start, Gqrx restores its own height.
+<figure class="missing">
+  <img src="images/gqrx-app-windows-positioned.png" alt="uBITX CEC Desktop with Gqrx's spectrum and waterfall underneath" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <div class="ph">Screenshot to come: uBITX CEC Desktop with Gqrx's spectrum and waterfall underneath.</div>
+  <figcaption>uBITX CEC Desktop with Gqrx underneath, at the same width.</figcaption>
+</figure>
+  </li>
+</ol>
 
 <!-- ---------------------------------------------------------------- -->
 <h4 class="program" id="sdr-sdrangel">SDRangel</h4>
