@@ -793,15 +793,16 @@ then restart the Pi.</li>
 <p><b>If uBITX CEC Desktop doesn't connect</b> because remote control was off, turn it on in Gqrx, then press the SDR button on Operate, which says <span class="ui">sdr — reconnect</span>.</p>
 <div class="note"><b>Don't turn off remote control while uBITX CEC Desktop is connected.</b> Gqrx quits when you do (seen on macOS). Quit uBITX CEC Desktop first, or leave remote control on. After such a quit, Gqrx asks on its next start whether to edit the settings: answer <b>No</b>, as the settings weren't the cause.</div>
 <p><b>On a Raspberry Pi 5</b>, Gqrx is the lightest choice, at about a third of one core. uBITX CEC Desktop gets more from it than from SDR++, so it's the one to use on a Pi when Brown is too heavy.</p>
-<p><b>The band plan.</b> Gqrx can label the bands across the spectrum: tick <b>Band Plan</b> (<i>Show band plan overlay</i>) in its FFT settings panel. It's off as Gqrx comes. Its plan is the US amateur bands, kept in <code>bandplan.csv</code> in Gqrx's settings folder (<code>~/.config/gqrx/</code> on Linux). Outside the US, edit that file to match your own bands. The labels don't tune or change the mode.</p>
 <!-- FIX (2026-11-20): the window, with Mark's screenshots and notes -->
 <p><b>The window.</b> Gqrx's panels (Input controls, Receiver Options, Audio, FFT Settings and the others) are docks, listed in the <span class="ui">View</span> menu. For a waterfall to sit under uBITX CEC Desktop:</p>
 <ol>
-  <li><b>Adjust the picture:</b> in <span class="ui">View</span>, untick every panel except <b>FFT Settings</b>. That leaves the spectrum, the waterfall and the FFT Settings panel beside them. Three controls there matter:
+  <li><b>Adjust the picture:</b> in <span class="ui">View</span>, untick every panel except <b>FFT Settings</b>. That leaves the spectrum, the waterfall and the FFT Settings panel beside them. Four controls there matter:
     <ul>
-      <li><b>Split</b> (first arrow): how the window is shared between the spectrum plot and the waterfall.</li>
-      <li><b>Plot dB</b> (second arrow): the range of levels the spectrum plot shows.</li>
-      <li><b>WF dB</b> (third arrow): the waterfall's levels, which work like its gain. Narrow it until the noise is dark and the signals stand out.</li>
+      <!-- FIX (2026-11-20): the band plan moved here, to Mark's new arrow -->
+      <li><b>Band Plan</b> (first arrow): labels the bands across the spectrum. It's off as Gqrx comes. Its plan is the US amateur bands, kept in <code>bandplan.csv</code> in Gqrx's settings folder (<code>~/.config/gqrx/</code> on Linux; started from a terminal, Gqrx prints where it is). Outside the US, edit that file in a text editor to match your own bands, and restart Gqrx. The labels don't tune or change the mode.</li>
+      <li><b>Split</b> (second arrow): how the window is shared between the spectrum plot and the waterfall.</li>
+      <li><b>Plot dB</b> (third arrow): the range of levels the spectrum plot shows.</li>
+      <li><b>WF dB</b> (fourth arrow): the waterfall's levels, which work like its gain. Narrow it until the noise is dark and the signals stand out.</li>
     </ul>
 <figure class="missing">
   <img src="images/gqrx-tools-waterfal-and-controls.png" alt="Gqrx View menu with only FFT Settings ticked" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
@@ -809,9 +810,9 @@ then restart the Pi.</li>
   <figcaption>View, with only FFT Settings ticked.</figcaption>
 </figure>
 <figure class="missing">
-  <img src="images/gqrx-waterfall-with_fft.png" alt="Gqrx with the FFT Settings panel: arrows at Split, Plot dB and WF dB" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
-  <div class="ph">Screenshot to come: Gqrx with the FFT Settings panel: arrows at Split, Plot dB and WF dB.</div>
-  <figcaption>The result: the arrows point to Split, Plot dB and WF dB.</figcaption>
+  <img src="images/gqrx-waterfall-with_fft.png" alt="Gqrx with the FFT Settings panel: arrows at Band Plan, Split, Plot dB and WF dB" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <div class="ph">Screenshot to come: Gqrx with the FFT Settings panel: arrows at Band Plan, Split, Plot dB and WF dB.</div>
+  <figcaption>The result: the arrows point to Band Plan, Split, Plot dB and WF dB.</figcaption>
 </figure>
   </li>
   <li><b>Hide the rest:</b> when the picture is right, untick <b>FFT Settings</b> too, so every panel in <span class="ui">View</span> is unticked. Only the spectrum and the waterfall are left. The <span class="ui">View</span> menu brings any panel back.

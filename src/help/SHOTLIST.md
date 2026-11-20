@@ -41,7 +41,7 @@ Save each one in `help/images/` under the name given. The page shows it in place
 | `gqrx-tools-only-waterfall.png` | Done: Gqrx View menu, every panel unticked. |
 | `gqrx-only-waterfall.png` | Done: Gqrx with only the spectrum and waterfall. Large (1.1 MB): a JPG candidate. |
 | `gqrx-tools-waterfal-and-controls.png` | Done: Gqrx View menu, FFT Settings ticked. |
-| `gqrx-waterfall-with_fft.png` | Done: Gqrx with FFT Settings: Split, Plot dB, WF dB. Large (770 KB): a JPG candidate. |
+| `gqrx-waterfall-with_fft.png` | Done: Gqrx with FFT Settings: Band Plan, Split, Plot dB, WF dB. Large (770 KB): a JPG candidate. |
 | `gqrx-app-windows-positioned.png` | Done: uBITX CEC Desktop with Gqrx underneath. Large (960 KB): a JPG candidate. |
 
 Also wanted, for the sections marked "To fill in":
