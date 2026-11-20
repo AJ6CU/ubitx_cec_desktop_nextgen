@@ -1,8 +1,25 @@
-# SDRoxide's PANO and uBITX CEC Desktop
+# Scans started in the SDR (SDRoxide's PANO and the like) and uBITX CEC Desktop
 
-Written 2026-11-20. **Decision for 1.0: don't use it.** The help tells users not
-to run SDRoxide's SCAN (MEM, RANGE or PANO) while uBITX CEC Desktop is
-connected, and to scan with uBITX CEC Desktop's own Channels instead.
+Written 2026-11-20. **Decision for 1.0: don't use them.** The help (Connecting
+uBITX CEC Desktop to the SDR) tells users not to run the SDR program's own
+scanner while uBITX CEC Desktop is connected, and to scan with uBITX CEC
+Desktop's own Channels instead, where the uBITX leads and the SDR follows.
+
+## Not only PANO
+
+PANO is where it was found, but any scanner inside the SDR program does the
+same: to step, it moves the program's frequency, which uBITX CEC Desktop reads
+over rigctl and can't tell from the operator tuning.
+
+| Program | Its scanner | Same problem? |
+| :--- | :--- | :--- |
+| SDRoxide | SCAN: MEM, RANGE, PANO | yes, seen at the station |
+| Brown | SCAN: MEM, RANGE (no PANO yet) | yes: same `stop_scan_for_operator` in its engine |
+| SDR++ | Scanner module | very likely: it tunes the VFO rigctl reports |
+| SDRangel | Frequency Scanner channel | probably; depends on which frequency it moves. Not checked |
+| Gqrx | none built in; external scanners use its remote control | yes, and they compete for the same port |
+
+The rest of this note is about PANO, where it was studied.
 
 ## What PANO is
 
@@ -121,7 +138,8 @@ Not filed. The issue text would go in the project as
 
 1. 1.0: don't use (the help says so). No code change.
 2. After 1.0: Fix 1, with its tests and the station checks above.
-3. File the SDRoxide issue for `u SCANNING`; ask Brown for the same once it has
-   PANO.
+3. File the SDRoxide issue for `u SCANNING`; ask Brown for the same (it has
+   MEM and RANGE scans already).
 4. When SDRoxide has it: probe and pause following; then change the help from
-   "don't use" to "works, uBITX stays put".
+   "don't use" to "works, uBITX stays put" for that program; the others stay
+   "don't use".

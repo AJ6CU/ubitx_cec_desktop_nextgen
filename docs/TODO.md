@@ -166,16 +166,18 @@ or a running copy:
      "with SDRoxide Brown". Try split on upstream: if it works, fix the
      intro; if not, set the grid cell to –.
 
-**SDRoxide's SCAN / PANO with uBITX CEC Desktop (2026-11-20).** For 1.0: don't
-use it; the help says so. SDRoxide's scans move its dial, uBITX CEC Desktop
-follows and drags the uBITX along, or a follow race sends a stale frequency back
-and stops the scan. Details, findings at the station and the reasoning:
-`docs/PANO.md`. Resolution, after 1.0:
+**Scans started in the SDR (SCAN / PANO and the like) with uBITX CEC Desktop
+(2026-11-20).** For 1.0: don't use them; the help says so, in Connecting
+uBITX CEC Desktop to the SDR. A scanner in the SDR program (SDRoxide's and
+Brown's SCAN, SDRoxide's PANO, SDR++'s Scanner, SDRangel's Frequency Scanner)
+moves its frequency; uBITX CEC Desktop follows and drags the uBITX along, or a
+follow race sends a stale frequency back and stops the scan. Details, findings
+at the station and the reasoning: `docs/PANO.md`. Resolution, after 1.0:
 1. Fix the follow race in `sdr_link.py` (late uBITX confirmations taken for a
    move at the rig; also bounces the SDR after two quick waterfall clicks), with
    the tests and station checks in PANO.md.
-2. Ask SDRoxide for a read-only `u SCANNING` (Hamlib's ext-func way); Brown too
-   once it has PANO. Draft as `ubitx_cec_desktop/sdroxide/issue_scan_status.md`.
+2. Ask SDRoxide for a read-only `u SCANNING` (Hamlib's ext-func way), and Brown
+   for the same. Draft as `ubitx_cec_desktop/sdroxide/issue_scan_status.md`.
 3. When it exists: probe at connect, pause following while it reads 1, and
    change the help from "don't use" to "works".
 
