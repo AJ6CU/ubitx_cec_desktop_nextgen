@@ -531,16 +531,10 @@ bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
 <p>uBITX CEC Desktop is the control panel, and the SDR program is the ears and eyes. A layout that works well:</p>
 <ul>
   <li><b>uBITX CEC Desktop above, the SDR's waterfall below it.</b> Size the SDR's window to the width of uBITX CEC Desktop's. If you have a second screen, the SDR can go there instead.</li>
-  <li><b>Hide what you don't need in the SDR program.</b> uBITX CEC Desktop does the tuning, the mode and the filter, so the SDR's own controls mostly duplicate it. Each program below says how to tidy its window.</li>
+  <li><b>Hide what you don't need in the SDR program.</b> uBITX CEC Desktop does the tuning, the mode and the filter, so the SDR's own controls mostly duplicate it. Each program below says how to tidy its window, and Brown's and Gqrx's sections show the result.</li>
   <li><b>Leave <span class="ui">Keep on top</span> on</b>, in <span class="ui">Setup → Station</span>. It's on by default. Without it, the first click on the SDR's waterfall brings the SDR's large window to the front, and uBITX CEC Desktop disappears behind it. With it, uBITX CEC Desktop stays in view however you click.</li>
 </ul>
 
-<!-- FIX (2026-11-19): Mark's screenshot of an efficient layout -->
-<figure class="missing">
-  <img src="images/sdr-layout.jpg" alt="uBITX CEC Desktop above, with the SDR program's spectrum and waterfall below it at the same width" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
-  <div class="ph">Screenshot to come: uBITX CEC Desktop with the SDR's waterfall below it.</div>
-  <figcaption>An efficient layout: uBITX CEC Desktop on top, and below it the SDR program cut down to its spectrum and waterfall, at the same width.</figcaption>
-</figure>
 
 <!-- ---------------------------------------------------------------- -->
 <h4 class="program" id="sdr-brown">SDRoxide Brown (recommended)</h4>
@@ -596,6 +590,12 @@ bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
   <div class="ph">Screenshot to come: Brown, Settings, Detachable: Panadapter set to Undocked, its own window.</div>
   <figcaption>Settings → Detachable, with the Panadapter undocked. The Operating panel, the Controls and the second spectrum stay docked.</figcaption>
 </figure>
+<!-- FIX (2026-11-20): Mark's layout screenshot moved here from Arranging the windows: it shows Brown -->
+<figure class="missing" id="brown-layout">
+  <img src="images/sdr-layout.jpg" alt="Before and after: Brown's full window, then uBITX CEC Desktop above Brown's undocked spectrum, waterfall and CW panel at the same width" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <div class="ph">Screenshot to come: uBITX CEC Desktop with Brown's waterfall below it.</div>
+  <figcaption>Before and after: on the left, Brown's full window; on the right, uBITX CEC Desktop on top and Brown cut down to its spectrum, waterfall and CW panel below it, at the same width.</figcaption>
+</figure>
 <!-- FIX (2026-11-19): the SDR's own band plan (Mark) -->
 <p><b>The band plan and the first start.</b> Brown's band plan follows the <b>IARU region</b> on the <span class="ui">General</span> tab of its Settings: the band labels along the bottom of the waterfall, which band buttons it shows, and its digital presets. Set it to your own region. Left on another, the labels won't match your band plan. In Region 1, for example, 3.9–4.0 and 7.2–7.3 MHz are marked as broadcast. On its first start, Brown's <b>WELCOME</b> pages walk through the station, the radio and transmitting. Work through them, or skip them. Brown's transmit lockout never comes into play here, because the uBITX does the transmitting.</p>
 <figure class="missing">
@@ -634,7 +634,7 @@ bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
 <p><b>The band plan and the first start:</b> as with Brown, set the <b>IARU region</b> on the <span class="ui">General</span> tab to your own, and work through or skip the <b>WELCOME</b> pages.</p>
 <p><b>On a Raspberry Pi 5:</b> as with Brown, set the CW skimmer to <b>Timing</b>, not Neural.</p>
 <!-- FIX (2026-11-20): SDRoxide 1.7.3's undock setting, from Mark's copy -->
-<p><b>The window.</b> SDRoxide 1.7.3 and later can undock the panadapter too, but the setting is on a different tab from Brown's. In <span class="ui">Settings → UI</span>, under <i>Display</i>, set <b>Panadapter window</b> to <b>Undocked — its own window</b>, and place it under uBITX CEC Desktop. Or undock the <b>Controls window</b> and the <b>Operating panel window</b> instead, and keep the spectrum in the main window. <b>DOCK ALL WINDOWS</b> brings everything back.</p>
+<p><b>The window.</b> SDRoxide 1.7.3 and later can undock the panadapter too, but the setting is on a different tab from Brown's. In <span class="ui">Settings → UI</span>, under <i>Display</i>, set <b>Panadapter window</b> to <b>Undocked — its own window</b>, and place it under uBITX CEC Desktop, as in <a href="#brown-layout">Brown's picture</a>. Or undock the <b>Controls window</b> and the <b>Operating panel window</b> instead, and keep the spectrum in the main window. <b>DOCK ALL WINDOWS</b> brings everything back. The rest works as in Brown: see <a href="#sdr-brown">its section</a>.</p>
 <figure class="missing">
   <img src="images/sdroxide-undock.png" alt="SDRoxide, Settings, UI: Panadapter window set to Undocked, its own window" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
   <div class="ph">Screenshot to come: SDRoxide, Settings, UI: Panadapter window set to Undocked, its own window.</div>
