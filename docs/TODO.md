@@ -1069,6 +1069,13 @@ display's notes would follow; test every VFO/split/RIT combination again.
   buttons and presets, and backs their own transmit lockout (off the table
   for us: the uBITX transmits). Not reachable over rigctl; the help now says
   to set the region (done 2026-11-19).
+* *Gqrx's*: `bandplan.csv` in its settings folder (`~/.config/gqrx/` on
+  Linux; a terminal start prints the path as "BandPlanFile is ..."), copied
+  on first start from the US plan built into Gqrx; one line per segment:
+  `start Hz, end Hz, mode, step, #color, name`. Labels only, shown with
+  FFT Settings > Band Plan; no transmit role. Not reachable over rigctl.
+  SDR++'s band plans (Band Plan section, by country) are the same kind of
+  label-only list, chosen in its window.
 
 What to do:
 
@@ -1088,6 +1095,13 @@ What to do:
    restore. The app's band plan would then be a setting (in settings.json, or
    a bands.json beside channels.json) rather than a constant, editable for
    a region or a license class.
+5. *OPTION -- Gqrx's labels too (Mark, 2026-11-20)*: outside the US, or with
+   a band plan of the user's own, Gqrx's `bandplan.csv` won't match the
+   radio's or the app's bands. With the option in 4, a third button could
+   **write a Gqrx `bandplan.csv`** from the app's band plan (back up the old
+   one first; Gqrx reads it at start, so it says to restart Gqrx). Gqrx
+   only: SDRoxide and Brown take theirs by IARU region, and SDR++ by
+   country, from their own windows.
 
 **Scroll over a frequency digit to tune by it (Mark, 2026-11-19).** *Open.*
 Today a click on a digit of the RX or TX readout only selects it as the
