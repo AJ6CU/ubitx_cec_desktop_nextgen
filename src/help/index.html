@@ -544,7 +544,8 @@ bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
 
 <!-- ---------------------------------------------------------------- -->
 <h4 class="program" id="sdr-brown">SDRoxide Brown (recommended)</h4>
-<p>A free fork of SDRoxide, tuned for CB and listening but carrying every ham feature of SDRoxide. It gives uBITX CEC Desktop the most to control: everything SDRoxide does, plus the span and the CW peak filter (APF). It runs on Windows, macOS and Linux (a Raspberry Pi too), and its neural CW decoder sends its copy to uBITX CEC Desktop's CW strip. The downsides: new builds come often, so things can change between versions; its manual is long; and its CB and listening focus shows in the menus and quick-start guides. Update it if your copy is older than 19 November 2026: older builds install on a Mac under the same name as SDRoxide (see the note under SDRoxide).</p>
+<p>A free fork of SDRoxide, tuned for CB and listening but carrying every ham feature of SDRoxide. It gives uBITX CEC Desktop the most to control: everything SDRoxide does, plus the span and the CW peak filter (APF). It runs on Windows, macOS and Linux (a Raspberry Pi too), and its neural CW decoder sends its copy to uBITX CEC Desktop's CW strip. It is currently moving faster in its evolution than the upstream SDRoxide and so most new features seem to be appearing here first.</p>
+    <p>The downsides: new builds come often, so things can change between versions; its manual is long; and its CB and listening focus shows in the menus and quick-start guides. Update it if your copy is older than 19 November 2026: older builds install on a Mac under the same name as SDRoxide (see the note under SDRoxide).</p>
 
 <h5>Resources</h5>
 <ul>
@@ -565,7 +566,7 @@ bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
       <li><b>Max clients</b> 1, or more if other programs use it too.</li>
       <li>Leave <b>Allow clients to transmit</b> off, since the uBITX does the transmitting.</li>
     </ul>
-    Press <b>APPLY</b>. The status line should say it's listening.
+    You must press <b>APPLY</b> for the changes to be saved (see yellow arrow). Make sure the status line should say it's listening.
 <!-- FIX (2026-11-19): Mark's screenshots of Brown's settings -->
 <figure class="missing">
   <img src="images/brown-servers-hamlib.png" alt="Brown, Settings, Servers: the Hamlib rigctld server enabled on 127.0.0.1 port 4532" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
@@ -577,15 +578,15 @@ bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
 <figure class="missing">
   <img src="images/brown-servers-cw.png" alt="Brown, Settings, Servers: Decoded CW over UDP enabled, sending to 127.0.0.1 port 9998" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
   <div class="ph">Screenshot to come: Brown, Settings, Servers: Decoded CW over UDP enabled, sending to 127.0.0.1 port 9998.</div>
-  <figcaption>Decoded CW over UDP, further down the same page. Its own <b>APPLY</b> is the one to press.</figcaption>
+  <figcaption>Decoded CW over UDP, further down the same page. Do not forget to click <b>APPLY</b> (yellow arrow).</figcaption>
 </figure>
   </li>
 </ul>
 <!-- FIX (2026-11-19): undock the panadapter -- one step (Mark) -->
-<p><b>The window.</b> Brown can take any of its parts out of the main window. The simplest way to get a waterfall to put under uBITX CEC Desktop is to undock the <b>Panadapter</b>, the spectrum and waterfall. In <span class="ui">Settings → Detachable</span>, under <i>Detachable windows</i>, set <b>Panadapter</b> to <b>Undocked — its own window</b>. Or use the <b>🪟 WINDOWS</b> chip at the right of the radio-tab strip, and set <b>SP1 — the spectrum</b> to <b>IN ITS OWN WINDOW</b>.</p>
+<p><b>The window.</b> Brown can separate its main window into multple windows through "undocking". The simplest way to only get a waterfall to put under uBITX CEC Desktop is to undock the <b>Panadapter</b>, the spectrum and waterfall. In <span class="ui">Settings → Detachable</span>, under <i>Detachable windows</i>, set <b>Panadapter</b> to <b>Undocked — its own window</b>. Or use the <b>🪟 WINDOWS</b> chip at the right of the radio-tab strip, and set <b>SP1 — the spectrum</b> to <b>IN ITS OWN WINDOW</b>.</p>
 <ul>
   <li><b>What you get:</b> a window that is just the spectrum and waterfall. Size it to sit under uBITX CEC Desktop.</li>
-  <li><b>The main window</b> keeps Brown's controls and decoders. Put it on another screen or out of the way: the waterfall keeps running without it in view. When Brown starts, its main window comes up in front of the undocked one, so move it back each time.</li>
+  <li><b>The main window</b> keeps Brown's controls and decoders. You can minimize it, put it on another screen or just move it out of the way: the waterfall keeps running without it in view. When Brown starts, its main window comes up in front of the undocked one, so minimize or move it back each time.</li>
   <li><b>The other way round:</b> undock the <b>Controls</b> (the top strip of frequency, S-meter and receiver controls) and the <b>Operating panel</b> instead. The main window then becomes the spectrum and the decoders.</li>
   <li><b>Getting a part back:</b> closing an undocked window docks it again, and <b>DOCK ALL WINDOWS</b> brings everything back.</li>
   <li><b>Next time:</b> Brown remembers the arrangement.</li>
@@ -609,11 +610,11 @@ bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
   <div class="ph">Screenshot to come: Brown's CW panel with QRG off.</div>
   <figcaption>The <b>QRG</b> chip in Brown's CW panel, off. Brown's readout shows the dial, 7.044.200, the same as uBITX CEC Desktop. The frequency being copied, the dial plus the 700 Hz pitch, appears beside the chip as 7.0449 MHz.</figcaption>
 </figure>
-<p><b>On a Raspberry Pi 5.</b> Brown runs well, but set the CW skimmer to <b>Timing</b>, not <b>Neural</b>, in the <b>SKIM</b> chip of the Display box, or turn the skimmers off. On Neural, the CW skimmer alone takes about two of the Pi's four cores. With that one change, the other settings can stay as they are.</p>
+<p><b>On a Raspberry Pi 5.</b> Brown runs well, but you will probably want to set the CW skimmer to <b>Timing</b>, not <b>Neural</b>, in the <b>SKIM</b> chip of the Display box, or turn the skimmers off. Use the Linux command <code>top</code> to check CPU utilization. The Pi5 has 4 cores, so don't be surprised if you see CPU utilization of 250% or more. On Neural, the CW skimmer alone takes aone or two of the Pi's four cores. With that one change, the other settings can stay as they are.</p>
 
 <!-- ---------------------------------------------------------------- -->
 <h4 class="program" id="sdr-sdroxide">SDRoxide</h4>
-<p>The original that Brown is built on: a free SDR program written in Rust, with panadapter, digital modes, skimmers and logbook in one, for Windows, macOS and Linux. It gives uBITX CEC Desktop nearly everything Brown does, but not the span and the CW peak filter. The downsides: it is beta and moving fast, and its authors advise against relying on it for critical operation yet; and like Brown, its manual is long. It needs version 1.6.11 or later.</p>
+<p>SDRoxide is the original software that Brown is built on: a free SDR program written in Rust, with panadapter, digital modes, skimmers and logbook in one, for Windows, macOS and Linux. It gives uBITX CEC Desktop nearly everything Brown does, but not (yet) the span and the CW peak filter. The official release schedule, approximately every 2 weeks, is similar to that of Brown, but there are no nightly builds. The downsides: it is beta and moving fast, and its authors advise against relying on it for critical operation yet; and like Brown, its manual is long. It needs version 1.7.3 or later.</p>
 
 <h5>Resources</h5>
 <ul>
@@ -624,6 +625,7 @@ bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
 </ul>
 
 <h5>Configuring for uBITX CEC Desktop</h5>
+    <p>Since Brown is derived from SDRoxide, the locations and screenshots of the settings above in the <a href="#sdr-brown">SDRoxide Brown</a> should be used to configure SDRoxide too.</p>
 <p><b>Services.</b> In <span class="ui">Settings → Servers</span>, the same as Brown:</p>
 <ul>
   <li><b>Hamlib rigctld server:</b> enabled, on <code>127.0.0.1</code>, port <code>4532</code>, without transmit. Press <b>APPLY</b>.</li>
