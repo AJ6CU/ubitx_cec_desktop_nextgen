@@ -26,6 +26,7 @@ Save each one in `help/images/` under the name given. The page shows it in place
 | `brown-servers-hamlib.png` | Done: Brown, Settings ▸ Servers, the Hamlib rigctld server. Allow clients to transmit off. |
 | `brown-servers-cw.png` | Done: Brown, Settings ▸ Servers, Decoded CW over UDP on 127.0.0.1:9998, its own APPLY. |
 | `brown-undock.png` | Done: Brown, Settings ▸ Detachable, Panadapter undocked. |
+| `sdroxide-undock.png` | Done: SDRoxide 1.7.3, Settings ▸ UI, Panadapter window undocked. |
 | `brown-region.png` | Done: Brown, the IARU region (Region 2) and 11M/CB. |
 | `brown-org-off.png` | Done: Brown's CW panel with the QRG chip off. |
 

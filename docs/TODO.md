@@ -150,10 +150,9 @@ or a running copy:
    (youtube.com/watch?v=mBU7eSviy_0) and the SignalsEverywhere SDR++
    overview (aAbgbDVs_0A): neither could be opened directly, only seen
    embedded on rtl-sdr.com.
-2. *Brown and SDRoxide windows*: does "Settings → UI → Undocked -- modules in
-   their own windows" (Brown) / "Undocked windows, the floating panel and
-   workspaces" (SDRoxide), "Undocked -- its own window", the 🪟 WINDOWS chip
-   and DOCK ALL WINDOWS match the copies installed here?
+2. *Brown and SDRoxide windows*: done (2026-11-20). Brown's is
+   Settings → Detachable; SDRoxide 1.7.3's is Settings → UI → Display →
+   Panadapter window. Both are in the help, with screenshots.
 3. *SDRangel's "Save it" step*: the exact menu name for saving the setup as
    a configuration (the help only says "as a configuration in SDRangel").
 4. *Gqrx*: does it keep remote control on after a restart? The help says
