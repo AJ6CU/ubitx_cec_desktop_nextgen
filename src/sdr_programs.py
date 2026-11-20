@@ -159,6 +159,14 @@ class Profile:
         # What the operating system calls the application, for asking it to
         # quit politely -- see sdr_launcher.stop().
         self.app_name = entry.get("app_name", "")
+        # FIX (2026-11-19): macOS: THE APPLICATION'S BUNDLE ID
+        # (CFBundleIdentifier). SDRoxide and SDRoxide Brown both run an
+        # executable called "sdroxide", so neither the process name nor --
+        # until Brown's #753 -- the application's name could tell them apart.
+        # Their bundle ids differ, so starting ("open -b"), finding the
+        # running one, and asking it to quit ("tell application id") go by
+        # this when it is given. See sdr_launcher.
+        self.bundle_id = entry.get("bundle_id") or ""
         # macOS: start it as an APPLICATION ("open -a Gqrx") rather than by
         # running its binary. A binary started directly is not a registered
         # application, so "tell application ... to quit" has nothing to talk

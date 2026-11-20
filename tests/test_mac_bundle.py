@@ -26,7 +26,7 @@ def run(system, override):
     L.subprocess.run = lambda cmd, **k: ran.append(cmd)
     L.subprocess.Popen = lambda cmd, **k: (popened.append(cmd), (_ for _ in ()).throw(
         PermissionError(13, "Permission denied", cmd[0])))[1]
-    L.running_process = lambda p: types.SimpleNamespace(pid=4242)
+    L.running_process = lambda p, bundle_id=None: types.SimpleNamespace(pid=4242)  # FIX (2026-11-19): takes a bundle id now
     L.time.sleep = lambda s: None
     L.program_command = lambda p, o: [o] if o else None
     return L.start(profile, override), ran, popened

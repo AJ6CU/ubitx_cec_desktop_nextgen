@@ -24,6 +24,7 @@ Path" setting overrides it, and the Setup page asks for one when the guess
 fails.
 """
 import os
+import plistlib
 import shutil
 import time
 import subprocess
@@ -50,39 +51,75 @@ def _system():
         "darwin" if sys.platform == "darwin" else "linux")
 
 
-def running_process(profile):
+def _bundle_id_of_app(app_path):
+    """macOS: the CFBundleIdentifier of an .app bundle, or "" if it can't be read."""
+    try:
+        with open(os.path.join(app_path, "Contents", "Info.plist"), "rb") as f:
+            return str(plistlib.load(f).get("CFBundleIdentifier") or "")
+    except Exception:
+        return ""
+
+
+def _bundle_id_of_exe(exe):
+    """macOS: the bundle id of the .app an executable sits in, or "" if it isn't in one."""
+    exe = str(exe or "")
+    marker = "/Contents/MacOS/"
+    if marker not in exe:
+        return ""
+    return _bundle_id_of_app(exe.split(marker)[0])
+
+
+def running_process(profile, bundle_id=None):
     """
     The process of an SDR already running, or None.
 
     Uses psutil where it is installed -- the previous version's approach, and
     the dependable one -- and falls back to asking the system, so a missing
     package means a worse answer rather than no feature.
+
+    FIX (2026-11-19): ON A MAC, THE BUNDLE ID DECIDES. SDRoxide and SDRoxide
+    Brown both run an executable called "sdroxide" (Mark: "ps ax | grep
+    sdroxide returns sdroxide"), so a name alone took one for the other --
+    attaching to the wrong one, or finding the wrong one to close. Where the
+    profile (or the caller) gives a bundle id, a process whose .app has a
+    DIFFERENT one is passed over. One whose bundle can't be read is still
+    taken, as before.
     """
     names = {name.lower() for name in profile.process_names}
     if not names:
         return None
+    wanted = (bundle_id if bundle_id is not None else getattr(profile, "bundle_id", "")) \
+        if _system() == "darwin" else ""
 
     try:
         import psutil
     except ImportError:
-        return _running_without_psutil(names)
+        return _running_without_psutil(names, wanted)
 
-    for process in psutil.process_iter(["pid", "name"]):
+    for process in psutil.process_iter(["pid", "name", "exe"]):
         try:
             name = (process.info["name"] or "").lower()
-            if name in names:
-                return process
+            if name not in names:
+                continue
+            if wanted:
+                found = _bundle_id_of_exe(process.info.get("exe"))
+                if found and found != wanted:
+                    continue            # the other program with the same name
+            return process
         except Exception:
             continue                    # gone, or not ours to look at
     return None
 
 
-def _running_without_psutil(names):
+def _running_without_psutil(names, bundle_id=""):
     """
     Whether one of these names is running, asking the system.
 
     Returns True rather than a process: without psutil there is nothing to
     hold on to, and True is enough to decide not to start another.
+
+    On a Mac "ps -o comm" gives each executable's full path, so a bundle id
+    is checked the same way as above.
     """
     try:
         if _system() == "win32":
@@ -92,6 +129,15 @@ def _running_without_psutil(names):
             output = subprocess.check_output(["ps", "-A", "-o", "comm"], text=True,
                                              stderr=subprocess.DEVNULL)
     except Exception:
+        return None
+    if bundle_id:
+        for line in output.splitlines():
+            line = line.strip()
+            if os.path.basename(line).lower() not in names:
+                continue
+            found = _bundle_id_of_exe(line)
+            if not found or found == bundle_id:
+                return True
         return None
     lowered = output.lower()
     return True if any(name in lowered for name in names) else None
@@ -130,10 +176,14 @@ class Started:
     will it go when asked, and will it go when told.
     """
 
-    def __init__(self, profile, popen=None, pid=None):
+    def __init__(self, profile, popen=None, pid=None, bundle_id=None):
         self.profile = profile
         self.popen = popen
         self.pid = pid if pid is not None else (popen.pid if popen else None)
+        # macOS: which application this is, by bundle id -- the profile's, or
+        # the one read from the .app it was started from. See running_process.
+        self.bundle_id = bundle_id if bundle_id is not None \
+            else getattr(profile, "bundle_id", "")
 
     def is_running(self):
         if self.popen is not None:
@@ -154,7 +204,7 @@ class Started:
         # id stays None. Reading that as "not running" made stop() decide the
         # program had already gone and ask nothing: Gqrx simply stayed open,
         # silently. Look for it by name instead.
-        return running_process(self.profile) is not None
+        return running_process(self.profile, self.bundle_id) is not None
 
     def ask_to_quit(self):
         """
@@ -163,7 +213,17 @@ class Started:
         """
         system = _system()
         try:
-            if system == "darwin" and self.profile.app_name:
+            # FIX (2026-11-19): BY BUNDLE ID WHERE THERE IS ONE. Brown's
+            # bundle was renamed sdroxide-brown (#753), so asking "sdroxide" to
+            # quit asked the wrong application -- or one not running at all --
+            # and Brown stayed open (Mark). An id names exactly one program.
+            if system == "darwin" and self.bundle_id:
+                target = f'application id "{self.bundle_id}"'
+            elif system == "darwin" and self.profile.app_name:
+                target = f'application "{self.profile.app_name}"'
+            else:
+                target = ""
+            if target:
                 # NOT SILENCED. Asking one application to quit another needs
                 # Automation permission on macOS, and the first attempt puts
                 # up a prompt: refused or unanswered, osascript fails with
@@ -172,7 +232,7 @@ class Started:
                 # as though nothing had been tried.
                 done = subprocess.run(
                     ["osascript", "-e",
-                     f'tell application "{self.profile.app_name}" to quit'],
+                     f'tell {target} to quit'],
                     capture_output=True, text=True, timeout=10)
                 # WHETHER IT WORKED IS NOT THE RETURN CODE'S TO SAY. Gqrx
                 # answers a quit with "User canceled (-128)" and then quits
@@ -266,11 +326,25 @@ def start(profile, override=""):
 
     # AS AN APPLICATION where the platform has such a thing and the program
     # needs to be quit politely -- see Profile.launch_as_application.
-    if bundle or (_system() == "darwin" and profile.launch_as_application
-                  and profile.app_name and not override):
-        what = bundle or profile.app_name
+    # FIX (2026-11-19): BY BUNDLE ID. A chosen .app is quit by its own id,
+    # read from its Info.plist; with no path set, a program whose profile has
+    # an id is opened by it ("open -b"), so SDRoxide and Brown can't be
+    # confused whatever their bundles are called or wherever they are.
+    by_id = (not override and _system() == "darwin" and profile.launch_as_application
+             and getattr(profile, "bundle_id", ""))
+    if bundle or by_id or (_system() == "darwin" and profile.launch_as_application
+                           and profile.app_name and not override):
+        if bundle:
+            what, command = bundle, ["open", "-a", bundle]
+            bundle_id = _bundle_id_of_app(bundle) or getattr(profile, "bundle_id", "")
+        elif by_id:
+            what, command = profile.app_name or profile.bundle_id, ["open", "-b", profile.bundle_id]
+            bundle_id = profile.bundle_id
+        else:
+            what, command = profile.app_name, ["open", "-a", profile.app_name]
+            bundle_id = ""
         try:
-            subprocess.run(["open", "-a", what], check=True,
+            subprocess.run(command, check=True,
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                            timeout=15)
         except Exception as err:
@@ -279,12 +353,13 @@ def start(profile, override=""):
         # ask to quit later.
         pid = None
         for _ in range(20):
-            process = running_process(profile)
+            process = running_process(profile, bundle_id)
             if process is not None:
                 pid = getattr(process, "pid", None)
                 break
             time.sleep(0.25)
-        return Started(profile, pid=pid), f"started {os.path.basename(what) if bundle else what}"
+        return (Started(profile, pid=pid, bundle_id=bundle_id),
+                f"started {os.path.basename(what) if bundle else what}")
 
     command = program_command(profile, override)
     if not command:
@@ -295,7 +370,11 @@ def start(profile, override=""):
                                  stderr=subprocess.DEVNULL, **_NO_WINDOW)
     except Exception as err:
         return None, f"could not start {command[0]}: {err}"
-    return Started(profile, popen=popen), f"started {os.path.basename(command[0])}"
+    # A binary inside an .app on a Mac still belongs to that bundle, and can
+    # be asked to quit by its id.
+    return (Started(profile, popen=popen,
+                    bundle_id=_bundle_id_of_exe(command[0]) or None),
+            f"started {os.path.basename(command[0])}")
 
 
 def stop(started, timeout=15.0, force_if_needed=False):

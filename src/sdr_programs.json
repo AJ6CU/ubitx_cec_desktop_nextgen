@@ -93,7 +93,8 @@
 
     "sdroxide": {
       "name": "SDRoxide",
-      "app_name": "SDRoxide",
+      "app_name": "sdroxide",
+      "bundle_id": "com.github.dividebysandwich.sdroxide",
       "launch_as_application": true,
       "protocol": "rigctl",
       "port": 4532,
@@ -111,7 +112,7 @@
       "squelch_range": [0.0, 1.0],
       "process_names": ["sdroxide", "sdroxide.exe", "SDRoxide"],
       "paths": {
-          "darwin": ["/Applications/SDRoxide.app/Contents/MacOS/sdroxide"],
+          "darwin": ["/Applications/sdroxide.app/Contents/MacOS/sdroxide"],
           "win32": ["C:\\Program Files\\SDRoxide\\sdroxide.exe"],
           "linux": ["sdroxide"]
       }
@@ -119,8 +120,9 @@
 
 "sdroxide-brown": {
     "name": "SDRoxide Brown",
-    "app_name": "sdroxide",
-    "launch_as_application": false,
+    "app_name": "sdroxide-brown",
+    "bundle_id": "com.github.madmedicnl.sdroxide-brown",
+    "launch_as_application": true,
     "protocol": "rigctl",
     "port": 4532,
     "modes": {"LSB": "LSB", "USB": "USB", "CWL": "CW", "CWU": "CW"},
@@ -137,7 +139,7 @@
     "squelch_range": [0.0, 1.0],
     "process_names": ["sdroxide", "sdroxide.exe"],
     "paths": {
-        "darwin": ["/Applications/sdroxide.app/Contents/MacOS/sdroxide"],
+        "darwin": ["/Applications/sdroxide-brown.app/Contents/MacOS/sdroxide"],
         "win32": ["C:\\Program Files\\sdroxide-brown\\sdroxide.exe"],
         "linux": ["sdroxide"]
     }
