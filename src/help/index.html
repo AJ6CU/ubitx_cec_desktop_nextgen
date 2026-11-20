@@ -632,6 +632,8 @@ bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
   <li><b>Decoded CW over UDP:</b> on, to <code>127.0.0.1</code>, port <b><code>9999</code></b>. SDRoxide's port, not Brown's 9998.</li>
 </ul>
 <p><b>The band plan and the first start:</b> as with Brown, set the <b>IARU region</b> on the <span class="ui">General</span> tab to your own, and work through or skip the <b>WELCOME</b> pages.</p>
+<!-- FIX (2026-11-20): SDRoxide has the same QRG chip (its manual, 2.14) -->
+<p><b>In CW, keep QRG off,</b> as with Brown: SDRoxide's CW panel has the same <b>QRG</b> chip in its header, and it's off as SDRoxide comes. See <a href="#sdr-brown">Brown's section</a> for why and what it looks like.</p>
 <p><b>On a Raspberry Pi 5:</b> as with Brown, set the CW skimmer to <b>Timing</b>, not Neural.</p>
 <!-- FIX (2026-11-20): SDRoxide 1.7.3's undock setting, from Mark's copy -->
 <p><b>The window.</b> SDRoxide 1.7.3 and later can undock the panadapter too, but the setting is on a different tab from Brown's. In <span class="ui">Settings → UI</span>, under <i>Display</i>, set <b>Panadapter window</b> to <b>Undocked — its own window</b>, and place it under uBITX CEC Desktop, as in <a href="#brown-layout">Brown's picture</a>. Or undock the <b>Controls window</b> and the <b>Operating panel window</b> instead, and keep the spectrum in the main window. <b>DOCK ALL WINDOWS</b> brings everything back. The rest works as in Brown: see <a href="#sdr-brown">its section</a>.</p>
