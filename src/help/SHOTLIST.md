@@ -29,6 +29,11 @@ Save each one in `help/images/` under the name given. The page shows it in place
 | `sdroxide-undock.png` | Done: SDRoxide 1.7.3, Settings ▸ UI, Panadapter window undocked. |
 | `brown-region.png` | Done: Brown, the IARU region (Region 2) and 11M/CB. |
 | `brown-org-off.png` | Done: Brown's CW panel with the QRG chip off. |
+| `sdrpp-module-manager.png` | Done: SDR++, the side menu scrolled to the Module Manager. |
+| `sdrpp-finding-rigctl-server.png` | Done: SDR++, Module Manager, the type list open on rigctl_server. |
+| `sdrpp-name-and-create.png` | Done: SDR++, Module Manager, a name in the box and the + button. |
+| `sdrpp-configure-rigctl.png` | Done: SDR++, the new server section: localhost 4532, Radio, Tuning, Listen on startup, Start. |
+| `sdrpp-listening.png` | Done: SDR++, the server section with Status: Listening. |
 
 Also wanted, for the sections marked "To fill in":
 - each SDR program's server setting (Brown's Settings ▸ Servers, SDR++'s Rigctl Server module, Gqrx's Remote control, SDRangel's device set and channels).

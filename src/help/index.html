@@ -672,14 +672,52 @@ bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
 </ul>
 
 <h5>Configuring for uBITX CEC Desktop</h5>
-<p><b>Services.</b> In SDR++'s side menu, open the <b>Rigctl Server</b> section. It's there by default; if not, add a <code>rigctl_server</code> module in the <b>Module Manager</b> section.</p>
-<ul>
-  <li><b>Address and port:</b> <code>localhost</code>, port <code>4532</code>.</li>
-  <li><b>Controlled VFO:</b> <i>Radio</i>.</li>
-  <li><b>Tuning</b> ticked.</li>
-  <li><b>Listen on startup</b> ticked, so the server is ready whenever SDR++ starts.</li>
-  <li>Press <b>Start</b>.</li>
-</ul>
+<!-- FIX (2026-11-20): the rigctl server is added in the Module Manager, step by step, with Mark's screenshots -->
+<p><b>The rigctl server.</b> SDR++ has no rigctl server until you add one, in its <b>Module Manager</b>:</p>
+<ol>
+  <li><b>Find the Module Manager.</b> It's near the bottom of SDR++'s side menu, below <i>Display</i> and <i>Theme</i>: scroll down to it.
+<figure class="missing">
+  <img src="images/sdrpp-module-manager.png" alt="SDR++, the side menu with the Module Manager section" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <div class="ph">Screenshot to come: SDR++, the side menu with the Module Manager section.</div>
+  <figcaption>The Module Manager, near the bottom of the side menu.</figcaption>
+</figure>
+  </li>
+  <li><b>Choose <code>rigctl_server</code>.</b> Below the list of modules is a box showing a module type. Click the <b>▼</b> arrow beside it, and pick <code>rigctl_server</code>. The list opens below the box or above it, depending on how close it is to the edge of the window.
+<figure class="missing">
+  <img src="images/sdrpp-finding-rigctl-server.png" alt="SDR++, Module Manager: the type list open, with rigctl_server picked" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <div class="ph">Screenshot to come: SDR++, Module Manager: the type list open, with rigctl_server picked.</div>
+  <figcaption>The ▼ arrow opens the list of module types; pick rigctl_server.</figcaption>
+</figure>
+  </li>
+  <li><b>Name it, then press +.</b> Type a name in the empty box to the left of the type, such as <code>rigctl</code>, and click <b>+</b> at the right. <b>The name is required:</b> without one, + doesn't add the module.
+<figure class="missing">
+  <img src="images/sdrpp-name-and-create.png" alt="SDR++, Module Manager: a name typed in the box left of rigctl_server, and the + button" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <div class="ph">Screenshot to come: SDR++, Module Manager: a name typed in the box left of rigctl_server, and the + button.</div>
+  <figcaption>A name in the box on the left, then + on the right.</figcaption>
+</figure>
+  </li>
+  <li><b>Set it up.</b> A new section appears in the side menu, headed with the name you gave it. In it:
+    <ul>
+      <li><b>Address and port:</b> <code>localhost</code>, port <code>4532</code>.</li>
+      <li><b>Controlled VFO:</b> <i>Radio</i>.</li>
+      <li><b>Tuning</b> ticked.</li>
+      <li><b>Listen on startup</b> ticked, so the server is ready whenever SDR++ starts.</li>
+      <li>Press <b>Start</b>.</li>
+    </ul>
+<figure class="missing">
+  <img src="images/sdrpp-configure-rigctl.png" alt="SDR++, the new rigctl server section: localhost, 4532, Controlled VFO Radio, Tuning and Listen on startup ticked, Start" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <div class="ph">Screenshot to come: SDR++, the new rigctl server section: localhost, 4532, Controlled VFO Radio, Tuning and Listen on startup ticked, Start.</div>
+  <figcaption>The new section: Radio, Tuning, Listen on startup, then Start.</figcaption>
+</figure>
+  </li>
+  <li><b>Check that it's listening.</b> The button now says <b>Stop</b>, and below it <b>Status: Listening</b>.
+<figure class="missing">
+  <img src="images/sdrpp-listening.png" alt="SDR++, the rigctl server section with Status: Listening" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <div class="ph">Screenshot to come: SDR++, the rigctl server section with Status: Listening.</div>
+  <figcaption>Status: Listening. The server is ready for uBITX CEC Desktop.</figcaption>
+</figure>
+  </li>
+</ol>
 <p>On Windows and Linux, uBITX CEC Desktop starts SDR++ with its dongle already running.</p>
 <p><b>On a Raspberry Pi (and other Linux):</b></p>
 <ul>
