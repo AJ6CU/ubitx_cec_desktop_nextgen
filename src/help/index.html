@@ -857,17 +857,134 @@ then restart the Pi.</li>
 </ul>
 
 <h5>Configuring for uBITX CEC Desktop</h5>
-<p><b>Services.</b> SDRangel's REST interface is on as it comes, at <code>127.0.0.1</code> port <code>8091</code>, so there's nothing to turn on. What uBITX CEC Desktop needs is the receiver built up in one device set:</p>
+<!-- FIX (2026-11-20): step by step, with Mark's seventeen screenshots -->
+<p><b>Services.</b> SDRangel's REST interface is on as it comes, at <code>127.0.0.1</code> port <code>8091</code>, so there's nothing to turn on. What uBITX CEC Desktop needs is a receiver built up in one device set: the RTL-SDR, a WDSP Receiver channel, a Channel Power channel and the Morse Decoder feature. Step by step:</p>
 <ol>
-  <li><b>A device set with the RTL-SDR</b>, started.</li>
-  <li><b>A WDSP Receiver channel</b>, added <i>first</i> in that device set. SDRangel's Morse Decoder listens to the first channel each time SDRangel starts. uBITX CEC Desktop uses the SSB demodulator if there's no WDSP receiver, with fewer controls.</li>
-  <li><b>A Channel Power channel</b>, for the S-meter. uBITX CEC Desktop keeps it on the passband.</li>
-  <li><b>The Morse Decoder feature</b>, for decoded CW. uBITX CEC Desktop points it at the WDSP receiver and turns on its output when you turn decoding on.</li>
+  <li><b>The first start: press Close.</b> SDRangel offers its ready-made configurations. They're for satellites, aircraft, ships and digital broadcasting, not for HF, so take none of them.
+<figure class="missing">
+  <img src="images/sdrangel-configurations.png" alt="SDRangel Configurations dialog on its first start" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <div class="ph">Screenshot to come: SDRangel Configurations dialog on its first start.</div>
+  <figcaption>The ready-made configurations: press Close.</figcaption>
+</figure>
+  </li>
+  <li><b>Make the text readable.</b> On many screens, SDRangel starts with very small text and buttons. In <span class="ui">Preferences → Graphics</span>, set <b>UI Scale Factor</b> to 125–150%. Then <b>quit SDRangel and start it again</b>: the new scale takes effect only after a restart, and is remembered from then on.
+<figure class="missing">
+  <img src="images/sdrangel-startup-screen.png" alt="SDRangel on its first start, with very small text" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <div class="ph">Screenshot to come: SDRangel on its first start, with very small text.</div>
+  <figcaption>Before: SDRangel as it first comes up.</figcaption>
+</figure>
+<figure class="missing">
+  <img src="images/sdrangel-preferences-graphics.png" alt="SDRangel Preferences menu with Graphics" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <div class="ph">Screenshot to come: SDRangel Preferences menu with Graphics.</div>
+  <figcaption>Preferences → Graphics.</figcaption>
+</figure>
+<figure class="missing">
+  <img src="images/sdrangel-ui-scale.png" alt="SDRangel Graphics dialog with the UI Scale Factor slider" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <div class="ph">Screenshot to come: SDRangel Graphics dialog with the UI Scale Factor slider.</div>
+  <figcaption>UI Scale Factor: 125–150%, then restart SDRangel.</figcaption>
+</figure>
+  </li>
+  <li><b>Find four buttons</b> on the toolbar at the top: <b>Add RX Device</b>, <b>Add Feature</b>, the <b>window placement</b> buttons, and <b>dock/undock</b>.
+<figure class="missing">
+  <img src="images/sdrangel-main-screen-after-ui-scale-resize.png" alt="SDRangel toolbar: Add RX Device, Add Feature, window placement and dock/undock" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <div class="ph">Screenshot to come: SDRangel toolbar: Add RX Device, Add Feature, window placement and dock/undock.</div>
+  <figcaption>After the restart: the four buttons used below.</figcaption>
+</figure>
+  </li>
+  <li><b>Add the RTL-SDR.</b> Press <b>Add RX Device</b>, choose your RTL-SDR, and press <b>OK</b>. SDRangel opens two windows for it: the device's panel and its spectrum.
+<figure class="missing">
+  <img src="images/sdrangel-add_rx_device.png" alt="SDRangel Select sampling device dialog with RTL-SDR chosen" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <div class="ph">Screenshot to come: SDRangel Select sampling device dialog with RTL-SDR chosen.</div>
+  <figcaption>Choose the RTL-SDR.</figcaption>
+</figure>
+<figure class="missing">
+  <img src="images/sdrangel_after-RX_added.png" alt="SDRangel with the RTL-SDR device panel and its spectrum window" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <div class="ph">Screenshot to come: SDRangel with the RTL-SDR device panel and its spectrum window.</div>
+  <figcaption>The RTL-SDR added: its panel on the left, its spectrum on the right.</figcaption>
+</figure>
+  </li>
+  <li><b>Set up the RTL-SDR</b>, in its panel:
+    <ul>
+      <li><b>DS</b> (direct sampling) ticked for an <b>RTL-SDR Blog V3</b> or another plain R820T dongle, to receive HF. A V4 or V4L doesn't need it.</li>
+      <li><b>DC</b> and <b>IQ</b> on: they remove the spike in the middle of the spectrum and balance the I/Q.</li>
+      <li><b>Gain</b> up: near the top, to start with.</li>
+      <li>The <b>sample rate</b> (SR) at 2.4 MS/s at most, as with the other programs. uBITX CEC Desktop's <b>Spectrum Span</b> slider sets the decimation (<b>Dec</b>), so leave Dec to it.</li>
+      <li>Press the device's <b>start</b> button (▶) at its top left.</li>
+    </ul>
+<figure class="missing">
+  <img src="images/sdrangel-rx-setup-forv3.png" alt="SDRangel RTL-SDR panel set up for an RTL-SDR Blog V3: DC and IQ on, DS ticked, gain up" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <div class="ph">Screenshot to come: SDRangel RTL-SDR panel set up for an RTL-SDR Blog V3: DC and IQ on, DS ticked, gain up.</div>
+  <figcaption>The RTL-SDR set up for a V3: DS ticked, DC and IQ on, gain up.</figcaption>
+</figure>
+  </li>
+  <li><b>Arrange the windows in columns,</b> if you like: the <b>Columns</b> button, among the window placement buttons, sets the windows side by side, so the next ones have room. Note the <b>Add Channel</b> button, on the device panel's title bar beside its name: it's used in the next two steps.
+<figure class="missing">
+  <img src="images/sdrangel_larger_win_and_columns_shows_add_channel.png" alt="SDRangel with the windows in columns, arrows at the Columns button and the Add Channel button" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <div class="ph">Screenshot to come: SDRangel with the windows in columns, arrows at the Columns button and the Add Channel button.</div>
+  <figcaption>Columns, and the device panel's Add Channel button.</figcaption>
+</figure>
+  </li>
+  <li><b>Add the WDSP Receiver, first.</b> Press <b>Add Channel</b> on the device panel, choose <b>WDSP Receiver</b>, press <b>Apply</b>, then <b>Close</b>. It must be the first channel: SDRangel's Morse Decoder listens to the first channel each time SDRangel starts. Without a WDSP Receiver, uBITX CEC Desktop uses the SSB demodulator, with fewer controls.
+<figure class="missing">
+  <img src="images/sdrangel-add_wdsp_channel.png" alt="SDRangel Available channels dialog with WDSP Receiver chosen" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <div class="ph">Screenshot to come: SDRangel Available channels dialog with WDSP Receiver chosen.</div>
+  <figcaption>Add Channel: WDSP Receiver, then Apply.</figcaption>
+</figure>
+<figure class="missing">
+  <img src="images/sdrangel-after-add-wdsp.png" alt="SDRangel with the WDSP Receiver window added on the right" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <div class="ph">Screenshot to come: SDRangel with the WDSP Receiver window added on the right.</div>
+  <figcaption>The WDSP Receiver added.</figcaption>
+</figure>
+  </li>
+  <li><b>Add the Channel Power,</b> the same way: <b>Add Channel</b>, <b>Channel Power</b>, <b>Apply</b>. It's for uBITX CEC Desktop's S-meter. uBITX CEC Desktop keeps it on the passband, so leave it where it is.
+<figure class="missing">
+  <img src="images/sdrangel-add_channel_power.png" alt="SDRangel Available channels dialog with Channel Power chosen" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <div class="ph">Screenshot to come: SDRangel Available channels dialog with Channel Power chosen.</div>
+  <figcaption>Add Channel: Channel Power.</figcaption>
+</figure>
+<figure class="missing">
+  <img src="images/sdrangel-channel_power_added.png" alt="SDRangel with the Channel Power added" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <div class="ph">Screenshot to come: SDRangel with the Channel Power added.</div>
+  <figcaption>The Channel Power added: its passband shows in the device spectrum.</figcaption>
+</figure>
+  </li>
+  <li><b>Add the Morse Decoder,</b> for decoded CW: press <b>Add Feature</b> on the toolbar (step 3), choose <b>Morse Decoder</b>, and <b>Apply</b>. uBITX CEC Desktop points it at the WDSP Receiver and turns its output on when you turn decoding on.
+<figure class="missing">
+  <img src="images/sdrangel-add-morsecode_decoder-feature.png" alt="SDRangel Add Feature list with Morse Decoder chosen" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <div class="ph">Screenshot to come: SDRangel Add Feature list with Morse Decoder chosen.</div>
+  <figcaption>Add Feature: Morse Decoder.</figcaption>
+</figure>
+  </li>
+  <li><b>Check it all,</b> with uBITX CEC Desktop connected: the RTL-SDR running, the WDSP Receiver and the Channel Power on the radio's frequency, and the Morse Decoder's text also on uBITX CEC Desktop's CW strip.
+<figure class="missing">
+  <img src="images/sdrangel-everything.png" alt="SDRangel with the RTL-SDR, Channel Power, Morse Decoder and WDSP Receiver, and uBITX CEC Desktop connected" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <div class="ph">Screenshot to come: SDRangel with the RTL-SDR, Channel Power, Morse Decoder and WDSP Receiver, and uBITX CEC Desktop connected.</div>
+  <figcaption>Everything in place, with uBITX CEC Desktop connected and decoding.</figcaption>
+</figure>
+  </li>
   <li><b>Save it.</b> SDRangel keeps its setup when it closes normally. Saving it as a configuration in SDRangel also lets you get it back after a crash.</li>
 </ol>
+<p><b>Tuning in SDRangel.</b> Tune by moving the <b>WDSP Receiver</b>: drag its center line in the device spectrum, scroll over that line (10 Hz a step, 100 Hz with Ctrl, 1 kHz with Shift), or change the <b>Δf</b> digits in its window. uBITX CEC Desktop follows. A plain click elsewhere in the spectrum doesn't tune: SDRangel moves a channel to a click only when the device set has a single channel, and this one has two.</p>
 <p><b>The band plan.</b> SDRangel has no band plan of its own. If you want the bands marked, its spectrum's <b>annotation markers</b> can do it: add them by hand, or import a <code>.csv</code> list, in the spectrum's markers dialog.</p>
 <p><b>On a Raspberry Pi:</b> there's no SDRangel that installs on Raspberry Pi OS (Trixie). Debian doesn't have it, and SDRangel's own arm64 package is built for a newer Ubuntu. It means building from source, so use Gqrx on a Pi instead.</p>
-<p><b>The window.</b> SDRangel's channels and features open as small windows inside its main window. Roll up the ones you don't need to watch, the Channel Power and the Morse Decoder, with the arrow on their title bars. Keep the device's spectrum and waterfall in view under uBITX CEC Desktop.</p>
+<!-- FIX (2026-11-20): the window, with Mark's screenshots -->
+<p><b>The window.</b> SDRangel's devices, channels and features each have a window inside its main window. Under uBITX CEC Desktop, only the device's <b>spectrum and waterfall</b> is needed:</p>
+<ol>
+  <li><b>Hide the others:</b> the device panel, the WDSP Receiver, the Channel Power and the Morse Decoder. Each window's title bar has a <b>hide</b> button. A hidden window keeps working.
+<figure class="missing">
+  <img src="images/sdrangel-hide-this-window.png" alt="An SDRangel window title bar, an arrow at its hide button" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <div class="ph">Screenshot to come: An SDRangel window title bar, an arrow at its hide button.</div>
+  <figcaption>The hide button on a window's title bar.</figcaption>
+</figure>
+  </li>
+  <li><b>Place it:</b> size SDRangel to the width of uBITX CEC Desktop's window, and put it underneath. See <a href="#sdr-windows">Arranging the windows</a>.
+<figure class="missing">
+  <img src="images/sdrangel-windows-positioned.png" alt="uBITX CEC Desktop above SDRangel's device spectrum and waterfall" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <div class="ph">Screenshot to come: uBITX CEC Desktop above SDRangel's device spectrum and waterfall.</div>
+  <figcaption>uBITX CEC Desktop with SDRangel's spectrum and waterfall underneath.</figcaption>
+</figure>
+  </li>
+</ol>
 
 
 <!-- FIX (2026-11-19): moved here from the top of the section (Mark): connecting

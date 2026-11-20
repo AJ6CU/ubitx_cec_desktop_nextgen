@@ -43,6 +43,23 @@ Save each one in `help/images/` under the name given. The page shows it in place
 | `gqrx-tools-waterfal-and-controls.png` | Done: Gqrx View menu, FFT Settings ticked. |
 | `gqrx-waterfall-with_fft.png` | Done: Gqrx with FFT Settings: Band Plan, Split, Plot dB, WF dB. Large (770 KB): a JPG candidate. |
 | `gqrx-app-windows-positioned.png` | Done: uBITX CEC Desktop with Gqrx underneath. Large (960 KB): a JPG candidate. |
+| `sdrangel-configurations.png` | Done: the first-start Configurations dialog; press Close. |
+| `sdrangel-startup-screen.png` | Done: SDRangel's first start, tiny text. |
+| `sdrangel-preferences-graphics.png` | Done: Preferences ▸ Graphics. |
+| `sdrangel-ui-scale.png` | Done: UI Scale Factor (125–150%), then restart. |
+| `sdrangel-main-screen-after-ui-scale-resize.png` | Done: the toolbar: Add RX Device, Add Feature, window placement, dock/undock. |
+| `sdrangel-add_rx_device.png` | Done: Select sampling device, RTL-SDR. |
+| `sdrangel_after-RX_added.png` | Done: the RTL-SDR panel and spectrum. |
+| `sdrangel-rx-setup-forv3.png` | Done: the RTL-SDR set up for a V3: DS, DC, IQ, gain. |
+| `sdrangel_larger_win_and_columns_shows_add_channel.png` | Done: Columns, and the Add Channel button. |
+| `sdrangel-add_wdsp_channel.png` | Done: Add Channel, WDSP Receiver. |
+| `sdrangel-after-add-wdsp.png` | Done: the WDSP Receiver added. |
+| `sdrangel-add_channel_power.png` | Done: Add Channel, Channel Power. |
+| `sdrangel-channel_power_added.png` | Done: the Channel Power added. |
+| `sdrangel-add-morsecode_decoder-feature.png` | Done: Add Feature, Morse Decoder. |
+| `sdrangel-everything.png` | Done: everything in place, uBITX CEC Desktop connected. Large (835 KB). |
+| `sdrangel-hide-this-window.png` | Done: a window's hide button. |
+| `sdrangel-windows-positioned.png` | Done: uBITX CEC Desktop above SDRangel's spectrum and waterfall. Large (653 KB). |
 
 Also wanted, for the sections marked "To fill in":
 - each SDR program's server setting (Brown's Settings ▸ Servers, SDR++'s Rigctl Server module, Gqrx's Remote control, SDRangel's device set and channels).
