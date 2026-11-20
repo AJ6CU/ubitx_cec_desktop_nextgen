@@ -965,6 +965,31 @@ testing by hand may be version-dependent rather than protocol-dependent.
 <a name="the-application"></a>
 ### The application — bugs worth fixing in the current code
 
+**At the next build: starting and closing each SDR by name, on every platform
+(Mark, 2026-11-19).** *Open -- test with the RC build.* Brown's #753 renamed its
+Mac bundle sdroxide-brown.app (bundle id com.github.madmedicnl.sdroxide-brown);
+uBITX CEC Desktop now starts, finds and quits the SDRoxides on a Mac by bundle
+id (sdr-mac-bundle-ids, tests/test_sdr_mac_bundles.py). Unit tests pass and
+the source tree worked on the Mac; check it again from the installed build:
+
+* *macOS*, with the newest Brown nightly (sdroxide-brown.app) and, if to hand,
+  upstream SDRoxide (sdroxide.app) both in Applications:
+  1. SDR settings' location empty (or set to the .app): "Start it" opens
+     Brown, and quitting uBITX CEC Desktop closes it. The first time, macOS
+     asks to let uBITX CEC Desktop control sdroxide-brown: allow.
+  2. Upstream SDRoxide started by hand, uBITX CEC Desktop set to Brown: Brown
+     is started, SDRoxide isn't attached to, and quitting closes Brown only.
+  3. The same the other way round, set to SDRoxide.
+  4. An SDR already running when uBITX CEC Desktop starts is attached to and
+     left running when it quits.
+  5. Gqrx, SDR++ and SDRangel still start and close as before.
+* *Windows* (desktop or X1) and *Linux / the Pi*: start Brown from uBITX CEC
+  Desktop, quit, and Brown closes; one already running is left alone. On
+  Windows Brown is still sdroxide.exe, in C:\Program Files\sdroxide-brown;
+  both SDRoxides running at once can't be told apart there.
+* Then close the open item on SDRoxide vs. SDRoxide Brown on the Mac
+  (OPEN_ITEMS).
+
 **Test on a Raspberry Pi 4, 4 GB (Mark, 2026-11-19).** *Open.* The Pi 5 notes
 (Field-laptop floor, 2026-11-12) call the Pi 5 the minimum, but what made the
 Pi 5 struggle was Brown's CW skimmer on **Neural** (about two of its four
