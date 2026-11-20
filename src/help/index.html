@@ -759,6 +759,9 @@ then restart the Pi.</li>
 <ul>
   <li><b>Device string:</b> <code>rtl=0</code>.</li>
   <li><b>An RTL-SDR Blog V3, or another plain R820T dongle:</b> for HF, use <code>rtl=0,direct_samp=2</code> (Q-branch direct sampling). A V4 or V4L doesn't need it.</li>
+  <!-- FIX (2026-11-20): input rate, decimation and sample rate (Mark) -->
+  <li><b>Input rate:</b> what Gqrx asks the dongle for. Its default for an RTL-SDR, <code>1800000</code> (1.8 Msps), is fine: the waterfall is then 1.8 MHz wide. On a computer with power to spare, <code>2400000</code> gives a wider one. Don't go above 2.4 Msps on an RTL-SDR, where most dongles start losing samples.</li>
+  <li><b>Decimation:</b> <b>None</b>. The <b>Sample rate</b> shown below it is the input rate divided by the decimation, so with None it's the same as the input rate, and that's the width of the waterfall. On a Raspberry Pi, a lower input rate such as 1.8 Msps saves CPU more simply than decimation does.</li>
   <li><b>Audio output:</b> <b>default</b>, not a USB sound card chosen by name. On a Pi, PipeWire holds the card, and choosing it directly failed.</li>
   <li><b>Starting afresh:</b> <code>gqrx -r</code> resets Gqrx's settings.</li>
 </ul>
