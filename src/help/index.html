@@ -638,8 +638,8 @@ bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
   <div class="ph">Screenshot to come: SDRoxide, Settings, UI: Panadapter window set to Undocked, its own window.</div>
   <figcaption>SDRoxide's Settings → UI, with the Panadapter undocked.</figcaption>
 </figure>
-<!-- FIX (2026-11-20): SDRoxide 1.7.3's PANO moves the VFO slice by slice -->
-<div class="note"><b>Don't scan in SDRoxide while it's connected.</b> SDRoxide's <b>SCAN</b> (MEM, RANGE and, since 1.7.3, <b>PANO</b>, the panorama that sweeps a whole band for an RTL-SDR) tunes SDRoxide's dial from one slice or channel to the next. uBITX CEC Desktop follows the SDR's dial, so it would tune the uBITX along with every step, or stop the scan the moment it sends the dial back. Scan with uBITX CEC Desktop's own <a href="#channels">Channels</a> instead. For a PANO sweep of a band, close uBITX CEC Desktop first, or turn off SDRoxide's <b>Hamlib rigctld server</b> while it sweeps.</div>
+<!-- FIX (2026-11-20): SDRoxide 1.7.3's PANO moves the VFO slice by slice; seen at the station (Mark). Don't use, for now: see docs/PANO.md -->
+<div class="note"><b>Don't use SDRoxide's SCAN while it's connected.</b> SDRoxide's <b>SCAN</b> (MEM, RANGE and, since 1.7.3, <b>PANO</b>) moves SDRoxide's dial from step to step, and uBITX CEC Desktop follows the dial: the uBITX is tuned along with each step, or the scan stops after a step or two. Scan with uBITX CEC Desktop's own <a href="#channels">Channels</a> instead.</div>
 <!-- FIX (2026-11-19): Brown renamed its Mac app (#752/#753) -->
 <div class="note"><b>Two SDRoxides on a Mac.</b> Since 19 November 2026, Brown installs as <b>sdroxide-brown</b> and SDRoxide as <b>sdroxide</b>, so both can sit in Applications, and uBITX CEC Desktop tells them apart. Brown builds from before then use SDRoxide's name: only one of the two can be installed, and uBITX CEC Desktop can take one for the other. Update Brown to fix that.</div>
 

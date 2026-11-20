@@ -153,11 +153,6 @@ or a running copy:
 2. *Brown and SDRoxide windows*: done (2026-11-20). Brown's is
    Settings → Detachable; SDRoxide 1.7.3's is Settings → UI → Display →
    Panadapter window. Both are in the help, with screenshots.
-   * New in 1.7.3: SCAN → PANO parks SDRoxide's VFO on each slice
-     (engine.rs scan_next_slice), and any SetVfo stops a scan
-     (stop_scan_for_operator). The help now says not to scan in SDRoxide
-     while connected. Not tried: whether the uBITX gets dragged along or
-     the scan stops at once. Worth one look with the uBITX on a dummy load.
 3. *SDRangel's "Save it" step*: the exact menu name for saving the setup as
    a configuration (the help only says "as a configuration in SDRangel").
 4. *Gqrx*: does it keep remote control on after a restart? The help says
@@ -170,6 +165,19 @@ or a running copy:
      RIT/XIT), but the intro of Setting up an SDR says VFO A/B and split come
      "with SDRoxide Brown". Try split on upstream: if it works, fix the
      intro; if not, set the grid cell to –.
+
+**SDRoxide's SCAN / PANO with uBITX CEC Desktop (2026-11-20).** For 1.0: don't
+use it; the help says so. SDRoxide's scans move its dial, uBITX CEC Desktop
+follows and drags the uBITX along, or a follow race sends a stale frequency back
+and stops the scan. Details, findings at the station and the reasoning:
+`docs/PANO.md`. Resolution, after 1.0:
+1. Fix the follow race in `sdr_link.py` (late uBITX confirmations taken for a
+   move at the rig; also bounces the SDR after two quick waterfall clicks), with
+   the tests and station checks in PANO.md.
+2. Ask SDRoxide for a read-only `u SCANNING` (Hamlib's ext-func way); Brown too
+   once it has PANO. Draft as `ubitx_cec_desktop/sdroxide/issue_scan_status.md`.
+3. When it exists: probe at connect, pause following while it reads 1, and
+   change the help from "don't use" to "works".
 
 **Anchors: `id` rather than `name`.** Some renderers ignore `name` on an empty
 anchor, so a table of contents entry silently fails. Where the heading text
