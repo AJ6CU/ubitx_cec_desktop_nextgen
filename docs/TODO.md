@@ -167,6 +167,16 @@ or a running copy:
      "with SDRoxide Brown". Try split on upstream: if it works, fix the
      intro; if not, set the grid cell to –.
 
+**Gqrx: RF gain via its gain stages (after 1.0).** Gqrx's remote control
+has no `RF` level, so the grid says –, but it does expose each of the dongle's
+gain stages as `<name>_GAIN` (`l ?` lists them: `SQL STRENGTH AF LNA_GAIN` on
+an RTL-SDR; `remote_control.cpp`). `L LNA_GAIN <dB>` is the LNA slider in
+Gqrx's Input controls. Map uBITX CEC Desktop's RF gain to it (the value is in
+dB, range from the dongle; discover the name from `l ?`), then set the grid
+cell to ✓. No effect in direct sampling (V3 on HF), where the tuner and its LNA
+are bypassed -- worth a line in the help. NB, NR, AGC and notch: not offered
+(functions are only RECORD, IQRECORD, DSP, RDS, MUTE), so they stay –.
+
 **Gqrx quits when remote control is turned off with a client connected
 (2026-11-20, macOS).** Seen with uBITX CEC Desktop connected: "Gqrx quit
 unexpectedly", then on the next start Gqrx's "problems with the current
