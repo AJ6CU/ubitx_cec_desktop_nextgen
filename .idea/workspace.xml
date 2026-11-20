@@ -4,10 +4,7 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="ffee8cb6-f9f7-4a7a-aac5-5c8718d71e6d" name="Changes" comment="">
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/ubitx_cec_desktop.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/ubitx_cec_desktop.py" afterDir="false" />
-    </list>
+    <list default="true" id="ffee8cb6-f9f7-4a7a-aac5-5c8718d71e6d" name="Changes" comment="" />
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -32,37 +29,38 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent">{
-  &quot;keyToString&quot;: {
-    &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
-    &quot;Python.make_cw_iq.executor&quot;: &quot;Run&quot;,
-    &quot;Python.radio_model.executor&quot;: &quot;Run&quot;,
-    &quot;Python.scratch.executor&quot;: &quot;Run&quot;,
-    &quot;Python.test.executor&quot;: &quot;Run&quot;,
-    &quot;Python.test_apf.executor&quot;: &quot;Run&quot;,
-    &quot;Python.test_decoder_port.executor&quot;: &quot;Run&quot;,
-    &quot;Python.test_rigctl.executor&quot;: &quot;Run&quot;,
-    &quot;Python.test_rit.executor&quot;: &quot;Run&quot;,
-    &quot;Python.test_rit_loop.executor&quot;: &quot;Run&quot;,
-    &quot;Python.test_sdr_path.executor&quot;: &quot;Run&quot;,
-    &quot;Python.test_serial_ports.executor&quot;: &quot;Run&quot;,
-    &quot;Python.test_span.executor&quot;: &quot;Run&quot;,
-    &quot;Python.ubitx_cec_desktop.executor&quot;: &quot;Run&quot;,
-    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
-    &quot;git-widget-placeholder&quot;: &quot;main&quot;,
-    &quot;last_opened_file_path&quot;: &quot;/Users/markjhatch/Documents/GitHub/ubitx_cec_desktop_nextgen/docs&quot;,
-    &quot;settings.editor.selected.configurable&quot;: &quot;configurable.group.python.group.settings&quot;
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "ModuleVcsDetector.initialDetectionPerformed": "true",
+    "Python.make_cw_iq.executor": "Run",
+    "Python.radio_model.executor": "Run",
+    "Python.scratch.executor": "Run",
+    "Python.test.executor": "Run",
+    "Python.test_apf.executor": "Run",
+    "Python.test_decoder_port.executor": "Run",
+    "Python.test_rigctl.executor": "Run",
+    "Python.test_rit.executor": "Run",
+    "Python.test_rit_loop.executor": "Run",
+    "Python.test_sdr_mac_bundles.executor": "Run",
+    "Python.test_sdr_path.executor": "Run",
+    "Python.test_serial_ports.executor": "Run",
+    "Python.test_span.executor": "Run",
+    "Python.ubitx_cec_desktop.executor": "Run",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
+    "RunOnceActivity.git.unshallow": "true",
+    "git-widget-placeholder": "main",
+    "last_opened_file_path": "/Users/markjhatch/Documents/GitHub/ubitx_cec_desktop_nextgen/docs",
+    "settings.editor.selected.configurable": "preferences.editor"
   }
-}</component>
+}]]></component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
       <recent name="$PROJECT_DIR$/docs" />
+      <recent name="$PROJECT_DIR$/src/help" />
+      <recent name="$PROJECT_DIR$/firmware" />
       <recent name="$PROJECT_DIR$/src" />
       <recent name="$PROJECT_DIR$/tests" />
-      <recent name="$APPLICATION_CONFIG_DIR$/scratches" />
-      <recent name="$PROJECT_DIR$/docs/bug_reports" />
     </key>
     <key name="MoveFile.RECENT_KEYS">
       <recent name="$PROJECT_DIR$/tests" />
