@@ -58,7 +58,7 @@ Save each one in `help/images/` under the name given. The page shows it in place
 | `sdrangel-channel_power_added.png` | Done: the Channel Power added. |
 | `sdrangel-add-morsecode_decoder-feature.png` | Done: Add Feature, Morse Decoder. |
 | `sdrangel-everything.png` | Done: everything in place, uBITX CEC Desktop connected. Large (835 KB). |
-| `sdrangel-hide-this-window.png` | Done: a window's hide button. |
+| `sdrangel-hide-this-window.png` | Done: the device panel: Hide this window, Show main spectrum, Show all channels. |
 | `sdrangel-windows-positioned.png` | Done: uBITX CEC Desktop above SDRangel's spectrum and waterfall. Large (653 KB). |
 
 Also wanted, for the sections marked "To fill in":

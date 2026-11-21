@@ -971,10 +971,12 @@ then restart the Pi.</li>
 <p><b>The window.</b> SDRangel's devices, channels and features each have a window inside its main window. Under uBITX CEC Desktop, only the device's <b>spectrum and waterfall</b> is needed:</p>
 <ol>
   <li><b>Hide the others:</b> the device panel, the WDSP Receiver, the Channel Power and the Morse Decoder. Each window's title bar has a <b>hide</b> button. A hidden window keeps working.
+    <!-- FIX (2026-11-20): getting a hidden window back -- from SDRangel's source (mainwindow.cpp, devicegui.cpp) -->
+    <br><b>To get a window back:</b> SDRangel's <span class="ui">Window → Show</span> menu lists every hidden window; choose one, or <b>Show all</b>. On the device panel, the two buttons at the bottom left also bring back the device's spectrum (<i>Show main spectrum</i>) and its channels (<i>Show all channels</i>).
 <figure class="missing">
-  <img src="images/sdrangel-hide-this-window.png" alt="An SDRangel window title bar, an arrow at its hide button" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
-  <div class="ph">Screenshot to come: An SDRangel window title bar, an arrow at its hide button.</div>
-  <figcaption>The hide button on a window's title bar.</figcaption>
+  <img src="images/sdrangel-hide-this-window.png" alt="The RTL-SDR device panel: arrows at Hide this window, Show main spectrum and Show all channels" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <div class="ph">Screenshot to come: The RTL-SDR device panel: arrows at Hide this window, Show main spectrum and Show all channels.</div>
+  <figcaption>The device panel: <b>Hide this window</b> on its title bar (every window has one), and at the bottom left, <b>Show main spectrum</b> and <b>Show all channels</b>.</figcaption>
 </figure>
   </li>
   <li><b>Place it:</b> size SDRangel to the width of uBITX CEC Desktop's window, and put it underneath. See <a href="#sdr-windows">Arranging the windows</a>.
