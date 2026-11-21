@@ -53,7 +53,7 @@ Save each one in `help/images/` under the name given. The page shows it in place
 | `sdrangel-rx-setup-forv3.png` | Done: the RTL-SDR set up for a V3: DS, DC, IQ, gain. |
 | `sdrangel_larger_win_and_columns_shows_add_channel.png` | Done: Columns, and the Add Channel button. |
 | `sdrangel-add_wdsp_channel.png` | Done: Add Channel, WDSP Receiver. |
-| `sdrangel-after-add-wdsp.png` | Done: the WDSP Receiver added. |
+| `sdrangel-after-add-wdsp.png` | Done: the WDSP Receiver added; arrows at Vol and the loudspeaker (sound device). |
 | `sdrangel-add_channel_power.png` | Done: Add Channel, Channel Power. |
 | `sdrangel-channel_power_added.png` | Done: the Channel Power added. |
 | `sdrangel-add-morsecode_decoder-feature.png` | Done: Add Feature, Morse Decoder. |
