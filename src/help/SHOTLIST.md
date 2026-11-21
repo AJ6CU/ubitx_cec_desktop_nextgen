@@ -29,6 +29,9 @@ Save each one in `help/images/` under the name given. The page shows it in place
 | `sdroxide-undock.png` | Done: SDRoxide 1.7.3, Settings ▸ UI, Panadapter window undocked. |
 | `brown-region.png` | Done: Brown, the IARU region (Region 2) and 11M/CB. |
 | `brown-org-off.png` | Done: Brown's CW panel with the QRG chip off. |
+| `brown-radio-rtlsdr.png` | Done: Brown, Settings ▸ Radio, Radio interface RTL-SDR (USB). SDRoxide's is the same. |
+| `brown-radio-hf.png` | Done: Brown, Settings ▸ Radio: 2.400 Msps, manual gain, HF reception Automatic, IQ correction, Apply / reconnect. |
+| `sdrpp-source-rtlsdr.png` | Done: SDR++ Source: RTL-SDR, 2.4MHz, Q branch, gain, IQ Correction, Play. |
 | `sdrpp-module-manager.png` | Done: SDR++, the side menu scrolled to the Module Manager. |
 | `sdrpp-finding-rigctl-server.png` | Done: SDR++, Module Manager, the type list open on rigctl_server. |
 | `sdrpp-name-and-create.png` | Done: SDR++, Module Manager, a name in the box and the + button. |

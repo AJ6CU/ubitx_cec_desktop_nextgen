@@ -493,6 +493,9 @@ bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
 
 <p>An SDR is optional. With one, the SDR program is the receiver: you hear the band through it and see its waterfall, while the uBITX does the transmitting. uBITX CEC Desktop keeps the SDR on the radio's frequency, mode, filter, RIT and, with SDRoxide Brown, VFO A/B and split. However, you can still use the software without a SDR. It will just be the standard controls of the Nextion with some extra usability features like dual VFO's display in Split and ability to Log QSO's.</p>
 
+<!-- FIX (2026-11-20): every program now walks through the dongle too (Mark) -->
+<p><b>The dongle.</b> For convenience, each program's section walks through the setup with an <b>RTL-SDR Blog V3</b>, including the dongle's own settings. If you have a different dongle, change those settings to suit it, using the program's own guide where needed.</p>
+
 <h4>In the SDR program, in short</h4>
 <p>Each program's own section below gives the details.</p>
 <table>
@@ -562,6 +565,34 @@ bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
 </ul>
 
 <h5>Configuring for uBITX CEC Desktop</h5>
+<!-- FIX (2026-11-20): the RTL-SDR in Settings -> Radio, with Mark's screenshots -->
+<p><b>The dongle.</b> In <span class="ui">Settings → Radio</span>:</p>
+<ol>
+  <li><b>Radio interface:</b> <b>RTL-SDR (USB)</b>.
+<figure class="missing">
+  <img src="images/brown-radio-rtlsdr.png" alt="Brown, Settings, Radio: Radio interface set to RTL-SDR (USB)" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <div class="ph">Screenshot to come: Brown, Settings, Radio: Radio interface set to RTL-SDR (USB).</div>
+  <figcaption>Settings → Radio: choose RTL-SDR (USB) as the radio interface.</figcaption>
+</figure>
+  </li>
+  <li><b>Further down the same page:</b>
+    <ul>
+      <li><b>Dongle:</b> <i>first one found</i>, or yours by name if you have more than one.</li>
+      <li><b>Sample rate:</b> <b>2.400 Msps</b>, the widest an RTL-SDR does reliably.</li>
+      <li><b>AGC:</b> <b>Manual (no AGC)</b>, with the <b>Tuner gain</b> about midway. uBITX CEC Desktop's RF gain knob sets it from then on.</li>
+      <li><b>HF reception:</b> <b>Automatic</b>. On a V3 it switches to direct sampling below 24 MHz; a V4 or V4L reaches HF through its own upconverter.</li>
+      <li><b>IQ correction</b> ticked: it removes the spike in the middle of the spectrum and the mirror images.</li>
+      <li><b>Bias tee</b> off, unless your antenna has a preamplifier that needs it.</li>
+    </ul>
+  </li>
+  <li><b>Press Apply / reconnect.</b> Nothing changes until you do.
+<figure class="missing">
+  <img src="images/brown-radio-hf.png" alt="Brown, Settings, Radio: dongle, sample rate 2.400 Msps, AGC manual, HF reception Automatic, IQ correction, Apply / reconnect" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <div class="ph">Screenshot to come: Brown, Settings, Radio: dongle, sample rate 2.400 Msps, AGC manual, HF reception Automatic, IQ correction, Apply / reconnect.</div>
+  <figcaption>The rest of the page: 2.400 Msps, manual gain, HF reception Automatic, IQ correction, then Apply / reconnect.</figcaption>
+</figure>
+  </li>
+</ol>
 <p><b>Services.</b> In <span class="ui">Settings → Servers</span>:</p>
 <ul>
   <li><b>Hamlib rigctld server:</b>
@@ -638,6 +669,8 @@ bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
 
 <h5>Configuring for uBITX CEC Desktop</h5>
     <p>Since Brown is derived from SDRoxide, the locations and screenshots of the settings above in the <a href="#sdr-brown">SDRoxide Brown</a> should be used to configure SDRoxide too.</p>
+    <!-- FIX (2026-11-20): the dongle, the same as Brown (Mark) -->
+    <p><b>The dongle:</b> exactly as in Brown, in <span class="ui">Settings → Radio</span>: RTL-SDR (USB), 2.400 Msps, manual gain, HF reception Automatic, IQ correction, then <b>Apply / reconnect</b>.</p>
 <p><b>Services.</b> In <span class="ui">Settings → Servers</span>, the same as Brown:</p>
 <ul>
   <li><b>Hamlib rigctld server:</b> enabled, on <code>127.0.0.1</code>, port <code>4532</code>, without transmit. Press <b>APPLY</b>.</li>
@@ -686,6 +719,21 @@ bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
 </ul>
 
 <h5>Configuring for uBITX CEC Desktop</h5>
+<!-- FIX (2026-11-20): the RTL-SDR in the Source section, with Mark's screenshot -->
+<p><b>The dongle.</b> In the <b>Source</b> section at the top of SDR++'s side menu:</p>
+<ul>
+  <li><b>RTL-SDR</b> in the first list, and your dongle in the second if you have more than one.</li>
+  <li><b>Sample rate:</b> <b>2.4MHz</b>, the widest an RTL-SDR does reliably.</li>
+  <li><b>Direct Sampling:</b> <b>Q branch</b> on a V3, to receive HF. On a V4 or V4L, leave it <i>Disabled</i>.</li>
+  <li><b>Gain:</b> set it by hand, with <b>RTL AGC</b> and <b>Tuner AGC</b> off or on to taste. uBITX CEC Desktop can't set SDR++'s gain, so this is where it's set.</li>
+  <li><b>IQ Correction</b> ticked: it removes the spike in the middle of the spectrum.</li>
+  <li>Press <b>▶</b> (Play) at the top left to start the dongle.</li>
+</ul>
+<figure class="missing">
+  <img src="images/sdrpp-source-rtlsdr.png" alt="SDR++ Source section: RTL-SDR, the dongle, 2.4MHz, Direct Sampling Q branch, manual gain, AGC options, IQ Correction, and the Play button" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <div class="ph">Screenshot to come: SDR++ Source section: RTL-SDR, the dongle, 2.4MHz, Direct Sampling Q branch, manual gain, AGC options, IQ Correction, and the Play button.</div>
+  <figcaption>The Source section set up for a V3, and Play at the top left.</figcaption>
+</figure>
 <!-- FIX (2026-11-20): the rigctl server is added in the Module Manager, step by step, with Mark's screenshots -->
 <p><b>The rigctl server.</b> SDR++ has no rigctl server until you add one, in its <b>Module Manager</b>:</p>
 <ol>
@@ -733,13 +781,13 @@ bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
   </li>
 </ol>
 <p>On Windows and Linux, uBITX CEC Desktop starts SDR++ with its dongle already running.</p>
-<p><b>On a Raspberry Pi (and other Linux):</b></p>
+<p><b>On Linux, a Raspberry Pi included:</b></p>
 <ul>
-  <li><b>Install:</b> SDR++'s own arm64 <code>.deb</code> from its Releases page works on Raspberry Pi OS (Trixie). It uses about a third of one core.</li>
+  <li><b>Install:</b> SDR++'s own <code>.deb</code> from its Releases page. On a Raspberry Pi, its arm64 <code>.deb</code> works on Raspberry Pi OS (Trixie), and uses about a third of one core.</li>
   <li><b>Before it can open the dongle:</b> install the <code>rtl-sdr</code> package, and stop the kernel's TV driver from taking the dongle:
 <pre><code>sudo apt install rtl-sdr
 echo "blacklist dvb_usb_rtl28xxu" | sudo tee /etc/modprobe.d/blacklist-rtl.conf</code></pre>
-then restart the Pi.</li>
+then restart the computer.</li>
 </ul>
 <!-- FIX (2026-11-19): each SDR's own band labels (Mark) -->
 <p><b>The band plan.</b> SDR++ labels the bands along the waterfall from a band plan you choose in the <b>Band Plan</b> section of its side menu. It starts on <i>General</i> (worldwide). Choose your country's plan instead: USA, Canada, United Kingdom, Australia and others are there. The labels are only labels: they don't tune, change the mode or stop anything.</p>
@@ -1008,7 +1056,7 @@ then restart the Pi.</li>
 <h4 class="program" id="sdr-connect">Connecting uBITX CEC Desktop to the SDR</h4>
     <!-- FIX (2026-11-19): drivers are the SDR program's business (Mark: "start with the
      assumption that the SDR is up and working with the dongle") -->
-<div class="note"><b>SDR must work with your dongle.</b> <p>What follows assumes your SDR program already works with your dongle: it starts, finds the dongle and shows a waterfall. If it doesn't, follow that program's own getting-started guide.</p>
+<div class="note"><b>The SDR must work with your dongle first.</b> <p>Before connecting, check that your SDR program starts, finds the dongle and shows a waterfall. Each program's section above sets up an RTL-SDR Blog V3; with another dongle, follow the program's own getting-started guide.</p>
 </div>
 <p>Once your program's server is on, as in its section above, and the program is running or set to be started:</p>
 <ol>
