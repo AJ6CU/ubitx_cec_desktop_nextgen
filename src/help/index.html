@@ -29,6 +29,7 @@
   nav ol { list-style: none; padding: 0; margin: 0; }
   nav li { margin: 2px 0; }
   nav li li { padding-left: 14px; }
+  nav li li li a { font-size: 0.92em; padding-top: 2px; padding-bottom: 2px; }
   nav a { color: var(--text); text-decoration: none; display: block; padding: 3px 8px; border-radius: 6px; }
   nav a:hover { background: var(--accent-soft); color: var(--accent); }
   main { padding: 28px 40px 80px; min-width: 0; }
@@ -110,7 +111,18 @@
         <li><a href="#tr-switch">Protecting the SDR</a></li>
         <li><a href="#install">Installing uBITX CEC Desktop</a></li>
         <li><a href="#first-start">First start</a></li>
-        <li><a href="#sdr-setup">Setting up an SDR</a></li>
+        <!-- FIX (2026-11-20): each SDR program in the contents, as the sections are long (Mark) -->
+        <li><a href="#sdr-setup">Setting up an SDR</a>
+          <ol>
+            <li><a href="#sdr-controls">Features by SDR</a></li>
+            <li><a href="#sdr-windows">Arranging the windows</a></li>
+            <li><a href="#sdr-brown">SDRoxide Brown</a></li>
+            <li><a href="#sdr-sdroxide">SDRoxide</a></li>
+            <li><a href="#sdr-sdrpp">SDR++</a></li>
+            <li><a href="#sdr-gqrx">Gqrx</a></li>
+            <li><a href="#sdr-sdrangel">SDRangel</a></li>
+            <li><a href="#sdr-connect">Connecting to the SDR</a></li>
+          </ol></li>
       </ol></li>
     <li><a href="#operate">2. Operate</a></li>
     <li><a href="#rx">3. RX</a></li>
