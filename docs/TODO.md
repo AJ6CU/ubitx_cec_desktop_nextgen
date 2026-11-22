@@ -1037,6 +1037,24 @@ the source tree worked on the Mac; check it again from the installed build:
 * Then close the open item on SDRoxide vs. SDRoxide Brown on the Mac
   (OPEN_ITEMS).
 
+**Test with an SDR other than an RTL-SDR (Mark, 2026-11-21).** *Open, for
+1.1.* Nothing in uBITX CEC Desktop assumes 2.4 MS/s: the span is read from
+the SDR (SPECTRUM_SPAN, its \dump_caps list, or SDRangel's device
+"bandwidth"; the slider's 48 kHz–20 MHz are only bounds), and the frequency
+is the SDR program's. But only RTL dongles have been tried, and the help says
+so. What to watch, likeliest first:
+1. RF gain: an SDRplay's gain is an LNA state plus an IF gain *reduction*;
+   how each program maps that to Hamlib's RFGAIN decides whether the knob
+   works, runs backwards or covers part of the range.
+2. A narrow device (Airspy HF+, well under 1 MHz): few span steps, frequent
+   re-centering when tuning across a band; check the waterfall follows.
+3. A wide one (SDRplay, Airspy R2 at 8–10 MHz): the computer's load, a Pi most.
+4. Which programs support it: SDR++ and SDRangel do both; check SDRoxide's
+   and Brown's device lists first.
+First choice to borrow or buy: an SDRplay RSP1B or RSPdx (common among hams;
+tests 1). Second: an Airspy HF+ Discovery (tests 2). When done, change the
+help's "haven't been tested yet" line in Setting up an SDR.
+
 **Test on a Raspberry Pi 4, 4 GB (Mark, 2026-11-19).** *Open.* The Pi 5 notes
 (Field-laptop floor, 2026-11-12) call the Pi 5 the minimum, but what made the
 Pi 5 struggle was Brown's CW skimmer on **Neural** (about two of its four
