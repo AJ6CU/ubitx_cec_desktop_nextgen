@@ -1037,6 +1037,22 @@ the source tree worked on the Mac; check it again from the installed build:
 * Then close the open item on SDRoxide vs. SDRoxide Brown on the Mac
   (OPEN_ITEMS).
 
+**Windows: Python from the new install manager (2026-11-21).** *Open, before
+1.0 if a Windows machine is handy.* python.org now offers its Python install
+manager first (also in the Microsoft Store); the traditional installer, with
+its "tcl/tk and IDLE" tick box, stops with Python 3.16. The help, the Windows
+bundle's README (built by `build_bundles.py`) and the installer's no-Tk
+message now name the install manager. Two things to check on Windows, with
+Python installed through the install manager:
+1. **Tk is included:** `python -m tkinter` opens a small test window. If not,
+   the installer stops with its no-Tk message; the help then needs the extra
+   step.
+2. **Double-clicking a `.py` file still runs it:** step 3 of the Windows
+   README says to double-click "Install uBITX CEC Desktop.py" ("if Windows
+   asks which program should open it, choose Python"). The old installer set
+   up that association; check the install manager does too. If not, step 3
+   needs another sentence (for example, right-click > Open with > Python).
+
 **Test with an SDR other than an RTL-SDR (Mark, 2026-11-21).** *Open, for
 1.1.* Nothing in uBITX CEC Desktop assumes 2.4 MS/s: the span is read from
 the SDR (SPECTRUM_SPAN, its \dump_caps list, or SDRangel's device
