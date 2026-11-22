@@ -325,6 +325,15 @@ avrdude -c arduino -p m328p -P /dev/ttyUSB0 -b 115200 -D -U flash:w:KD8CEC_1.20_
 
 <p>The adapter's TX goes to what the radio receives on, and its RX to what the radio sends on: each one's output is the other's input.</p>
 
+<!-- FIX (2026-11-22): the adapter's driver (Mark: the CP2102 needed one on Windows 11, none on macOS) -->
+<div class="note"><b>The adapter may need a driver.</b> Plug it in before connecting it to the radio, and check that a serial port appears for it.
+<ul>
+  <li><b>Windows:</b> the CP2102 needed a driver on Windows 11. In Device Manager it shows with a warning sign under <i>Other devices</i>, and no COM port. Install Silicon Labs' <a href="https://www.silabs.com/developer-tools/usb-to-uart-bridge-vcp-drivers" target="_blank">CP210x VCP driver</a>, then unplug the adapter and plug it in again. For an FT232RL, Windows usually installs FTDI's driver by itself; if not, use FTDI's <a href="https://ftdichip.com/drivers/vcp-drivers/" target="_blank">VCP driver</a>.</li>
+  <li><b>macOS:</b> no driver needed; the CP2102 works as it comes.</li>
+  <li><b>Linux:</b> the drivers are part of Linux. If no <code>/dev/ttyUSB…</code> port appears, see <a href="#trouble">When things go wrong</a>.</li>
+</ul>
+</div>
+
 <!-- FIX (2026-11-22): three wires and the jumper, not the radio's +5 V -- works on every adapter, whatever its board (Mark, tested on both his adapters) -->
 <div class="todo"><b>Three wires, and set the jumper.</b> Connect only ground, TX and RX. Leave the red wire, the radio's +5 V, unconnected at the adapter: tape over its end, or cut it short. Then set the adapter's voltage jumper to your radio's logic level:
 <ul>
