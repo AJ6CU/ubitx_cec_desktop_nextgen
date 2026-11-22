@@ -4,11 +4,11 @@ Save each one in `help/images/` under the name given. The page shows it in place
 
 | File | What it should show |
 | :--- | :--- |
-| `usb-ttl-adapter.jpg` | Done: a CP2102 and an FT232RL with the wire colour for each pin, and the voltage jumper. |
+| `usb-ttl-adapter.jpg` | **Retake (2026-11-22):** the jumper now goes ON (5 V for a Nano Raduino), and the red wire is NOT connected. Show the jumper on 5 V and the red wire taped off. |
 | `uBITX_V3_4_5_Nextion_Wiring.jpg` | Done: the Nextion cable on a V3/V4/V5 Raduino. |
 | `uBITX_V6_Nextion_Wiring.jpg` | Done: the Nextion cable on a V6 Raduino (from below). |
-| `usb-ttl-wiring-v3_4_5_Raduino.jpg` | Done: wiring diagram, adapter to the V3/V4/V5 display header. |
-| `usb_ttl_wiring_v6_Raduino.jpg` | Done: wiring diagram, adapter to the V6 display header. |
+| `usb-ttl-wiring-v3_4_5_Raduino.jpg` | **Redo (2026-11-22):** three wires only (pins 1, 4, 6); no +5 V to the adapter; jumper on 5 V. |
+| `usb_ttl_wiring_v6_Raduino.jpg` | **Redo (2026-11-22):** three wires only (pins 2, 5, 11); no +5 V to the adapter; jumper on 5 V. |
 | `setup-radio.png` | Done: Setup → **Station & Radio** sub-tab: the callsign, appearance and Keep on top beside the Radio group, with the adapter chosen under Port, Speed, Connect. |
 | `setup-sdr.png` | Done: Setup → **SDR** sub-tab: SDRoxide Brown chosen, Start it, Address, Port, CW port. |
 | `operate.png` | Done: Operate, connected to the radio and SDRoxide Brown: a frequency, a signal on the meter, a lamp or two lit. Split on helps show the RX/TX badges with different VFOs. |

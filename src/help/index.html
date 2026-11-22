@@ -318,22 +318,28 @@ avrdude -c arduino -p m328p -P /dev/ttyUSB0 -b 115200 -D -U flash:w:KD8CEC_1.20_
 <table>
   <tr><th>Wire</th><th>What it carries</th><th>Raduino pin, V3–V5</th><th>Raduino pin, V6</th><th>CP2102</th><th>FT232RL</th></tr>
   <tr><td><b>Black</b></td><td>Ground</td><td>1</td><td>2</td><td>GND</td><td>GND</td></tr>
-  <tr><td><b>Red</b></td><td>The radio's +5 V</td><td>2</td><td>1</td><td>VCCIO</td><td>VCC</td></tr>
+  <tr><td><b>Red</b></td><td>The radio's +5 V: <b>not connected</b> to the adapter</td><td>(2)</td><td>(1)</td><td>—</td><td>—</td></tr>
   <tr><td><b>Blue</b></td><td>What the radio <em>receives</em> (the Nano's D8)</td><td>4</td><td>11</td><td>TXD</td><td>TXO</td></tr>
   <tr><td><b>Yellow</b></td><td>What the radio <em>sends</em> (the Nano's D9)</td><td>6</td><td>5</td><td>RXD</td><td>RXI</td></tr>
 </table>
 
 <p>The adapter's TX goes to what the radio receives on, and its RX to what the radio sends on: each one's output is the other's input.</p>
 
-<div class="todo"><b>Leave the adapter's voltage jumper off.</b> With it on, the adapter puts its own 5 V (or 3.3 V) onto the red wire, against the radio's +5 V. The radio can draw more current than this adapter can provide causing a potential failure. Also, your radio is going to stay on, even with the power switch off.</div>
+<!-- FIX (2026-11-22): three wires and the jumper, not the radio's +5 V -- works on every adapter, whatever its board (Mark, tested on both his adapters) -->
+<div class="todo"><b>Three wires, and set the jumper.</b> Connect only ground, TX and RX. Leave the red wire, the radio's +5 V, unconnected at the adapter: tape over its end, or cut it short. Then set the adapter's voltage jumper to your radio's logic level:
+<ul>
+  <li><b>5 V</b> for the uBITX's Nano Raduino (V3 to V6).</li>
+  <li><b>3.3 V</b> for a 3.3 V board, such as one built on a Raspberry Pi Pico. On 5 V, the adapter would drive 5 V into the Pico's pins, which can damage them.</li>
+</ul>
+The jumper sets the adapter's signal levels from its own supply. Connecting the red wire as well would put the adapter's supply against the radio's +5 V, and could keep the radio on with its power switch off.</div>
 
-<div class="todo"><b>Ground and +5 V are the other way round on the V6.</b> On a V3, V4 or V5 Raduino, pin 1 of the display header is ground and pin 2 is +5 V; on a V6, pin 1 is +5 V and pin 2 is ground. Plug the cable into the radio exactly as the Nextion's was, and check the colors against the pictures for your uBITX before you switch on. A lead the wrong way round at the radio connects the adapter's ground to +5 V, and can damage the adapter, the computer's USB port or the radio. If you make your own lead, wire it by what each wire does, never by position on the connector.</div>
+<div class="todo"><b>Ground and +5 V are the other way round on the V6.</b> On a V3, V4 or V5 Raduino, pin 1 of the display header is ground and pin 2 is +5 V; on a V6, pin 1 is +5 V and pin 2 is ground. This matters even with the red wire left unconnected, as the black wire must go to ground. Plug the cable into the radio exactly as the Nextion's was, and check the colors against the pictures for your uBITX before you switch on. A lead the wrong way round at the radio connects the adapter's ground to +5 V, and can damage the adapter, the computer's USB port or the radio. If you make your own lead, wire it by what each wire does, never by position on the connector.</div>
 
 <h4>At the adapter</h4>
 <figure class="missing">
   <img src="images/usb-ttl-adapter.jpg" alt="The CP2102 and FT232RL adapters, with the wire color for each pin and the voltage jumper" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
   <div class="ph">Photo to come: the USB-to-TTL adapter, with its pins labeled.</div>
-  <figcaption>Two common adapters, a CP2102 and an FT232RL, with the wire from the Raduino on each pin. The arrows point to the voltage jumper: leave it off.</figcaption>
+  <figcaption>Two common adapters, a CP2102 and an FT232RL, with the wire from the Raduino on each pin. The arrows point to the voltage jumper: set it to 5 V for a Nano Raduino, and leave the red wire unconnected.</figcaption>
 </figure>
 
 <h4>At the radio</h4>
@@ -352,12 +358,12 @@ avrdude -c arduino -p m328p -P /dev/ttyUSB0 -b 115200 -D -U flash:w:KD8CEC_1.20_
 <figure class="missing">
   <img src="images/usb-ttl-wiring-v3_4_5_Raduino.jpg" alt="Wiring diagram: a CP2102 or FT232RL adapter to the display header of a uBITX V3, V4 or V5 Raduino" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
   <div class="ph">Diagram to come: the wiring for a V3, V4 or V5.</div>
-  <figcaption>uBITX V3, V4 and V5: the display header's pins 1 (ground), 2 (+5 V), 4 (D8) and 6 (D9) to a CP2102 or an FT232RL. Use one adapter, not both.</figcaption>
+  <figcaption>uBITX V3, V4 and V5: the display header's pins 1 (ground), 4 (D8) and 6 (D9) to a CP2102 or an FT232RL; pin 2 (+5 V) is left unconnected. Use one adapter, not both.</figcaption>
 </figure>
 <figure class="missing">
   <img src="images/usb_ttl_wiring_v6_Raduino.jpg" alt="Wiring diagram: a CP2102 or FT232RL adapter to the display header of a uBITX V6 Raduino" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
   <div class="ph">Diagram to come: the wiring for a V6.</div>
-  <figcaption>uBITX V6: the display header's pins 1 (+5 V), 2 (ground), 5 (D9) and 11 (D8) to a CP2102 or an FT232RL. Use one adapter, not both.</figcaption>
+  <figcaption>uBITX V6: the display header's pins 2 (ground), 5 (D9) and 11 (D8) to a CP2102 or an FT232RL; pin 1 (+5 V) is left unconnected. Use one adapter, not both.</figcaption>
 </figure>
 
 <!-- <div class="note"><b>A second adapter for watching the line?</b> A monitoring adapter on the same wires, with its TX connected, can make the radio send the same reports over and over, without end. Connect only its GND and RX. See <a href="#trouble">When things go wrong</a>.</div>
