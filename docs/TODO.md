@@ -292,6 +292,18 @@ rig and SDR++. Still to do, roughly in order of value:
   four outcomes -- nothing chosen, will not open, opened but silent,
   connected -- each say their own thing.
 
+* **The WiFi-to-TTL bridge (`socket://host:port`): disable it for 1.0, come
+  back in 1.1 (Mark, 2026-11-21).** *Open, before 1.0.* It needs more testing
+  than there is time for before the release. For 1.0, take the network rig out
+  of what the operator can choose: the Port field on Setup should accept only
+  a serial port, and a saved `socket://` setting should open on Setup with a
+  plain message (not try to connect). The code stays (`serial_ports.py`
+  `parse_rig_port`, `configuration.py`, the Setup docstring), behind one
+  switch, so 1.1 turns it back on. Check the help says nothing about a network
+  rig (it doesn't today) and that the README doesn't either. For 1.1: test with
+  real bridges (ESP8266/ESP32 serial bridges), on a busy Wi-Fi, through
+  reconnects and the radio's start-up; then the IPv6 item below.
+
   Left over from it: **`socket://` does not understand an IPv6 address.**
   `parse_rig_port` splits the host from the port on the last colon, which is
   wrong for `socket://[::1]:8080`. The old `comportManager` had the same
