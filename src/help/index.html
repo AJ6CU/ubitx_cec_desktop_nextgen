@@ -1268,16 +1268,16 @@ then restart the computer.</li>
 <p>If no <code>/dev/ttyUSB…</code> port appears when you plug in the USB-to-TTL adapter, the braille service <b>brltty</b> may have taken it. This happens mostly with CH340 adapters and on older Ubuntu releases. If you don't use a braille display, remove it, then unplug the adapter and plug it in again:</p>
 <pre><code>sudo apt remove brltty</code></pre>
 <p>If the port appears but uBITX CEC Desktop can't open it, check that you're in the <code>dialout</code> group (see <a href="#install">Installing uBITX CEC Desktop</a>).</p>
-
+<br>
 <h4>"The port opened but the radio is not answering"</h4>
 <p>Is the radio on, and are the adapter's TX and RX the right way round (adapter RX to the radio's send line)? uBITX CEC Desktop waits up to 10 seconds for a radio that's still starting.</p>
-
+<br>
 <h4>The console fills with the same report, over and over</h4>
 <p>Something is feeding the radio's serial input. A monitoring USB-to-TTL adapter on the same lines does it. Unplug it, or connect only its GND and RX; power-cycling the adapter clears it.</p>
-
+<br>
 <h4>The SDR doesn't follow</h4>
 <p>Check the SDR button on Operate. If it says reconnect, check the program's server setting (see its section under <a href="#sdr-setup">Setting up an SDR</a>) and press it.</p>
-
+<br>
 <h4>Seeing what uBITX CEC Desktop is doing</h4>
 <p>Start uBITX CEC Desktop from a terminal with <code>UBITX_SDR_TRACE=1</code> set, and the console shows every command sent to the SDR and every change it reports. That's the first thing to send with a problem report.</p>
 
