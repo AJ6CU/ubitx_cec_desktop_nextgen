@@ -507,10 +507,10 @@ bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
   <tr><td><b><a href="#sdr-sdroxide">SDRoxide</a></b> (1.6.11 or later)</td><td>rigctl, port 4532</td><td>Settings ▸ Servers: the rigctl server (labeled "Hamlib rigctld server"); Decoded CW over UDP on port 9999.</td></tr>
   <tr><td><b><a href="#sdr-sdrpp">SDR++</a></b></td><td>rigctl, port 4532</td><td>The <b>Rigctl Server</b> module, started. SDR++ gives no signal reading, so the S-meter stays empty.</td></tr>
   <tr><td><b><a href="#sdr-gqrx">Gqrx</a></b></td><td>Remote control, port 7356</td><td>Tools ▸ Remote control.</td></tr>
-  <tr><td><b><a href="#sdr-sdrangel">SDRangel</a></b></td><td>REST API, port 8091</td><td>A device set with the RTL-SDR; the <b>WDSP receiver</b> as its <i>first</i> channel; a <b>Channel Power</b> channel for the S-meter; the <b>Morse Decoder</b> feature for CW. Save the setup in SDRangel.</td></tr>
+  <tr><td><b><a href="#sdr-sdrangel">SDRangel</a></b></td><td>REST API, port 8091</td><td>The <b>WDSP receiver</b> as its <i>first</i> channel; a <b>Channel Power</b> channel for the S-meter; the <b>Morse Decoder</b> feature for CW. Save the setup in SDRangel.</td></tr>
 </table>
 <!-- FIX (2026-11-21): rigctl, not Hamlib -- nothing to install (Mark) -->
-<p><b>Nothing to install for rigctl.</b> rigctl is the text protocol of Hamlib's network server. Brown, SDRoxide and SDR++ have that server built in, and uBITX CEC Desktop speaks the protocol itself, so you <b>don't need to install Hamlib</b> for any of this. Brown and SDRoxide still call the setting "Hamlib rigctld server".</p>
+<p><b>Nothing to install for rigctl &mdash; </b> rigctl is the text protocol of Hamlib's network server. Brown, SDRoxide and SDR++ have that server built in, and uBITX CEC Desktop speaks the protocol itself, so you <b>don't need to install Hamlib</b> for any of this. Brown and SDRoxide still call the setting "Hamlib rigctld server".</p>
 
 <!-- FIX (2026-11-18): what each program lets uBITX CEC Desktop control, as a grid (Mark) -->
 <h4 id="sdr-controls">Features available with each SDR</h4>
@@ -535,7 +535,7 @@ bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
   <tr><td>VFO A/B and split</td><td class="yes">✓</td><td class="yes">✓</td><td class="no">–</td><td class="no">–</td><td class="no">–</td></tr>
 </table>
 <ul>
-  <li><b>SDRoxide:</b> the CW peak filter and the span are SDRoxide Brown's for now. SDRoxide may add them later.</li>
+  <li><b>SDRoxide:</b> the CW peak filter and the span are only available on SDRoxide Brown for now. SDRoxide may add them later.</li>
   <li><b>SDRangel:</b> with the <b>WDSP receiver</b> as the first channel. Its S-meter needs a <b>Channel Power</b> channel, and decoded CW its <b>Morse Decoder</b> feature. SDRangel uses its own RIT for CW, so uBITX CEC Desktop's RIT isn't offered.</li>
   <li><b>SDR++</b> gives frequency, mode and filter only, so the S-meter stays empty. Volume and mute work through the computer's own volume.</li>
   <!-- FIX (2026-11-19): the computer's volume fallback (system_audio.py) -->
@@ -545,7 +545,7 @@ bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
 <!-- FIX (2026-11-19): one section per SDR program -- what it's good and bad at,
      where to get it and learn it, and how to set it up for uBITX CEC Desktop (Mark) -->
 <!-- FIX (2026-11-19): the Raspberry Pi, from Mark's Pi 5 tests (Trixie, 2026-11-12) -->
-<div class="note"><b>On a Raspberry Pi.</b> It has been tested on a <b>Pi 5</b>. A Pi 4 hasn't been tried yet; it may manage with Brown's CW skimmer on Timing (see below). Memory isn't the limit, so a 4 GB Pi 5 is enough. The Pi 5 has no audio output of its own, so to hear the SDR, add a USB sound adapter, or use HDMI with speakers. Each program below says how it does on a Pi.</div>
+<div class="note"><b>On a Raspberry Pi.</b> It has been tested on a <b>Pi 5</b>. A Pi 4 hasn't been tried yet; it may manage with Brown's CW skimmer set to Timing (see below). Memory isn't the limit, so a 4 GB Pi 5 is enough. The Pi 5 has no audio output of its own, so to hear the SDR, add a USB sound adapter, or use HDMI with speakers. Each program below says how it does on a Pi.</div>
 
 <h4 id="sdr-windows">Arranging the windows</h4>
 <p>uBITX CEC Desktop is the control panel, and the SDR program is the ears and eyes. A layout that works well:</p>
