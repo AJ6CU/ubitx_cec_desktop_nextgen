@@ -1255,6 +1255,12 @@ then restart the computer.</li>
 <!-- ============================================================== -->
 <h2 id="trouble">7. When things go wrong</h2>
 
+<!-- FIX (2026-11-21): brltty on Linux; not seen on Ubuntu 26.04 with Mark's adapter, known with CH340 adapters (Mark) -->
+<h4>No serial port for the adapter on Linux</h4>
+<p>If no <code>/dev/ttyUSB…</code> port appears when you plug in the USB-to-TTL adapter, the braille service <b>brltty</b> may have taken it. This happens mostly with CH340 adapters and on older Ubuntu releases. If you don't use a braille display, remove it, then unplug the adapter and plug it in again:</p>
+<pre><code>sudo apt remove brltty</code></pre>
+<p>If the port appears but uBITX CEC Desktop can't open it, check that you're in the <code>dialout</code> group (see <a href="#install">Installing uBITX CEC Desktop</a>).</p>
+
 <h4>"The port opened but the radio is not answering"</h4>
 <p>Is the radio on, and are the adapter's TX and RX the right way round (adapter RX to the radio's send line)? uBITX CEC Desktop waits up to 10 seconds for a radio that's still starting.</p>
 
