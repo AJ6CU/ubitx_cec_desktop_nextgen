@@ -4,7 +4,7 @@ Save each one in `help/images/` under the name given. The page shows it in place
 
 | File | What it should show |
 | :--- | :--- |
-| `usb-ttl-adapter.jpg` | Done (edited 2026-11-22): the +5V wires shown "not connected", the note says set the jumper to 5V (3.3V for a 3.3V board). The photo still shows no jumper cap fitted; a retake with the cap on 5 V would be better still. |
+| `usb-ttl-adapter.jpg` | Done (edited 2026-11-22): the +5V wires shown "not connected", the note says set the jumper to 5V for a Nano, 3.3V for a RPi Pico. The photo still shows no jumper cap fitted; a retake with the cap on 5 V would be better still. |
 | `uBITX_V3_4_5_Nextion_Wiring.jpg` | Done: the Nextion cable on a V3/V4/V5 Raduino. |
 | `uBITX_V6_Nextion_Wiring.jpg` | Done: the Nextion cable on a V6 Raduino (from below). |
 | `usb-ttl-wiring-v3_4_5_Raduino.jpg` | **Redo (2026-11-22):** three wires only (pins 1, 4, 6); no +5 V to the adapter; jumper on 5 V. |
