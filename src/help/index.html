@@ -503,12 +503,14 @@ bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
 <p>Each program's own section below gives the details.</p>
 <table>
   <tr><th>Program</th><th>How uBITX CEC Desktop talks to it</th><th>What to turn on</th></tr>
-  <tr><td><b><a href="#sdr-brown">SDRoxide Brown</a></b> (recommended)</td><td>Hamlib (rigctl), port 4532</td><td>Settings ▸ Servers: the Hamlib server. For CW decoding in uBITX CEC Desktop, also <b>Decoded CW over UDP</b> (port 9998). Brown gives the most; see the table below.</td></tr>
-  <tr><td><b><a href="#sdr-sdroxide">SDRoxide</a></b> (1.6.11 or later)</td><td>Hamlib (rigctl), port 4532</td><td>Settings ▸ Servers: the Hamlib server; Decoded CW over UDP on port 9999.</td></tr>
-  <tr><td><b><a href="#sdr-sdrpp">SDR++</a></b></td><td>Hamlib (rigctl), port 4532</td><td>The <b>Rigctl Server</b> module, started. SDR++ gives no signal reading, so the S-meter stays empty.</td></tr>
+  <tr><td><b><a href="#sdr-brown">SDRoxide Brown</a></b> (recommended)</td><td>rigctl, port 4532</td><td>Settings ▸ Servers: the rigctl server (labeled "Hamlib rigctld server"). For CW decoding in uBITX CEC Desktop, also <b>Decoded CW over UDP</b> (port 9998). Brown gives the most; see the table below.</td></tr>
+  <tr><td><b><a href="#sdr-sdroxide">SDRoxide</a></b> (1.6.11 or later)</td><td>rigctl, port 4532</td><td>Settings ▸ Servers: the rigctl server (labeled "Hamlib rigctld server"); Decoded CW over UDP on port 9999.</td></tr>
+  <tr><td><b><a href="#sdr-sdrpp">SDR++</a></b></td><td>rigctl, port 4532</td><td>The <b>Rigctl Server</b> module, started. SDR++ gives no signal reading, so the S-meter stays empty.</td></tr>
   <tr><td><b><a href="#sdr-gqrx">Gqrx</a></b></td><td>Remote control, port 7356</td><td>Tools ▸ Remote control.</td></tr>
   <tr><td><b><a href="#sdr-sdrangel">SDRangel</a></b></td><td>REST API, port 8091</td><td>A device set with the RTL-SDR; the <b>WDSP receiver</b> as its <i>first</i> channel; a <b>Channel Power</b> channel for the S-meter; the <b>Morse Decoder</b> feature for CW. Save the setup in SDRangel.</td></tr>
 </table>
+<!-- FIX (2026-11-21): rigctl, not Hamlib -- nothing to install (Mark) -->
+<p><b>Nothing to install for rigctl.</b> rigctl is the text protocol of Hamlib's network server. Brown, SDRoxide and SDR++ have that server built in, and uBITX CEC Desktop speaks the protocol itself, so you <b>don't need to install Hamlib</b> for any of this. Brown and SDRoxide still call the setting "Hamlib rigctld server".</p>
 
 <!-- FIX (2026-11-18): what each program lets uBITX CEC Desktop control, as a grid (Mark) -->
 <h4 id="sdr-controls">Features available with each SDR</h4>
@@ -598,7 +600,7 @@ bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
 </ol>
 <p><b>Services.</b> In <span class="ui">Settings → Servers</span>:</p>
 <ul>
-  <li><b>Hamlib rigctld server:</b>
+  <li><b>Hamlib rigctld server</b> (the rigctl server, built into Brown: nothing to install):
     <ul>
       <li><b>Enable</b> on.</li>
       <li><b>Listen on</b> <code>127.0.0.1</code>.</li>
@@ -611,7 +613,7 @@ bash uBITX-CEC-Desktop-<i>version</i>/install.sh</code></pre></li>
 <figure class="missing">
   <img src="images/brown-servers-hamlib.png" alt="Brown, Settings, Servers: the Hamlib rigctld server enabled on 127.0.0.1 port 4532" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
   <div class="ph">Screenshot to come: Brown, Settings, Servers: the Hamlib rigctld server enabled on 127.0.0.1 port 4532.</div>
-  <figcaption>Brown's Hamlib server, listening on 127.0.0.1:4532 with uBITX CEC Desktop connected (1 client).</figcaption>
+  <figcaption>Brown's rigctl server, listening on 127.0.0.1:4532 with uBITX CEC Desktop connected (1 client).</figcaption>
 </figure>
   </li>
   <li><b>Decoded CW over UDP:</b> on, <b>Send to</b> <code>127.0.0.1</code>, <b>Port</b> <code>9998</code>. That's the <span class="ui">CW port</span> uBITX CEC Desktop's Setup → SDR fills in for Brown. Press <b>APPLY</b> under it: this part has its own. Text is sent only in CW, while Brown's CW panel is decoding.
