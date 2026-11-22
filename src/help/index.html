@@ -77,7 +77,18 @@
   /* FIX (2026-11-18): printing, and the PDF made from this page. One column,
      the navigation kept as the contents, light colours whatever the system's,
      long commands wrapped instead of cut off, and nothing split across a page. */
+  /* FIX (2026-11-21): a cover page for the PDF -- shown only when printed (Mark) */
+  .cover { display: none; }
   @media print {
+    .cover { display: flex; flex-direction: column; align-items: center; justify-content: center;
+             min-height: 9in; text-align: center; break-after: page; }
+    .cover img { width: 1.9in; height: 1.9in; margin-bottom: 0.35in; }
+    .cover .name { font-size: 32pt; font-weight: 700; color: var(--accent); margin: 0; }
+    .cover .what { font-size: 15pt; color: var(--muted); margin: 6pt 0 0.5in; }
+    .cover .lead { font-size: 11.5pt; max-width: 5.2in; margin: 0 auto 0.6in; color: var(--text); }
+    .cover table.rev { width: auto; margin: 0 auto 0.5in; font-size: 10pt; border-collapse: collapse; }
+    .cover table.rev th, .cover table.rev td { padding: 3pt 10pt; border-bottom: 1px solid var(--line); text-align: left; }
+    .cover .copy { font-size: 9.5pt; color: var(--muted); line-height: 1.5; }
     :root {
       --bg: #ffffff; --panel: #ffffff; --text: #1d232b; --muted: #5b6573;
       --line: #c9d0d8; --accent: #1a4375; --accent-soft: #eef3fa;
@@ -102,6 +113,20 @@
 </head>
 <body id="top">
 <div class="wrap">
+<!-- FIX (2026-11-21): the PDF's cover page (Mark). Update the revision rows with each release. -->
+<section class="cover">
+  <img src="../icons/icon_512.png" alt="">
+  <p class="name">uBITX CEC Desktop</p>
+  <p class="what">Help and setup guide</p>
+  <p class="lead">A control panel for the uBITX running KD8CEC's firmware, on your laptop or desktop, with an SDR as the receiver.</p>
+  <table class="rev">
+    <tr><th>Revision</th><th>For uBITX CEC Desktop</th><th>Date</th></tr>
+    <tr><td>1</td><td>1.0rc1</td><td>November 2026</td></tr>
+  </table>
+  <p class="copy">Copyright © 2026 Mark Hatch, AJ6CU.<br>
+  uBITX CEC Desktop is free software, released under the GNU General Public License, version 3.<br>
+  github.com/AJ6CU/ubitx_cec_desktop_nextgen</p>
+</section>
 <nav>
   <!-- FIX (2026-11-21): the title goes back to the top (Mark) -->
   <div class="title"><a href="#top" title="Back to the top">uBITX CEC Desktop</a></div>
