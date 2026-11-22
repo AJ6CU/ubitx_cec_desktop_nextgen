@@ -101,8 +101,11 @@ def main():
         import tkinter
         tkinter.Tcl()
     except Exception:
-        fail("this Python has no Tk. Reinstall Python from python.org with "
-             "'tcl/tk and IDLE' ticked, then run this again.")
+        # FIX (2026-11-21): python.org now offers its install manager first,
+        # which includes Tk; only the older installer has the tick box.
+        fail("this Python has no Tk, which the window needs. Reinstall Python "
+             "from python.org, with its Python install manager, or with the "
+             "older installer and 'tcl/tk and IDLE' ticked; then run this again.")
     say(f"  using Python {sys.version.split()[0]} ({sys.executable})")
 
     # -- its own environment -----------------------------------------------------

@@ -389,7 +389,7 @@ avrdude -c arduino -p m328p -P /dev/ttyUSB0 -b 115200 -D -U flash:w:KD8CEC_1.20_
 
 <h4>Windows</h4>
 <ol>
-  <li>If you don't have Python, install it from <a href="https://www.python.org/downloads/windows/" target="_blank">python.org</a>, version 3.10 or newer. In its installer, keep <b>tcl/tk and IDLE</b> ticked.</li>
+  <li>If you don't have Python, install it from <a href="https://www.python.org/downloads/windows/" target="_blank">python.org</a>, version 3.10 or newer. <!-- FIX (2026-11-21): the install manager; Tk, not IDLE, is what matters (Mark) -->Its <b>Python install manager</b> (also in the Microsoft Store) installs everything uBITX CEC Desktop needs. If you use the older <b>installer</b> instead, keep <b>tcl/tk and IDLE</b> ticked: that's what installs Tk, which uBITX CEC Desktop's window needs. IDLE comes with it, and you can ignore it.</li>
   <li>Right-click the downloaded zip and choose <b>Extract All…</b> Double-clicking the installer inside the zip without extracting it does not work.</li>
   <li>In the extracted folder, double-click <b>Install uBITX CEC Desktop.py</b>. Python runs it in a window that shows its progress. If Windows asks which program should open it, choose <b>Python</b>. It doesn't need <i>Run as administrator</i>.</li>
   <li>Start uBITX CEC Desktop from the <b>Start menu</b> or the <b>Desktop</b> shortcut.</li>
