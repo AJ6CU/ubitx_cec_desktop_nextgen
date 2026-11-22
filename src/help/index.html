@@ -345,6 +345,7 @@ The jumper sets the adapter's signal levels from its own supply. Connecting the 
 <!-- FIX (2026-11-22): for those wired the earlier way (Mark) -->
 <div class="note"><b>Wired the earlier way?</b> Earlier versions of this help said to connect the red wire to the adapter's VCC (VCCIO on the CP2102) and leave the jumper <i>off</i>. That works on adapters whose VCC pin sets their signal levels, such as the common red FT232RL board, so if yours works that way, it's fine as it is. Two cautions: <b>never</b> put the jumper on while the red wire is connected, and on another board, or with a 3.3 V radio, change to three wires as above. Three wires work on every adapter.</div>
 
+
 <div class="todo"><b>Ground and +5 V are the other way round on the V6.</b> On a V3, V4 or V5 Raduino, pin 1 of the display header is ground and pin 2 is +5 V; on a V6, pin 1 is +5 V and pin 2 is ground. This matters even with the red wire left unconnected, as the black wire must go to ground. Plug the cable into the radio exactly as the Nextion's was, and check the colors against the pictures for your uBITX before you switch on. A lead the wrong way round at the radio connects the adapter's ground to +5 V, and can damage the adapter, the computer's USB port or the radio. If you make your own lead, wire it by what each wire does, never by position on the connector.</div>
 
 <h4>At the adapter</h4>
@@ -380,6 +381,29 @@ The jumper sets the adapter's signal levels from its own supply. Connecting the 
 
 <!-- <div class="note"><b>A second adapter for watching the line?</b> A monitoring adapter on the same wires, with its TX connected, can make the radio send the same reports over and over, without end. Connect only its GND and RX. See <a href="#trouble">When things go wrong</a>.</div>
 -->
+<!-- FIX (2026-11-22): the Nextion kept as a display, on a Y cable (Mark, tested) -->
+<h4 id="y-cable">Keeping the Nextion as a display (a Y cable)</h4>
+<p>You can keep the Nextion on the radio as a second, read-only display, with uBITX CEC Desktop in control. Make a Y cable from the display header:</p>
+<figure class="missing">
+  <img src="images/usb-ttl-y-cable.png" alt="Y cable: the Raduino display header's ground and D9 to both the Nextion and the adapter, +5V to the Nextion only, D8 from the adapter's TXD only; the Nextion's TX and the adapter's VCC not connected" onerror="this.parentNode.classList.add('missing')" onload="this.parentNode.classList.remove('missing')">
+  <div class="ph">Diagram to come: the Y cable.</div>
+  <figcaption>The Y cable. Pin numbers are for the V3, V4 and V5 / the V6.</figcaption>
+</figure>
+<table>
+  <tr><th>Wire</th><th>To the Nextion</th><th>To the adapter</th></tr>
+  <tr><td><b>Black</b> (ground)</td><td>Yes</td><td>Yes</td></tr>
+  <tr><td><b>Red</b> (+5 V)</td><td>Yes: it powers the Nextion</td><td>No</td></tr>
+  <tr><td><b>Yellow</b> (what the radio sends)</td><td>Yes</td><td>Yes</td></tr>
+  <tr><td><b>Blue</b> (what the radio receives)</td><td><b>No</b>: leave the Nextion's end unconnected</td><td>Yes</td></tr>
+</table>
+<div class="todo"><b>Never connect the blue wire to both.</b> The Nextion and the adapter would then both drive the radio's one input, garbling what either sends, and can damage a pin. Check with a meter which wire goes to header pin 4 (V3–V5) or pin 11 (V6): some cables use other colors.</div>
+<p>The Nextion then shows what the radio sends it. Touching it does nothing, and its secondary pages, which ask the radio for their data, stay empty. Two differences from uBITX CEC Desktop's display, to be improved in a later version:</p>
+<ul>
+  <li><b>CW:</b> with the CW offset applied to transmit, the Nextion's frequency is off by the CW offset. uBITX CEC Desktop's own displays are right.</li>
+  <li><b>The tuning step:</b> the Nextion shows the radio's finest step, which uBITX CEC Desktop selects so that nothing it sends is rounded. uBITX CEC Desktop's dial steps by the digit you selected.</li>
+</ul>
+<p>Changing bands brings the Nextion back in step.</p>
+
 <h3 id="tr-switch">Protecting the SDR</h3>
 
 <p>An SDR dongle is a sensitive receiver built for microwatts. A few watts from the uBITX fed straight into it will burn out its input, and that happens the first time you transmit. So if the SDR listens on the same antenna as the radio, a <b>transmit/receive (T/R) antenna switch</b> must sit between them.</p>

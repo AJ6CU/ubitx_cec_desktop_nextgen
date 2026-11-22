@@ -1093,6 +1093,28 @@ done: role_frequency("tx") in split would use the VFO's own rit base when that
 VFO has RIT on, and A⇄B (which carries each VFO's RIT along) and the
 display's notes would follow; test every VFO/split/RIT combination again.
 
+**The Nextion as a read-only mirror (Y cable) (Mark, 2026-11-22).** *Open,
+for 1.1.* Tested and documented in the help (#y-cable): the radio's TX
+(yellow) to both the Nextion and the adapter, the radio's RX (blue) from the
+adapter only, +5 V to the Nextion only. Two differences to fix:
+1. **CW offset:** with the CW offset applied to transmit, the Nextion's
+   frequency is off by it. uBITX CEC Desktop's displays are right, and
+   turning the offset off would make its TX display wrong. Look at what the
+   radio sends the display in CW and whether uBITX CEC Desktop can send a
+   correcting value after each change.
+2. **The tuning step:** the Nextion shows the radio's step preset, which
+   uBITX CEC Desktop forces to the finest at connect (ubitx_link.py,
+   Set_Tuning_Preset(1)), because the radio rounds every frequency it sets to
+   the active preset (setFrequency(), KD8CEC). Idea: after ~2 s with no
+   frequency written, select the preset matching the selected digit
+   (TS_CMD_TUNESTEP, RAM only, not EEPROM); before the next write, select
+   preset 1 again. Every path that writes a frequency (dial, channels, SDR
+   follow, split, RIT) must go through "finest first", or the old channel
+   rounding bug returns. Digits without a matching preset (10 kHz, 100 kHz)
+   leave it at the nearest. Bonus: the radio's own knob then steps at the
+   selected digit while idle.
+A band change brings the Nextion back in step (Mark).
+
 **Channels and the SDR's memories (Mark, 2026-11-21).** *Open, after 1.0.*
 uBITX CEC Desktop's Channels and the SDR programs' own memories don't know
 about each other; the help says so (Connecting to the SDR, after the scanner
