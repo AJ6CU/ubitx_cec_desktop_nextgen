@@ -488,6 +488,15 @@ class SDR_Link:
         if not self.connected:
             return
         before = set(self.capabilities)
+        # FIX (2026-11-22): what discovery READS, as well as what it finds
+        # the SDR can do. Asked again, discovery also re-reads the SDR's mute,
+        # volume, squelch, RF gain and listening aids -- and sets them on the
+        # controller without a word. A program still starting answers its
+        # defaults first (Brown: unmuted), so when its saved state (muted)
+        # arrived by the recheck, the controller held it, the poll then saw
+        # no change to report, and the interface kept showing it unmuted
+        # (Mark, 2026-11-22). Compared before and after, and said if changed.
+        heard_before = self._audio_state()
         try:
             self.controller.discover()
         except Exception as err:
@@ -497,6 +506,14 @@ class SDR_Link:
         if gained:
             print(f"[sdr] {self.profile.name} can also do: {', '.join(sorted(gained))}")
             self._report(self.connected)
+        elif self._audio_state() != heard_before:
+            self._audio_changed()
+
+    def _audio_state(self):
+        """What discovery reads of the SDR's audio, for comparing."""
+        c = self.controller
+        return tuple(repr(getattr(c, name, None)) for name in
+                     ("muted", "volume", "squelch", "rf_gain", "dsp_on", "dsp_settings"))
 
     def _close_for_switch(self, wanted):
         """
