@@ -1084,6 +1084,8 @@ then restart the computer.</li>
 
 <!-- FIX (2026-11-20): any scan started in the SDR, not only SDRoxide's PANO (Mark). Don't use, for now: see docs/PANO.md -->
 <div class="note"><b>Don't use the SDR program's own scanner while it's connected.</b> A scan run inside the SDR program, such as SDRoxide's and Brown's <b>SCAN</b> (including SDRoxide's <b>PANO</b>) or SDR++'s Scanner, moves the program's frequency from step to step. uBITX CEC Desktop takes each step for you tuning, and follows: the uBITX is tuned along with each step, or the scan stops after a step or two. Scan with uBITX CEC Desktop's own <a href="#channels">Channels</a> instead: there, the uBITX leads and the SDR follows.</div>
+<!-- FIX (2026-11-21): the SDR's memories are separate (Mark) -->
+<div class="note"><b>The SDR program's memories are separate.</b> The memories, bookmarks or frequency lists you keep in the SDR program (SDRoxide's and Brown's memories, Gqrx's bookmarks, SDR++'s frequency manager) aren't connected to uBITX CEC Desktop's <a href="#channels">Channels</a>, not yet. Clicking one tunes the SDR, and uBITX CEC Desktop follows as it does for any tuning, but they don't appear in Channels, and Channels don't appear there.</div>
 
 <!-- ============================================================== -->
 <h2 id="operate">2. Operate</h2>

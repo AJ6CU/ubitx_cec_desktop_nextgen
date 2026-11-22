@@ -1093,6 +1093,22 @@ done: role_frequency("tx") in split would use the VFO's own rit base when that
 VFO has RIT on, and A⇄B (which carries each VFO's RIT along) and the
 display's notes would follow; test every VFO/split/RIT combination again.
 
+**Channels and the SDR's memories (Mark, 2026-11-21).** *Open, after 1.0.*
+uBITX CEC Desktop's Channels and the SDR programs' own memories don't know
+about each other; the help says so (Connecting to the SDR, after the scanner
+note). Each program keeps its own, in its own format:
+* SDRoxide and Brown: their memories (MEM, used by SCAN MEM);
+* Gqrx: `bookmarks.csv` in its settings folder, beside `bandplan.csv`;
+* SDR++: the frequency manager module's lists, in its config (JSON);
+* SDRangel: none worth the name (presets save whole setups, not frequencies).
+None is reachable over rigctl or SDRangel's REST, so this would be files, like
+the Gqrx band plan in the bands item below. What to do: an **Export / Import**
+of Channels to each program's format (Gqrx and SDR++ first, as plain files),
+with the program closed, a backup of its file first, and what's lost said
+(modes and names map, filters and steps mostly don't). Possibly one-way only
+(Channels to the SDR), so the radio and uBITX CEC Desktop stay the source.
+Clicking a memory in the SDR already works: it's ordinary tuning, followed.
+
 **Bands: three tables that don't know about each other (Mark, 2026-11-19).**
 *Open.*
 
