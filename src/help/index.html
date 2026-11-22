@@ -333,6 +333,9 @@ avrdude -c arduino -p m328p -P /dev/ttyUSB0 -b 115200 -D -U flash:w:KD8CEC_1.20_
 </ul>
 The jumper sets the adapter's signal levels from its own supply. Connecting the red wire as well would put the adapter's supply against the radio's +5 V, and could keep the radio on with its power switch off.</div>
 
+<!-- FIX (2026-11-22): for those wired the earlier way (Mark) -->
+<div class="note"><b>Wired the earlier way?</b> Earlier versions of this help said to connect the red wire to the adapter's VCC (VCCIO on the CP2102) and leave the jumper <i>off</i>. That works on adapters whose VCC pin sets their signal levels, such as the common red FT232RL board, so if yours works that way, it's fine as it is. Two cautions: <b>never</b> put the jumper on while the red wire is connected, and on another board, or with a 3.3 V radio, change to three wires as above. Three wires work on every adapter.</div>
+
 <div class="todo"><b>Ground and +5 V are the other way round on the V6.</b> On a V3, V4 or V5 Raduino, pin 1 of the display header is ground and pin 2 is +5 V; on a V6, pin 1 is +5 V and pin 2 is ground. This matters even with the red wire left unconnected, as the black wire must go to ground. Plug the cable into the radio exactly as the Nextion's was, and check the colors against the pictures for your uBITX before you switch on. A lead the wrong way round at the radio connects the adapter's ground to +5 V, and can damage the adapter, the computer's USB port or the radio. If you make your own lead, wire it by what each wire does, never by position on the connector.</div>
 
 <h4>At the adapter</h4>
