@@ -157,7 +157,7 @@
         <li>Scanning with signal strength </li>
     </ul>
 
-<p>And all this is made possible through the software using the existing Nextion screen protocol to talk to the radio. You can QSY by either clicking on the waterfall, clicking/moving a virtual knob on in the user interface (UX) or if you prefer, using the knob on the front of your radio. The SDR effectively replaces the RX side of your radio giving you a host of features and much better Signal to Noise ratio. The software runs on common laptops or desktops using the OS of your choice: Linux, Windows or macOS. And the software running on your laptop is much easier to use than squinting and trying to touch the right button on your screen!</p>
+<p>You can QSY by either clicking on the waterfall, clicking/moving a virtual knob on in the user interface (UX) or if you prefer, using the knob on the front of your radio. The SDR effectively replaces the RX side of your radio giving you a host of features and much better Signal to Noise ratio. The software runs on common laptops or desktops using the OS of your choice: Linux, Windows or macOS. And the software running on your laptop is much easier to use than squinting and trying to touch the right button on your screen!</p>
 
 
 <!-- ============================================================== -->
@@ -168,7 +168,7 @@
   <li><b>A uBITX</b> (any version) running <b>KD8CEC firmware 1.2, the Nextion build with Baud set at 57600 (not the default 9600)</b>. See <a href="#firmware">Installing KD8CEC 1.2 (57600 baud)</a>.</li>
   <li><b>A USB-to-TTL serial adapter</b>, wired to the radio where a Nextion display would plug in. See <a href="#usb-ttl">The USB-to-TTL adapter</a>.</li>
   <li><b>A computer</b> running macOS, Windows or Linux (a Raspberry Pi works too), with Python 3.10 or newer. See <a href="#install">Installing uBITX CEC Desktop</a>.</li>
-  <li><b>An SDR</b> (RTL-SDR v3,v4,v4L, for example) with one of these programs: SDRoxide Brown, SDRoxide, SDR++, Gqrx or SDRangel.</li>
+  <li><b>An SDR</b> (RTL-SDR v3,v4,v4L, Airspy, SDRplay, for example) with one of these programs: SDRoxide Brown, SDRoxide, SDR++, Gqrx or SDRangel.</li>
     <li><b>With an SDR on the same antenna: a transmit/receive (T/R) antenna switch. This is required, not optional.</b> Without one, the uBITX's transmit power goes straight into the SDR and burns out its input the first time you transmit. A switch such as <a href="https://www.amazon.com/Antenna-Sharer-Transceiver-Switch-Device/dp/B0FFM8M41H" target="_blank"> this one</a> connects the SDR to the antenna while you receive and disconnects it while the uBITX transmits. See <a href="#tr-switch">Protecting the SDR</a>.</li>
 </ul>
     <figure class="missing">
@@ -236,7 +236,7 @@ avrdude -c arduino -p m328p -P /dev/ttyUSB0 -b 115200 -D -U flash:w:KD8CEC_1.20_
   <li>Install the Arduino IDE, download KD8CEC's source (<code>github.com/phdlee/ubitx</code>, release 1.20), and open <code>ubitx_20/ubitx_20.ino</code>.</li>
   <li>In <code>ubitx.h</code>:
     <ul>
-      <li>make sure <code>#define UBITX_DISPLAY_NEXTION</code> is the one display line not commented out;</li>
+      <li>make sure <code>#define UBITX_DISPLAY_NEXTION</code> is the only display line not commented out;</li>
       <li>set <code>UBITX_BOARD_VERSION</code> for your radio: <b>4</b> for a uBITX V3 or V4, <b>5</b> for a V5 or V6;</li>
       <li>comment out <code>#define USE_I2CSMETER</code> (line 42): put <code>//</code> in front of it. That line is for an extra S-meter Nano on the I2C bus, which uBITX CEC Desktop doesn't use; without it the firmware reads the radio's own S-meter sensor;</li>
       <li><b>switch the feature list to the Nextion one.</b> Comment out the "Enable all features" list (lines 62–83 of the unchanged file, from <code>#define FN_BAND</code> thru <code>#define FN_TXONOFF</code>): put <code>/*</code> on a new line before it and <code>*/</code> on a new line after it. Then turn on the "Recommended for Nextion, TJC LCD" list further down: delete the <code>/*</code> on the line above <code>//Recommended for Nextion, TJC LCD 88%</code>, and the <code>*/</code> after its last line, <code>#define FN_TXONOFF 1 //70</code>. (In the unchanged file those are lines 137 and 161; after adding the two lines above, 139 and 163.) With every feature on, the firmware is too big for the Nano's memory and the upload fails.</li>
@@ -281,7 +281,7 @@ avrdude -c arduino -p m328p -P /dev/ttyUSB0 -b 115200 -D -U flash:w:KD8CEC_1.20_
 <h3 id="usb-ttl">The USB-to-TTL adapter</h3>
 
 <p>uBITX CEC Desktop connects to the Nextion wiring harness thru an USB-to-TTL serial adapter.  Dont try to use the Nano's own USB port; that one is for flashing firmware and editing the EEPROM!</p>
-    <p>I have used two types of these adapters, both of which are readily available on Amazon and AliExpress. The FT232RL is based on the FTDI chip. It is the less expensive option and the one I used throughout my development. However, I have recently seen some saw some cautions in regards to this adapter. Apparently, there are many clones of this chip &#8212; some of which are worse than others &#8212; and the poorer made tend to be more noisy.  Subsequently, I started using the CP2102 USB to TTL. They are about 4x the cost, ~$12 USD per board vs $2.50 USD for the FT232 variant. I have not really been able to tell the difference yet, but I keep looking hoping to justify my purchase...</p>
+    <p>I have used two types of these adapters, both of which are readily available on Amazon and AliExpress. The FT232RL is based on the FTDI chip. It is the less expensive option and the one I used throughout my development. However, I have recently seen some cautions in regards to this adapter. Apparently, there are many clones of this chip &#8212; some of which are worse than others &#8212; and the poorer made tend to be more noisy.  Subsequently, I started using the CP2102 USB to TTL. They are about 4x the cost, ~$12 USD per board vs $2.50 USD for the FT232 variant. I have not really been able to tell the difference yet, but I keep looking hoping to justify my purchase...</p>
 
 <p>The easiest approach is to use the Nextion's own cable: unplug it from the display and plug that end into a male JST connector and use a 6 pin JST Female connector on the other side that matches your USB-to-TTL converter. Its colors are the Nextion's standard ones, and the pictures below use them too:</p>
 <p> Unless you are an expert wire crimper of JST connectors, I highly recommend that you invest in a set of premade wires. You can get them in F-F and M-F. The Amazon links are:
@@ -385,7 +385,7 @@ avrdude -c arduino -p m328p -P /dev/ttyUSB0 -b 115200 -D -U flash:w:KD8CEC_1.20_
   <li><b>Linux and Raspberry Pi OS:</b> <code>uBITX-CEC-Desktop-<i>version</i>-Linux.tar.gz</code></li>
 </ul>
 
-<p>Each holds a folder with the program, an installer, an uninstaller and a READ ME. uBITX CEC Desktop runs on <b>Python 3.10 or newer, with Tk</b>, Python's window toolkit. The installer checks for it, puts uBITX CEC Desktop in a folder of its own with everything it needs, and makes a shortcut. Nothing is installed into Python itself, and no administrator password is needed, except on Linux to add a missing system package, and then only after asking.</p>
+<p>Each holds a folder with the program, an installer, an uninstaller and a README. uBITX CEC Desktop runs on <b>Python 3.10 or newer, with Tk</b>, Python's window toolkit. The installer checks for it, puts uBITX CEC Desktop in a folder of its own with everything it needs, and makes a shortcut. Nothing is installed into Python itself, and no administrator password is needed, except on Linux to add a missing system package, and then only after asking.</p>
 
 <h4>Windows</h4>
 <ol>
